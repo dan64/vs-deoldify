@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vsdeoldify"
+version = "1.0.0"
+description = "Deoldify function for VapourSynth"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "Dan64", email = "whitedan64@gmail.com"}]
+keywords = ["Deoldify", "VapourSynth"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Multimedia :: Video"
+]
+dependencies = [
+  "numpy>=1.26.2",
+  "fastai==1.0.60",
+  "torch>=2.1.1",
+  "torch-tensorrt-fx-only>=1.5.0.dev0",
+  "pillow>=9.0.0",
+  "VapourSynth>=60",
+  "vstools>=2.1.0"
+]
+
+[project.urls]
+"Homepage" = "https://github.com"
+"Bug Tracker" = "https://github.com"
