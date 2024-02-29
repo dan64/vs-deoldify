@@ -1,5 +1,5 @@
 # Deoldify
-A Deep Learning based project for colorizing and restoring old images and video, based on https://github.com/jantic/DeOldify
+A Deep Learning based Vaoursynth filter for colorizing and restoring old images and video, based on https://github.com/jantic/DeOldify
 
 
 ## Dependencies
