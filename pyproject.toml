@@ -28,5 +28,5 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com"
-"Bug Tracker" = "https://github.com"
+"Homepage" = "https://github.com/dan64/vs-deoldify"
+"Bug Tracker" = "https://github.com/dan64/vs-deoldify/issues"
