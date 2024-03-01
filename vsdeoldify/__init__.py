@@ -21,11 +21,15 @@ os.environ["CUDA_MODULE_LOADING"] = "LAZY"
 package_dir = os.path.dirname(os.path.realpath(__file__))
 model_dir = os.path.join(package_dir, "models")
 
+#configuring torch
+torch.backends.cudnn.benchmark=True
+
+
 import vapoursynth as vs
-core = vs.core
+
 
 def ddeoldify(
-    clip: vs.VideoNode, model: int = 0, render_factor: int = 21, device_index: int = 0, post_process=True   
+    clip: vs.VideoNode, model: int = 0, render_factor: int = 21, device_index: int = 0, torch_hub_dir: str = model_dir
 ) -> vs.VideoNode:
     """A Deep Learning based project for colorizing and restoring old images and video 
 
@@ -36,7 +40,8 @@ def ddeoldify(
                               2 = ColorizeArtistic_gen
     :param render_factor:  render factor for the model (range: 10-40).
     :param device_index:   device ordinal of the GPU, choices: GPU0...GPU7, CPU=99
-    :param post_process:   post_process takes advantage of the fact that human eyes are less sensitive to imperfections in chrominance to save memory.
+    :param torch_hub_dir:  torch hub dir location, default is model directory,
+                           if set to None will switch to torch cache dir.
     """
 
     if (not torch.cuda.is_available() and device_index != 99):
@@ -60,8 +65,8 @@ def ddeoldify(
     #choices: GPU0...GPU7, CPU=99 
     device.set(device=DeviceId(device_index))
     
-    torch.backends.cudnn.benchmark=True
-    torch.hub.set_dir(model_dir)
+    if torch_hub_dir != None:
+        torch.hub.set_dir(torch_hub_dir)
     
     match model:
         case 0:
@@ -73,11 +78,11 @@ def ddeoldify(
    
     def ddeoldify_colorize(n: int, f: vs.VideoFrame) -> vs.VideoFrame:
         img_orig = frame_to_image(f)
-        img_color = colorizer.get_transformed_pil_image(img_orig, render_factor=render_factor, post_process=post_process)
+        img_color = colorizer.get_transformed_pil_image(img_orig, render_factor=render_factor, post_process=True)
         f_out = image_to_frame(img_color, f.copy()) 
         return f_out
     
-    return core.std.ModifyFrame(clip, clip, ddeoldify_colorize) 
+    return clip.std.ModifyFrame(clip, ddeoldify_colorize) 
 
 def frame_to_image(frame: vs.VideoFrame) -> Image:
     npArray = np.dstack([np.asarray(frame[plane]) for plane in range(frame.format.num_planes)])

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vsdeoldify"
-version = "1.0.0"
+version = "1.0.1"
 description = "Deoldify function for VapourSynth"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,7 +21,6 @@ dependencies = [
   "numpy>=1.26.2",
   "fastai==1.0.60",
   "torch>=2.1.1",
-  "torch-tensorrt-fx-only>=1.5.0.dev0",
   "pillow>=9.0.0",
   "VapourSynth>=60",
   "vstools>=2.1.0"
