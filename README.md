@@ -11,7 +11,7 @@ The Vapoursynth filter version has the advantage of coloring the images directly
 
 ## Installation
 ```
-pip install -U vsdeoldify
+pip install vsdeoldify-x.x.x-py3-none-any.whl
 ```
 
 
@@ -37,8 +37,7 @@ It is possible specify the destination directory of networks used by torch, by u
 ## Usage
 ```python
 from vsdeoldify import ddeoldify
-
-ret = ddeoldify(clip)
+clip = ddeoldify(clip)
 ```
 
 See `__init__.py` for the description of the parameters.

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import os
 
+os.environ["CUDA_MODULE_LOADING"] = 'LAZY'
+os.environ['NUMEXPR_MAX_THREADS'] = '8'
+
 import numpy as np
 from .deoldify import device
 from .deoldify.device_id import DeviceId
@@ -13,10 +16,11 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, message=".*?Your .*? set is empty.*?")
 warnings.filterwarnings("ignore", category=UserWarning, message="The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.")
 warnings.filterwarnings("ignore", category=FutureWarning, message="Arguments other than a weight enum or `None`.*?")
+warnings.filterwarnings("ignore", category=UserWarning, message="Arguments other than a weight enum or `None`.*?")
+warnings.filterwarnings("ignore", category=UserWarning, message="torch.nn.utils.weight_norm is deprecated.*?")
 
-__version__ = "1.0.0"
+__version__ = "1.0.2"
 
-os.environ["CUDA_MODULE_LOADING"] = "LAZY"
 
 package_dir = os.path.dirname(os.path.realpath(__file__))
 model_dir = os.path.join(package_dir, "models")
@@ -29,17 +33,18 @@ import vapoursynth as vs
 
 
 def ddeoldify(
-    clip: vs.VideoNode, model: int = 0, render_factor: int = 21, device_index: int = 0, torch_hub_dir: str = model_dir
+    clip: vs.VideoNode, model: int = 0, render_factor: int = 21, device_index: int = 0, n_threads: int = 8, torch_hub_dir: str = model_dir
 ) -> vs.VideoNode:
     """A Deep Learning based project for colorizing and restoring old images and video 
 
     :param clip:           clip to process, only RGB24 format is supported.
-    :param model:          model to use.
+    :param model:          model to use (default = 0).
                               0 = ColorizeVideo_gen
                               1 = ColorizeStable_gen
                               2 = ColorizeArtistic_gen
-    :param render_factor:  render factor for the model (range: 10-40).
-    :param device_index:   device ordinal of the GPU, choices: GPU0...GPU7, CPU=99
+    :param render_factor:  render factor for the model, range: 10-40 (default = 21).
+    :param device_index:   device ordinal of the GPU, choices: GPU0...GPU7, CPU=99 (default = 0)
+    :param n_threads:      number of threads used by numpy, range: 1-32 (default = 8)
     :param torch_hub_dir:  torch hub dir location, default is model directory,
                            if set to None will switch to torch cache dir.
     """
@@ -61,7 +66,12 @@ def ddeoldify(
 
     if device_index > 7 and device_index != 99:
         raise vs.Error("deoldify: wrong device_index, choices are: GPU0...GPU7, CPU=99")
+     
+    if n_threads not in range(1, 32):
+        n_threads = 8
 
+    os.environ['NUMEXPR_MAX_THREADS'] = str(n_threads)
+     
     #choices: GPU0...GPU7, CPU=99 
     device.set(device=DeviceId(device_index))
     
