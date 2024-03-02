@@ -107,12 +107,17 @@ def ddeoldify(
     if ddcolor_enabled:
         # adjusting color space to RGBH for vsDDColor
         clipb = vs.core.resize.Bicubic(clip=clip, format=vs.RGBH, range_s="limited")
-        clipa = clip.std.ModifyFrame(clip, ddeoldify_colorize) 
+        if dd_weight < 1.0:
+            clipa = clip.std.ModifyFrame(clip, ddeoldify_colorize) 
         dd_insize = dd_strength * 32 * 8
         clipb = ddcolor(clip=clipb, model=dd_model, input_size=dd_insize, device_index=device_index, num_streams=dd_num_streams)
         # adjusting color space to RGB24 for deoldify
         clipb = vs.core.resize.Bicubic(clip=clipb, format=vs.RGB24, range_s="limited")
-        color_clip = vs.core.std.Merge(clipa, clipb, weight=dd_weight) #dd_weight: weight of clipb
+        if dd_weight < 1.0: 
+            color_clip = vs.core.std.Merge(clipa, clipb, weight=dd_weight) #dd_weight: weight of clipb
+        else:
+            color_clip = clipb #weight of clipb 100%
+        
     else:
         color_clip = clip.std.ModifyFrame(clip, ddeoldify_colorize) 
     
