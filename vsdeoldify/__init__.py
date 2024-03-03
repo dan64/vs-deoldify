@@ -36,7 +36,7 @@ import vapoursynth as vs
 
 def ddeoldify(
     clip: vs.VideoNode, model: int = 0, render_factor: int = 21, sat: list = [1,1], hue: list = [0,0], dd_method: int = 0, dd_weight: float = 0.0,
-    dd_strength: int = 0, dd_model: int = 0, device_index: int = 0, n_threads: int = 8, dd_num_streams: int = 1, torch_hub_dir: str = model_dir
+    dd_strength: int = 3, dd_model: int = 0, device_index: int = 0, n_threads: int = 8, dd_num_streams: int = 1, torch_hub_dir: str = model_dir
 ) -> vs.VideoNode:
     """A Deep Learning based project for colorizing and restoring old images and video 
 
@@ -51,9 +51,9 @@ def ddeoldify(
     :param dd_weight:      weight assigned to ddcolor (default = 0) [range: 0-1], 
                                 if = 0 ddcolor will be disabled      
                                 if = 1 deoldify will be disabled
-    :param dd_method:      method used to combine deoldify with ddcolor (default = 0): 
+    :param dd_method:      method used to combine deoldify with ddcolor (default = 3): 
                               0 : Simple Merge
-    :param dd_strength:    ddcolor input size, if = 0 will be auto selected (default = 0) [range: 0-9] 
+    :param dd_strength:    ddcolor input size, if = 0 will be auto selected (default = 0) [range: 0-8] 
     :param dd_model:       ddcolor model (default = 0): 
                               0 = ddcolor_modelscope, 
                               1 = ddcolor_artistic
@@ -92,7 +92,7 @@ def ddeoldify(
     if dd_strength > 0:
         dd_insize = dd_strength * 128
     else:
-        dd_insize = min(max(math.trunc(clip.width / 128), 1), 9) * 128
+        dd_insize = min(max(math.trunc(0.5 * clip.width / 128), 1), 8) * 128
 
     os.environ['NUMEXPR_MAX_THREADS'] = str(n_threads)
      
