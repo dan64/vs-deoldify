@@ -6,6 +6,10 @@ The Vapoursynth filter version has the advantage of coloring the images directly
 
 This filter is able to combine the results provided by DeOldify and DDColor, which are some of the best models available for coloring pictures, providing often a final colorized image that is better than the image obtained from the individual models.  
 
+## Quick Start
+
+This filter is distributed with the torch package provided with the **Hybrid Windows Addons**. To use it on Desktop (Windows, Linux) it is necessary install [Hybrid](https://www.selur.de/downloads). **Hybrid** is a Qt-based frontend for other tools (including this filter) which can convert most input formats to common audio & video formats and containers. It represent the  easiest way to colorize images with [DeOldify](https://github.com/jantic/DeOldify) using [VapourSynth](https://www.vapoursynth.com/).      
+
 
 ## Dependencies
 - [PyTorch](https://pytorch.org/get-started) 2.1.1 or later
