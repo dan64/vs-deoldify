@@ -53,7 +53,7 @@ def ddeoldify(
                                 if = 1 deoldify will be disabled
     :param dd_method:      method used to combine deoldify with ddcolor (default = 3): 
                               0 : Simple Merge
-    :param dd_strength:    ddcolor input size, if = 0 will be auto selected (default = 0) [range: 0-8] 
+    :param dd_strength:    ddcolor input size, if = 0 will be auto selected (default = 3) [range: 0-8] 
     :param dd_model:       ddcolor model (default = 0): 
                               0 = ddcolor_modelscope, 
                               1 = ddcolor_artistic
