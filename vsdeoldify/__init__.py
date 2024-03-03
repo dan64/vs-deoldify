@@ -22,7 +22,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, message="Arguments oth
 warnings.filterwarnings("ignore", category=UserWarning, message="Arguments other than a weight enum or `None`.*?")
 warnings.filterwarnings("ignore", category=UserWarning, message="torch.nn.utils.weight_norm is deprecated.*?")
 
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 
 package_dir = os.path.dirname(os.path.realpath(__file__))
@@ -41,25 +41,28 @@ def ddeoldify(
     """A Deep Learning based project for colorizing and restoring old images and video 
 
     :param clip:           clip to process, only RGB24 format is supported.
-    :param model:          model to use (default = 0):
+    :param model:          deoldify model to use (default = 0):
                               0 = ColorizeVideo_gen
                               1 = ColorizeStable_gen
                               2 = ColorizeArtistic_gen
     :param render_factor:  render factor for the model, range: 10-40 (default = 21).
     :param sat:            list with the saturation parameters to apply to color models (default = [1,1])
     :param hue:            list with the hue parameters to apply to color models (default = [0,0])
-    :param dd_weight:      weight assigned to ddcolor, if = 0 ddcolor will be disabled (default = 0) [range: 0-1]     
+    :param dd_weight:      weight assigned to ddcolor (default = 0) [range: 0-1], 
+                                if = 0 ddcolor will be disabled      
+                                if = 1 deoldify will be disabled
     :param dd_method:      method used to combine deoldify with ddcolor (default = 0): 
                               0 : Simple Merge
     :param dd_strength:    ddcolor input size, if = 0 will be auto selected (default = 0) [range: 0-9] 
-    :param dd_model:       ddcolor model: 0 = ddcolor_modelscope, 1 = ddcolor_artistic (default = 0)
+    :param dd_model:       ddcolor model (default = 0): 
+                              0 = ddcolor_modelscope, 
+                              1 = ddcolor_artistic
     :param device_index:   device ordinal of the GPU, choices: GPU0...GPU7, CPU=99 (default = 0)
     :param n_threads:      number of threads used by numpy, range: 1-32 (default = 8)
     :param dd_num_streams: number of CUDA streams to enqueue the kernels (default = 1)
     :param torch_hub_dir:  torch hub dir location, default is model directory,
                            if set to None will switch to torch cache dir.
     """
-    ddcolor_enabled = False
     
     if (not torch.cuda.is_available() and device_index != 99):
         raise vs.Error("deoldify: CUDA is not available")
@@ -81,12 +84,15 @@ def ddeoldify(
     
     if dd_strength not in range(0, 10):
         raise vs.Error("deoldify: dd_strength must between: 0-9")
-    
-    if dd_weight > 0 :
-        ddcolor_enabled = True     
-     
+            
     if n_threads not in range(1, 32):
         n_threads = 8
+    
+    # input_size calculation for ddcolor    
+    if dd_strength > 0:
+        dd_insize = dd_strength * 128
+    else:
+        dd_insize = min(max(math.trunc(clip.width / 128), 1), 9) * 128
 
     os.environ['NUMEXPR_MAX_THREADS'] = str(n_threads)
      
@@ -110,32 +116,23 @@ def ddeoldify(
         f_out = image_to_frame(img_color, f.copy()) 
         return f_out      
     
-    if ddcolor_enabled:        
-        if dd_weight < 1.0:
-            clipa = clip.std.ModifyFrame(clip, ddeoldify_colorize) 
-            clipa = Tweak(clip=clipa.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="limited"), hue=hue[0], sat=sat[0], cont=1.00, coring=True)
-            clipa = clipa.resize.Bicubic(format=vs.RGB24, range_s="limited")
-        if dd_strength > 0:
-            dd_insize = dd_strength * 128
-        else:
-            dd_insize = min(max(math.trunc(clip.width / 128), 1), 9) * 128
-        # adjusting color space to RGBH for vsDDColor
-        clipb = clip.resize.Bicubic(format=vs.RGBH, range_s="limited")
-        clipb = ddcolor(clip=clipb, model=dd_model, input_size=dd_insize, device_index=device_index, num_streams=dd_num_streams)
-        clipb = Tweak(clip=clipb.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="limited"), hue=hue[1], sat=sat[1], cont=1.00, coring=True)
-        # adjusting color space to RGB24 for deoldify
-        clipb = clipb.resize.Bicubic(format=vs.RGB24, range_s="limited")
-        if dd_weight < 1.0: 
-            color_clip = vs.core.std.Merge(clipa, clipb, weight=dd_weight) #dd_weight: weight of clipb
-        else:
-            color_clip = clipb #weight of clipb 100%
-        
-    else:
+    if dd_weight < 1.0:        
         clipa = clip.std.ModifyFrame(clip, ddeoldify_colorize) 
-        clipa = Tweak(clip=clipa.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="limited"), hue=hue[0], sat=sat[0], cont=1.00, coring=True)
-        color_clip = clipa.resize.Bicubic(format=vs.RGB24, range_s="limited")
+    else:
+        clipa = None
     
-    return color_clip
+    if dd_weight > 0:    
+        clipb = get_ddcolor_colorize(clip,  model=dd_model, input_size=dd_insize, device_index=device_index, num_streams=dd_num_streams)
+    else:
+        clipb = None
+            
+    return combine_models(clipa, clipb, sat, hue, dd_method, dd_weight)
+
+def get_ddcolor_colorize(clip: vs.VideoNode, model: int = 0, input_size: int = 512, device_index: int = 0, num_streams: int = 1) -> vs.VideoNode:
+    # adjusting clip's color space to RGBH for vsDDColor 
+    clipb = ddcolor(clip.resize.Bicubic(format=vs.RGBH, range_s="limited"), model=model, input_size=input_size, device_index=device_index, num_streams=num_streams)    
+    # adjusting color space to RGB24 for deoldify
+    return clipb.resize.Bicubic(format=vs.RGB24, range_s="limited")
 
 def frame_to_image(frame: vs.VideoFrame) -> Image:
     npArray = np.dstack([np.asarray(frame[plane]) for plane in range(frame.format.num_planes)])

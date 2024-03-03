@@ -1,22 +1,33 @@
 import vapoursynth as vs
 import math
 
+def combine_models(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, sat: list = [1,1], hue: list = [0,0], method: int = 0, clipb_weight: float = 0.0) -> vs.VideoNode:
 
-# XXX bright should be a percentage or something
-
-
-def Tweak(clip, hue=None, sat=None, bright=None, cont=None, coring=True):
-    if clip.format is None:
-        raise vs.Error("Tweak: only clips with constant format are accepted.")
-
-    if clip.format.color_family == vs.RGB:
-        raise vs.Error("Tweak: RGB clips are not accepted.")
-
-    c = vs.core
+    if clipa is not None:
+        clipa = tweak(clipa, hue=hue[0], sat=sat[0])
+        if clipb is None: return clipa
+    
+    if clipb is not None:
+        clipb = tweak(clipb, hue=hue[1], sat=sat[1])
+        if clipa is None: return clipb
         
-    if (hue is not None or sat is not None) and clip.format.color_family != vs.GRAY:
-        hue = 0.0 if hue is None else hue
-        sat = 1.0 if sat is None else sat
+    if method == 0:
+        return vs.core.std.Merge(clipa, clipb, weight=clipb_weight)
+    else:
+        raise vs.Error("deoldify: only dd_method=0 is supported")
+    
+
+def tweak(clip: vs.VideoNode, hue: int = 0, sat: int = 1, bright=None, cont=None, coring=True):
+
+    if sat == 1 and hue == 0:
+        return clip  # non changes
+             
+    c = vs.core
+    
+    # convert the format for tewak
+    clip = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="limited")
+    
+    if (hue != 0 or sat != 1) and clip.format.color_family != vs.GRAY:
 
         hue = hue * math.pi / 180.0
         hue_sin = math.sin(hue)
@@ -67,5 +78,8 @@ def Tweak(clip, hue=None, sat=None, bright=None, cont=None, coring=True):
             expression = "x {} * {} + 0.0 max 1.0 min".format(cont, bright)
 
             clip = clip.std.Expr(expr=[expression, "", ""])
-
+            
+    # convert the clip format for deoldify
+    clp = clip.resize.Bicubic(format=vs.RGB24, range_s="limited") 
+    
     return clip
