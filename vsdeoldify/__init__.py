@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 
-os.environ["CUDA_MODULE_LOADING"] = 'LAZY'
-os.environ['NUMEXPR_MAX_THREADS'] = '8'
+os.environ["CUDA_MODULE_LOADING"] = "LAZY"
+os.environ["NUMEXPR_MAX_THREADS"] = "8"
 
 import numpy as np
 import math 
@@ -22,7 +22,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, message="Arguments oth
 warnings.filterwarnings("ignore", category=UserWarning, message="Arguments other than a weight enum or `None`.*?")
 warnings.filterwarnings("ignore", category=UserWarning, message="torch.nn.utils.weight_norm is deprecated.*?")
 
-__version__ = "1.1.3"
+__version__ = "1.1.4"
 
 
 package_dir = os.path.dirname(os.path.realpath(__file__))
@@ -87,7 +87,10 @@ def ddeoldify(
 
     if clip.format.id != vs.RGB24:
         # clip not in RGB24 format, it will be converted
-        clip = clip.resize.Bicubic(format=vs.RGB24, range_s="limited") 
+        if (clip.format.color_family == "YUV"):
+            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="limited", dither_type="error_diffusion") 
+        else:
+            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="limited") 
     
     # input_size calculation for ddcolor    
     if dd_strength > 0:
@@ -144,3 +147,4 @@ def image_to_frame(img: Image, frame: vs.VideoFrame) -> vs.VideoFrame:
     npArray = np.array(img)
     [np.copyto(np.asarray(frame[plane]), npArray[:, :, plane]) for plane in range(frame.format.num_planes)]
     return frame
+

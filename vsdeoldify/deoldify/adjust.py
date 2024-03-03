@@ -80,6 +80,6 @@ def tweak(clip: vs.VideoNode, hue: int = 0, sat: int = 1, bright=None, cont=None
             clip = clip.std.Expr(expr=[expression, "", ""])
             
     # convert the clip format for deoldify
-    clp = clip.resize.Bicubic(format=vs.RGB24, range_s="limited") 
+    return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="limited", dither_type="error_diffusion") 
+
     
-    return clip
