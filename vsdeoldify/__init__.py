@@ -22,7 +22,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, message="Arguments oth
 warnings.filterwarnings("ignore", category=UserWarning, message="Arguments other than a weight enum or `None`.*?")
 warnings.filterwarnings("ignore", category=UserWarning, message="torch.nn.utils.weight_norm is deprecated.*?")
 
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 
 
 package_dir = os.path.dirname(os.path.realpath(__file__))
@@ -51,7 +51,7 @@ def ddeoldify(
     :param dd_weight:      weight assigned to ddcolor (default = 0) [range: 0-1], 
                                 if = 0 ddcolor will be disabled      
                                 if = 1 deoldify will be disabled
-    :param dd_method:      method used to combine deoldify with ddcolor (default = 3): 
+    :param dd_method:      method used to combine deoldify with ddcolor (default = 0): 
                               0 : Simple Merge
     :param dd_strength:    ddcolor input size, if = 0 will be auto selected (default = 3) [range: 0-8] 
     :param dd_model:       ddcolor model (default = 0): 
@@ -70,9 +70,6 @@ def ddeoldify(
     if not isinstance(clip, vs.VideoNode):
         raise vs.Error("deoldify: this is not a clip")
 
-    if clip.format.id != vs.RGB24:
-        raise vs.Error("deoldify: only RGB24 format is supported")
-
     if model not in range(3):
         raise vs.Error("deoldify: model must be 0,1,2")
 
@@ -87,6 +84,10 @@ def ddeoldify(
             
     if n_threads not in range(1, 32):
         n_threads = 8
+
+    if clip.format.id != vs.RGB24:
+        # clip not in RGB24 format, it will be converted
+        clip = clip.resize.Bicubic(format=vs.RGB24, range_s="limited") 
     
     # input_size calculation for ddcolor    
     if dd_strength > 0:
