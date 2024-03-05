@@ -59,7 +59,7 @@ See `__init__.py` for the description of the parameters.
 
 ## Comparison of Models ##
 
-Taking inspiration from the article published on Habr: [Mode on: Comparing the two best colorization AI's](https://habr.com/en/companies/ruvds/articles/568426/). I decide to use it to get the refence images and the images obtained obtained using ColTran + TensorFlow 2.4.1 (Model T241) to extende hes analysis to include the models implemented in this filter.
+Taking inspiration from the article published on Habr: [Mode on: Comparing the two best colorization AI's](https://habr.com/en/companies/ruvds/articles/568426/). I decide to use it to get the refence images and the images obtained using the [ColTran](https://github.com/google-research/google-research/tree/master/coltran) model, to extend the analysis to include the models implemented in this filter.
 
 The added Models are:
 
@@ -74,6 +74,8 @@ The added Models are:
 
 **DV**: Deoldify (with model _Video_ & render_factor = 23)
 ![Hybrid D+D](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_DV.JPG)  
+
+**T241**:  ColTran + TensorFlow 2.4.1 model as shown in [Habr](https://habr.com/en/companies/ruvds/articles/568426/)
 
 **Comparison Methodology**
 
