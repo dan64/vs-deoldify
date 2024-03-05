@@ -72,7 +72,7 @@ The added Models are:
 **DS**: Deoldify (with model _Stable_ & render_factor = 30)
 ![Hybrid D+D](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_DS.JPG)  
 
-**DV**: Deoldify (with model _Video_ & render_factor = 21)
+**DV**: Deoldify (with model _Video_ & render_factor = 23)
 ![Hybrid D+D](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_DS.JPG)  
 
 **Comparison Methodology**
