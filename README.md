@@ -33,12 +33,11 @@ The _model files_ have to be copied in the **models** directory (which must be c
 
 .\Lib\site-packages\vsdeoldify\models
 
-
 At the first usage it is possible that are automatically downloaded by torch the neural networks: resnet101 and resnet34. 
 
 It is possible specify the destination directory of networks used by torch, by using the function parameter **torch\_hub\_dir**, if this parameter is set to **None**, the files will be downloaded in the torch cache dir, more details are available at: [caching-logic ](https://pytorch.org/docs/stable/hub.html#caching-logic).
 
-The models used by DDColor can be installed with the command
+The models used by **DDColor** can be installed with the command
 
 ```
 python -m vsddcolor
@@ -48,14 +47,16 @@ python -m vsddcolor
 ## Usage
 ```python
 from vsdeoldify import ddeoldify
-# DeOldify only model
+# DeOldify  with DDColor weighed at 50%
 clip = ddeoldify(clip)
-# DeOldify with DDColor weighed at 50%
-clip = ddeoldify(clip, dd_weight=0.5)
+# DeOldify only model
+clip = ddeoldify(clip, dd_weight=0.0)
 
 ```
 
 See `__init__.py` for the description of the parameters.
+
+**NOTE**: In the _DDColor_ version included with **DDeoldify** the parameter _input_size_ has changed name in _dd_strength_ because I changed the range of values of this parameter to be equivalent to _render_factor_ in _Deoldify_. 
 
 ---
 
@@ -169,11 +170,11 @@ First of all, it should be noted that the individual models added (**DA** for _D
 
 In Summary **DDeoldify** is able to provide often a final colorized image that is better than the image obtained from the individual models, and can be considered an improvement respect to the current Models.  The suggested configuration for _video encoding_ is: 
 
-* **D+D**: Deoldify (with model _Video_ & render_factor = 23) + DDColor (with model _Artistic_ and input_size = 3)
+* **D+D**: Deoldify (with model _Video_ & render_factor = 24) + DDColor (with model _Artistic_ and dd_strength = 24)
 
-willing to accept a decrease in encoding speed of about 30% it is possible to improve _a little_ the colorization process by using the configuration:
+willing to accept a decrease in encoding speed of about 40% it is possible to improve _a little_ the colorization process by using the configuration:
 
-* **DS+DD**: Deoldify (with model _Stable_ & render_factor = 30) + DDColor (with model _Artistic_ and input_size = 3)
+* **DS+DD**: Deoldify (with model _Stable_ & render_factor = 30) + DDColor (with model _Artistic_ and dd_strength = 30)
 
 As a final consideration I would like to point out that the test results showed that the images coloring technology is mature enough to be used concretely both for coloring images and, thanks to **Hybrid**, videos.
 
