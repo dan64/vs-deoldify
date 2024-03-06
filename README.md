@@ -57,6 +57,8 @@ clip = ddeoldify(clip, dd_weight=0.5)
 
 See `__init__.py` for the description of the parameters.
 
+---
+
 ## Comparison of Models ##
 
 Taking inspiration from the article published on Habr: [Mode on: Comparing the two best colorization AI's](https://habr.com/en/companies/ruvds/articles/568426/). I decided to use it to get the refence images and the images obtained using the [ColTran](https://github.com/google-research/google-research/tree/master/coltran) model, to extend the analysis with the models implemented in the **DDeoldify** filter.
@@ -77,12 +79,14 @@ The added models are:
 
 **T241**:  ColTran + TensorFlow 2.4.1 model as shown in [Habr](https://habr.com/en/companies/ruvds/articles/568426/)
 
-**Comparison Methodology**
+### Comparison Methodology ###
 
 To compare the models I decided to use a metric being able to consider the _perceptual non-uniformities_ in the evaluation of color difference between images. These non-uniformities are important because the human eye is more sensitive to certain colors than others.  Over time, The International Commission on Illumination (**CIE**) has proposed increasingly advanced measurement models to measure the color distance taking into account the _human color perception_, that they called **dE**. One of the most advanced is the [CIEDE2000](https://en.wikipedia.org/wiki/Color_difference#CIEDE2000) method, that I decided to use as _color similarity metric_ to compare the models. The final results are shown in the table below (test image can be seen by clicking on the test number)
 
+### Test Set #1 ###
+
 | Test # | D+D | DD | DS | DV  | T241 |
-|------|------|-----|-----|-----|-------|
+|---|---|---|---|---|---|
 |[01](https://github.com/dan64/vs-deoldify/blob/main/test_images/Image_01_test.jpg) | 10.7 | **8.7** | 8.8 | 12.7 | 15.7 |
 |[02](https://github.com/dan64/vs-deoldify/blob/main/test_images/Image_02_test.jpg) | 11.8 | **11.7** | 12.7 | 12.7 | 15.9 |
 |[03](https://github.com/dan64/vs-deoldify/blob/main/test_images/Image_03_test.jpg) | 5.5 | **3.8** | 5.6 | 7.6 | 9.9 |
@@ -108,18 +112,70 @@ To compare the models I decided to use a metric being able to consider the _perc
 |[23](https://github.com/dan64/vs-deoldify/blob/main/test_images/Image_23_test.jpg) | **5.6** | 7.1 | 11.4 | 8.8 | 11. |
 |**Avg(dE)** | **8.3** | **8.5** | **9.1** | **9.5** | **12.7** |
 
-
-
-
-       
-The calculation of **dE** with the  **CIEDE2000** model was obtained by leveraging on the computational code available in [ColorMine](https://github.com/MasterPieceCode/Mozaic/tree/master/ColorMine).
+   
+The calculation of **dE** with the  **CIEDE2000** method was obtained by leveraging on the computational code available in [ColorMine](https://github.com/MasterPieceCode/Mozaic/tree/master/ColorMine).
 
 As it is possible to see the model that performed better is the **D+D** model (which I called _DDelodify_ because is using both _Deoldify_ and _DDColor_). This model was the best model in 10 tests out of 23. Also the **DD** model performed well but there were situations where the **DD** model provided quite bad colorized images like in [Test #23](https://github.com/dan64/vs-deoldify/blob/main/test_images/Image_23_test.jpg) and the combination with the Deoldify allowed to significantly improve the final image. In effect the average distance of **DD** was 8.3 while for **DV** was 9.5, given that the 2 models were weighted at 50%, if the images were positively correlated a value 9 would have been expected, instead the average distance measured for **D+D** was 8.3, this implies that the 2 models were able to compensate each other. 
 Conversely, the **T241** was the model that performed worse with the greatest average difference in colors. Finally, the quality of Deoldify models was similar, being **DS** slightly better than **DV** (as expected).
 
-In Summary **DDeoldify** is able to provide often a final colorized image that is better than the image obtained from the individual models, and can be considered an improvement respect to the current Models.   
+###  Tests Set #2 ### 
 
-As a final consideration I would like to point out that the test results showed that the images coloring technology is mature enough to be used concretely both for coloring images and, thanks to Hybrid, videos.
+Given the goodness of  **CIEDE2000** method to provide a reliable estimate of _human color perception_, I decided to provide an additional set of tests including some of the cases not considered in the previously.
+
+The models added are:
+
+**DA**: Deoldify (with model _Artistic_ & render_factor = 30) 
+
+**DDs**: DDColor (with model _ModelScope_ and input_size = 384)
+
+**DS+DD**: Deoldify (with model _Stable_ & render_factor = 30) + DDColor (with model _Artistic_ and input_size = 3)
+
+**DA+DDs**: Deoldify (with model _Artistic_ & render_factor = 30) + DDColor (with model _ModelScope_ and input_size = 3)
+
+**DA+DD**: Deoldify (with model _Artistic_ & render_factor = 30) + DDColor (with model _Artistic_ and input_size = 3)
+
+The results of this additional tests set are shown in the table below (test image can be seen by clicking on the test number)
+
+| Test # | DS+DD | DA+DDs | DA+DD | DDs  | DA |
+|---|---|---|---|---|---|
+|[01](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_01_test_ex.jpg) | 7.7 | **7.5** | 8.2 | 8.2 | 8.6 |
+|[02](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_02_test_ex.jpg) | 11.8 | **11.4** | 11.9 | 11.6 | 13.2 |
+|[03](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_03_test_ex.jpg) | 4.5 | 4.2 | **3.9** | 4.5 | 4.2 |
+|[04](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_04_test_ex.jpg) | 5.9 | **5.1** | 6.0 | 6.6 | 5.9 |
+|[05](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_05_test_ex.jpg) | **6.4** | 6.5 | 6.7 | 9.5 | 9.0 |
+|[06](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_06_test_ex.jpg) | 10.0 | 10.0 | 10.3 | **9.5** | 11.4 |
+|[07](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_07_test_ex.jpg) | **6.1** | 7.3 | 6.6 | 8.1 | 8.0 |
+|[08](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_08_test_ex.jpg) | **6.2** | 8.1 | 7.3 | 8.1 | 9.4 |
+|[09](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_09_test_ex.jpg) | 12.7 | **11.3** | 11.5 | 12.5 | 13.3 |
+|[10](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_10_test_ex.jpg) | 8.1 | 7.7 | 8.0 | **7.1** | 9.0 |
+|[11](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_11_test_ex.jpg) | **7.2** | 7.3 | 7.4 | 8.6 | 7.9 |
+|[12](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_12_test_ex.jpg) | 8.0 | 7.1 | 8.0 | **6.5** | 9.3 |
+|[13](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_13_test_ex.jpg) | 12.0 | **11.7** | 12.0 | 11.8 | 13.8 |
+|[14](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_14_test_ex.jpg) | **4.5** | 4.6 | 4.8 | 5.8 | 4.8 |
+|[15](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_15_test_ex.jpg) | 8.3 | **8.1** | 8.9 | 8.2 | 12.2 |
+|[16](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_16_test_ex.jpg) | 10.6 | 10.5 | 10.7 | 12.5 | **9.9** |
+|[17](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_17_test_ex.jpg) | **10.8** | 12.1 | 11.4 | 12.3 | 13.5 |
+|[18](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_18_test_ex.jpg) | 6.7 | 7.1 | **6.1** | 11.1 | 7.2 |
+|[19](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_19_test_ex.jpg) | **3.5** | 4.6 | 4.5 | 5.1 | 7.1 |
+|[20](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_20_test_ex.jpg) | 8.0 | 8.1 | 8.2 | 9.3 | **7.6** |
+|[21](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_21_test_ex.jpg) | 6.9 | **6.7** | 7.1 | 7.1 | 9.0 |
+|[22](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_22_test_ex.jpg) | 12.1 | 11.0 | **10.9** | 12.1 | 11.2 |
+|[23](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_23_test_ex.jpg) | 6.2 | 6.3 | **6.0** | 7.8 | 10.2 |
+|**Avg(dE)** | **8.0** | **8.0** | **8.1** | **8.9** | **9.4** |
+
+First of all, it should be noted that the individual models added (**DA** for _Deoldify_ and **DDs** for _DDColor_)  performed worse than the individual models tested in the previous analysis (**DS** for _Deoldify_ and **DD** for _DDColor_). Conversely all combinations of _Deoldify_ and _DDColor_ performed well.  Confirming the positive impact on the final result, already observed in the previous analysis, obtained by combining the 2 models. 
+
+## Conclusions ##
+
+In Summary **DDeoldify** is able to provide often a final colorized image that is better than the image obtained from the individual models, and can be considered an improvement respect to the current Models.  The suggested configuration for _video encoding_ is: 
+
+* **D+D**: Deoldify (with model _Video_ & render_factor = 23) + DDColor (with model _Artistic_ and input_size = 3)
+
+willing to accept a decrease in encoding speed of about 30% it is possible to improve _a little_ the colorization process by using the configuration:
+
+* **DS+DD**: Deoldify (with model _Stable_ & render_factor = 30) + DDColor (with model _Artistic_ and input_size = 3)
+
+As a final consideration I would like to point out that the test results showed that the images coloring technology is mature enough to be used concretely both for coloring images and, thanks to **Hybrid**, videos.
 
 
 
