@@ -5,7 +5,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build]
 exclude = [
   "/test_images",
-  "/test_images_ex"
+  "/test_images_ex",
+  "/hybrid_setup"
 ]
 
 [project]
