@@ -121,7 +121,7 @@ Conversely, the **T241** was the model that performed worse with the greatest av
 
 ###  Tests Set #2 ### 
 
-Given the goodness of  **CIEDE2000** method to provide a reliable estimate of _human color perception_, I decided to provide an additional set of tests including some of the cases not considered in the previously.
+Given the goodness of  **CIEDE2000** method to provide a reliable estimate of _human color perception_, I decided to provide an additional set of tests including some of the cases not considered previously.
 
 The models added are:
 
