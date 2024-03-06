@@ -22,7 +22,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, message="Arguments oth
 warnings.filterwarnings("ignore", category=UserWarning, message="Arguments other than a weight enum or `None`.*?")
 warnings.filterwarnings("ignore", category=UserWarning, message="torch.nn.utils.weight_norm is deprecated.*?")
 
-__version__ = "1.1.4"
+__version__ = "1.1.5"
 
 
 package_dir = os.path.dirname(os.path.realpath(__file__))
