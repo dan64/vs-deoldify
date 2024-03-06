@@ -35,8 +35,8 @@ torch.backends.cudnn.benchmark=True
 import vapoursynth as vs
 
 def ddeoldify(
-    clip: vs.VideoNode, model: int = 0, render_factor: int = 21, sat: list = [1,1], hue: list = [0,0], dd_method: int = 0, dd_weight: float = 0.0,
-    dd_strength: int = 3, dd_model: int = 0, device_index: int = 0, n_threads: int = 8, dd_num_streams: int = 1, torch_hub_dir: str = model_dir
+    clip: vs.VideoNode, model: int = 0, render_factor: int = 24, sat: list = [1,1], hue: list = [0,0], dd_method: int = 0, dd_weight: float = 0.5,
+    dd_strength: int = 24, dd_model: int = 0, device_index: int = 0, n_threads: int = 8, dd_num_streams: int = 1, torch_hub_dir: str = model_dir
 ) -> vs.VideoNode:
     """A Deep Learning based project for colorizing and restoring old images and video 
 
@@ -45,7 +45,7 @@ def ddeoldify(
                               0 = ColorizeVideo_gen
                               1 = ColorizeStable_gen
                               2 = ColorizeArtistic_gen
-    :param render_factor:  render factor for the model, range: 10-40 (default = 21).
+    :param render_factor:  render factor for the model, range: 10-40 (default = 24).
     :param sat:            list with the saturation parameters to apply to color models (default = [1,1])
     :param hue:            list with the hue parameters to apply to color models (default = [0,0])
     :param dd_weight:      weight assigned to ddcolor (default = 0) [range: 0-1], 
@@ -53,7 +53,8 @@ def ddeoldify(
                                 if = 1 deoldify will be disabled
     :param dd_method:      method used to combine deoldify with ddcolor (default = 0): 
                               0 : Simple Merge
-    :param dd_strength:    ddcolor input size, if = 0 will be auto selected (default = 3) [range: 0-8] 
+    :param dd_strength:    ddcolor input size equivalent to render_factor, if = 0 will be auto selected 
+                           (default = 24) [range: 0-64] 
     :param dd_model:       ddcolor model (default = 0): 
                               0 = ddcolor_modelscope, 
                               1 = ddcolor_artistic
@@ -79,8 +80,8 @@ def ddeoldify(
     if device_index > 7 and device_index != 99:
         raise vs.Error("deoldify: wrong device_index, choices are: GPU0...GPU7, CPU=99")
     
-    if dd_strength not in range(0, 10):
-        raise vs.Error("deoldify: dd_strength must between: 0-9")
+    if dd_strength not in range(0, 65):
+        raise vs.Error("deoldify: dd_strength must between: 0-64")
             
     if n_threads not in range(1, 32):
         n_threads = 8
@@ -94,9 +95,9 @@ def ddeoldify(
     
     # input_size calculation for ddcolor    
     if dd_strength > 0:
-        dd_insize = dd_strength * 128
+        dd_insize = dd_strength * 16
     else:
-        dd_insize = min(max(math.trunc(0.5 * clip.width / 128), 1), 8) * 128
+        dd_insize = min(max(math.trunc(0.4 * clip.width / 16), 1), 64) * 16
 
     os.environ['NUMEXPR_MAX_THREADS'] = str(n_threads)
      
