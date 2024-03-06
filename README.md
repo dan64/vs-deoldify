@@ -59,9 +59,9 @@ See `__init__.py` for the description of the parameters.
 
 ## Comparison of Models ##
 
-Taking inspiration from the article published on Habr: [Mode on: Comparing the two best colorization AI's](https://habr.com/en/companies/ruvds/articles/568426/). I decide to use it to get the refence images and the images obtained using the [ColTran](https://github.com/google-research/google-research/tree/master/coltran) model, to extend the analysis with the models implemented in this filter.
+Taking inspiration from the article published on Habr: [Mode on: Comparing the two best colorization AI's](https://habr.com/en/companies/ruvds/articles/568426/). I decided to use it to get the refence images and the images obtained using the [ColTran](https://github.com/google-research/google-research/tree/master/coltran) model, to extend the analysis with the models implemented in the **DDeoldify** filter.
 
-The added Models are:
+The added models are:
 
 **D+D**: Deoldify (with model _Video_ & render_factor = 23) + DDColor (with model _Artistic_ and input_size = 3)
 ![Hybrid D+D](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_D%2BD.JPG)  
