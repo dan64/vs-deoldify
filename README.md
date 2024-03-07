@@ -56,7 +56,11 @@ clip = ddeoldify(clip, dd_weight=0.0)
 
 See `__init__.py` for the description of the parameters.
 
-**NOTE**: In the _DDColor_ version included with **DDeoldify** the parameter _input_size_ has changed name in _dd_strength_ because I changed the range of values of this parameter to be equivalent to _render_factor_ in _Deoldify_. 
+**NOTE**: In the _DDColor_ version included with **DDeoldify** the parameter _input_size_ has changed name in _dd_strength_ because I changed the range of values of this parameter to be equivalent to _render_factor_ in _Deoldify_, the relationship between these 2 parameters is the following:
+
+```
+input_size = render_factor * 16
+``` 
 
 ---
 
@@ -66,7 +70,7 @@ Taking inspiration from the article published on Habr: [Mode on: Comparing the t
 
 The added models are:
 
-**D+D**: Deoldify (with model _Video_ & render_factor = 23) + DDColor (with model _Artistic_ and input_size = 3)
+**D+D**: Deoldify (with model _Video_ & render_factor = 23) + DDColor (with model _Artistic_ and render_factor = 24)
 ![Hybrid D+D](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_D%2BD.JPG)  
 
 **DD**:  DDColor (with model _Artistic_ and input_size = 384)
@@ -116,7 +120,7 @@ To compare the models I decided to use a metric being able to consider the _perc
    
 The calculation of **dE** with the  **CIEDE2000** method was obtained by leveraging on the computational code available in [ColorMine](https://github.com/MasterPieceCode/Mozaic/tree/master/ColorMine).
 
-As it is possible to see the model that performed better is the **D+D** model (which I called _DDelodify_ because is using both _Deoldify_ and _DDColor_). This model was the best model in 10 tests out of 23. Also the **DD** model performed well but there were situations where the **DD** model provided quite bad colorized images like in [Test #23](https://github.com/dan64/vs-deoldify/blob/main/test_images/Image_23_test.jpg) and the combination with the Deoldify allowed to significantly improve the final image. In effect the average distance of **DD** was 8.3 while for **DV** was 9.5, given that the 2 models were weighted at 50%, if the images were positively correlated a value 9 would have been expected, instead the average distance measured for **D+D** was 8.3, this implies that the 2 models were able to compensate each other. 
+As it is possible to see the model that performed better is the **D+D** model (which I called _DDelodify_ because is using both _Deoldify_ and _DDColor_). This model was the best model in 10 tests out of 23. Also the **DD** model performed well but there were situations where the **DD** model provided quite bad colorized images like in [Test #23](https://github.com/dan64/vs-deoldify/blob/main/test_images/Image_23_test.jpg) and the combination with the Deoldify allowed to significantly improve the final image. In effect the average distance of **DD** was 8.3 while for **DV** was 9.5, given that the 2 models were weighted at 50%, if the images were positively correlated a value 9.0 would have been expected, instead the average distance measured for **D+D** was 8.3, this implies that the 2 models were able to compensate each other. 
 Conversely, the **T241** was the model that performed worse with the greatest average difference in colors. Finally, the quality of Deoldify models was similar, being **DS** slightly better than **DV** (as expected).
 
 ###  Tests Set #2 ### 
@@ -129,11 +133,11 @@ The models added are:
 
 **DDs**: DDColor (with model _ModelScope_ and input_size = 384)
 
-**DS+DD**: Deoldify (with model _Stable_ & render_factor = 30) + DDColor (with model _Artistic_ and input_size = 3)
+**DS+DD**: Deoldify (with model _Stable_ & render_factor = 30) + DDColor (with model _Artistic_ and render_factor  = 24)
 
-**DA+DDs**: Deoldify (with model _Artistic_ & render_factor = 30) + DDColor (with model _ModelScope_ and input_size = 3)
+**DA+DDs**: Deoldify (with model _Artistic_ & render_factor = 30) + DDColor (with model _ModelScope_ and render_factor  = 24)
 
-**DA+DD**: Deoldify (with model _Artistic_ & render_factor = 30) + DDColor (with model _Artistic_ and input_size = 3)
+**DA+DD**: Deoldify (with model _Artistic_ & render_factor = 30) + DDColor (with model _Artistic_ and render_factor  = 24)
 
 The results of this additional tests set are shown in the table below (test image can be seen by clicking on the test number)
 
@@ -170,11 +174,11 @@ First of all, it should be noted that the individual models added (**DA** for _D
 
 In Summary **DDeoldify** is able to provide often a final colorized image that is better than the image obtained from the individual models, and can be considered an improvement respect to the current Models.  The suggested configuration for _video encoding_ is: 
 
-* **D+D**: Deoldify (with model _Video_ & render_factor = 24) + DDColor (with model _Artistic_ and dd_strength = 24)
+* **D+D**: Deoldify (with model _Video_ & render_factor = 24) + DDColor (with model _Artistic_ and render_factor = 24)
 
 willing to accept a decrease in encoding speed of about 40% it is possible to improve _a little_ the colorization process by using the configuration:
 
-* **DS+DD**: Deoldify (with model _Stable_ & render_factor = 30) + DDColor (with model _Artistic_ and dd_strength = 30)
+* **DS+DD**: Deoldify (with model _Stable_ & render_factor = 30) + DDColor (with model _Artistic_ and render_factor = 30)
 
 As a final consideration I would like to point out that the test results showed that the images coloring technology is mature enough to be used concretely both for coloring images and, thanks to **Hybrid**, videos.
 
