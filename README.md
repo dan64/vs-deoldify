@@ -65,7 +65,7 @@ See `__init__.py` for the description of the parameters.
 ```
 input_size = render_factor * 16
 ``` 
-Has been added also the option **chroma resize**, when this option is enabled, the frame size used for the models _inference_ will be used in all frames processing filters. This option allows to speed up the encoding of HD movies by about 150%, but it has the disadvantage of canceling all changes made by the _post-process_ filters on frames luminosity.
+Has been added also the option **chroma resize**, when this option is enabled, the frame size used for the models _inference_ will be used in all frames processing filters. This option allows to speed up the encoding of HD movies by about 150%, but it has the disadvantage (or advantage) of transforming the changes made by the _post-process_ filters on _luminosity_ in changes on the chroma.
 
 ## Filter Usage
 
@@ -76,7 +76,7 @@ To try to solve this problem has been developed _pre-_ and _post-_ process filte
 
 The main filters introduced are:
 
-**Chroma Smoothing** : This filter allows to to reduce the _vibrancy_ of colors assigned by Deoldify/DDcolor by using the _de-saturation_ and _de-vibrancy_ (this parameter is not effective if the option **chroma resize** is enabled) parameters. The area impacted by the filter is defined by the thresholds dark/white. All the pixels with luma below the dark threshold will be impacted by the filter, while the pixels above the white threshold will be left untouched. All the pixels in the middle will be gradually impacted depending on the luma value.
+**Chroma Smoothing** : This filter allows to to reduce the _vibrancy_ of colors assigned by Deoldify/DDcolor by using the _de-saturation_ and _de-vibrancy_ (the effect on _vibrancy_ will be visible only if the option **chroma resize** is enabled, otherwise this parameter has effect on the _luminosity_) parameters. The area impacted by the filter is defined by the thresholds dark/white. All the pixels with luma below the dark threshold will be impacted by the filter, while the pixels above the white threshold will be left untouched. All the pixels in the middle will be gradually impacted depending on the luma value.
 
 **Chroma Stabilization**: This filter will try to stabilize the frames colors. As explained previously since the frames are colored individually, the colors can change significantly from one frame to the next, introducing a disturbing psychedelic flashing effect. This filter try to reduce this by averaging the chroma component of the frames. The average is performed using a number of frames specified in the _Frames_ parameter. 
 Are implemented 3 averaging methods 
