@@ -4,7 +4,7 @@ and  [DDColor](https://github.com/HolyWu/vs-ddcolor)
 
 The Vapoursynth filter version has the advantage of coloring the images directly in memory, without the need to use the filesystem to store the video frames. 
 
-This filter is able to combine the results provided by DeOldify and DDColor, which are some of the best models available for coloring pictures, providing often a final colorized image that is better than the image obtained from the individual models.  
+This filter is able to combine the results provided by DeOldify and DDColor, which are some of the best models available for coloring pictures, providing often a final colorized image that is better than the image obtained from the individual models.  But the main strength of this filter is the addition of specialized filters to improve the quality of videos obtained by using these color models. 
 
 ## Quick Start
 
@@ -29,13 +29,15 @@ The models to download are:
 - ColorizeStable_gen.pth
 - ColorizeArtistic_gen.pth
 
-The _model files_ have to be copied in the **models** directory (which must be created manually the first time), usually located in:
+The _model files_ have to be copied in the **models** directory usually located in:
 
 .\Lib\site-packages\vsdeoldify\models
 
 At the first usage it is possible that are automatically downloaded by torch the neural networks: resnet101 and resnet34. 
 
-It is possible specify the destination directory of networks used by torch, by using the function parameter **torch\_hub\_dir**, if this parameter is set to **None**, the files will be downloaded in the torch cache dir, more details are available at: [caching-logic ](https://pytorch.org/docs/stable/hub.html#caching-logic).
+So don't be worried if at the first usage the filter will be very slow to start, at the initialization are loaded almost all the _Fastai_ and _PyTorch_ modules and the resnet networks.
+
+It is possible specify the destination directory of networks used by torch, by using the function parameter **torch\_hub\_dir**, if this parameter is set to **None**, the files will be downloaded in the _torch's cache_ dir, more details are available at: [caching-logic ](https://pytorch.org/docs/stable/hub.html#caching-logic).
 
 The models used by **DDColor** can be installed with the command
 
@@ -50,13 +52,15 @@ from vsdeoldify import ddeoldify
 # DeOldify  with DDColor weighed at 50%
 clip = ddeoldify(clip)
 # DeOldify only model
-clip = ddeoldify(clip, dd_weight=0.0)
+clip = ddeoldify(clip, dd_method=0)
+# DDColor only model
+clip = ddeoldify(clip, dd_method=1)
 
 ```
 
 See `__init__.py` for the description of the parameters.
 
-**NOTE**: In the _DDColor_ version included with **DDeoldify** the parameter _input_size_ has changed name in _dd_strength_ because I changed the range of values of this parameter to be equivalent to _render_factor_ in _Deoldify_, the relationship between these 2 parameters is the following:
+**NOTE**: In the _DDColor_ version included with **DDeoldify** the parameter _input_size_ has changed name in _dd_render_factor_ because I changed the range of values of this parameter to be equivalent to _render_factor_ in _Deoldify_, the relationship between these 2 parameters is the following:
 
 ```
 input_size = render_factor * 16
@@ -64,7 +68,41 @@ input_size = render_factor * 16
 
 ---
 
-## Comparison of Models ##
+## Filter Usage
+
+The filter was developed having in mind to use it mainly to colorize movies. Both Deoldify and DDcolor are good models for coloring pictures (see the _Comparison of Models_). But when are used for coloring movies they are introducing artifacts that usually are not  noticeable in the images.  Especially in dark scenes both Deoldify and DDcolor are not able to understand what it is the dark area and what color to give it, they often decide to color these dark areas with blue, then in the next frame this area could become red and then in the next frame return to blue, introducing a flashing psychedelic effect when all the frames are put in a movie.
+To try to solve this problem has been developed _pre-_ and _post-_ process filters.  It is possible to see them in the Hybrid screenshot below.
+
+![Hybrid Coloring page](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_D%2BD_filters.JPG)  
+
+The main filters introduced are:
+
+**Chroma Smoothing** : This filter allows to to reduce the _vibrancy_ of colors assigned by Deoldify/DDcolor by using the de-vibrancy/de-saturation parameters. The area impacted by the filter is defined by the thresholds dark/white. All the pixels with luma below the dark threshold will be impacted by the filter, while the pixels above the white threshold will be left untouched. All the pixels in the middle will be gradually impacted depending on the luma value.
+
+**Chroma Stabilization**: This filter will try to stabilize the frames colors. As explained previously since the frames are colored individually, the colors can change significantly from one frame to the next, introducing a disturbing psychedelic flashing effect. This filter try to reduce this by averaging the chroma component of the frames. The average is performed using a number of frames specified in the _Frames_ parameter. 
+Are implemented 3 averaging methods 
+
+1. _Center average_: the current frame is averaged using the past and future frames
+2. _Left average_: the current frame is averaged using only the past frames
+3. _Right average_: the current frame is averaged using only the future frames
+
+It is possible to apply this filter to the output of each coloring model and at the final output obtained by combining the color models (D+D). 
+ 
+### Merging the models
+
+As explained previously, this filter is able to combine the results provided by DeOldify and DDColor, to perform this combination has been implemented 4 methods:
+
+1. _Simple Merge_: the frames are combined using a _weighted merge_, where the parameter _merge_weight_ represent the weight assigned to the frames provided by the DDcolor model. 
+
+2. _Adaptive Luma Merge_: given that the DDcolor perfomance is quite bad on dark scenes, with this method the images are combined by decreasing the weight assigned to DDcolor frames when the luma is below the _luma_threshold_. For example with: luma_threshold = 0.6 and alpha = 1, the weight assigned to DDcolor frames will start to decrease linearly when the luma < 60% till _min_weight_. For _alpha_=2, the weight begins to decrease quadratically.      
+
+3. _Constrained Chroma Merge_:  given that the colors provided by Deoldify's _Video_ model are more conservative and stable than the colors obtained with DDcolor. The frames are combined by assigning a limit to the amount of difference in chroma values between Deoldify and DDcolor. This limit is defined by the parameter _threshold_. The limit is applied to the frame converted to "YUV". For example when threshold=0.1, the chroma    values "U","V" of DDcolor frame will be constrained to have an absolute percentage difference respect to "U","V" provided by Deoldify not higher than 10%.  
+
+ 4. _Luma Masked Merge_: the behaviour is similar to the method _Adaptive Luma Merge_. With this method the frames are combined using a _masked merge_. The pixels of DDColor's frame with luma < _luma_limit_  will be filled with the (de-saturated) pixels of Deoldify, while the pixels above the _white_limit_ threshold will be left untouched. All the pixels in the middle will be gradually replaced depending on the luma value. If the parameter _weight_ > 0 the resulting masked frames will be merged again with the non de-saturated frames of Deoldify using the _Simple Merge_.
+
+With the only exception of _Simple Merge_ all merging methods are levereging on the fact that usually the Deoldify _Video_ model provides frames which are more stable, this feature is exploited to stabilize also DDColor.
+
+## Comparison of Models
 
 Taking inspiration from the article published on Habr: [Mode on: Comparing the two best colorization AI's](https://habr.com/en/companies/ruvds/articles/568426/). I decided to use it to get the refence images and the images obtained using the [ColTran](https://github.com/google-research/google-research/tree/master/coltran) model, to extend the analysis with the models implemented in the **DDeoldify** filter.
 
@@ -84,11 +122,11 @@ The added models are:
 
 **T241**:  ColTran + TensorFlow 2.4.1 model as shown in [Habr](https://habr.com/en/companies/ruvds/articles/568426/)
 
-### Comparison Methodology ###
+### Comparison Methodology
 
 To compare the models I decided to use a metric being able to consider the _perceptual non-uniformities_ in the evaluation of color difference between images. These non-uniformities are important because the human eye is more sensitive to certain colors than others.  Over time, The International Commission on Illumination (**CIE**) has proposed increasingly advanced measurement models to measure the color distance taking into account the _human color perception_, that they called **dE**. One of the most advanced is the [CIEDE2000](https://en.wikipedia.org/wiki/Color_difference#CIEDE2000) method, that I decided to use as _color similarity metric_ to compare the models. The final results are shown in the table below (test image can be seen by clicking on the test number)
 
-### Test Set #1 ###
+### Test Set #1
 
 | Test # | D+D | DD | DS | DV  | T241 |
 |---|---|---|---|---|---|
@@ -123,7 +161,7 @@ The calculation of **dE** with the  **CIEDE2000** method was obtained by leverag
 As it is possible to see the model that performed better is the **D+D** model (which I called _DDelodify_ because is using both _Deoldify_ and _DDColor_). This model was the best model in 10 tests out of 23. Also the **DD** model performed well but there were situations where the **DD** model provided quite bad colorized images like in [Test #23](https://github.com/dan64/vs-deoldify/blob/main/test_images/Image_23_test.jpg) and the combination with the Deoldify allowed to significantly improve the final image. In effect the average distance of **DD** was **8.5** while for **DV** was **9.5**, given that the 2 models were weighted at 50%, if the images were positively correlated a value **9.0** would have been expected, instead the average distance measured for **D+D** was **8.3**, this implies that the 2 models were able to compensate each other. 
 Conversely, the **T241** was the model that performed worse with the greatest average difference in colors. Finally, the quality of Deoldify models was similar, being **DS** slightly better than **DV** (as expected).
 
-###  Tests Set #2 ### 
+###  Tests Set #2
 
 Given the goodness of  **CIEDE2000** method to provide a reliable estimate of _human color perception_, I decided to provide an additional set of tests including some of the cases not considered previously.
 
@@ -170,7 +208,7 @@ The results of this additional tests set are shown in the table below (test imag
 
 First of all, it should be noted that the individual models added (**DA** for _Deoldify_ and **DDs** for _DDColor_)  performed worse than the individual models tested in the previous analysis (**DS** for _Deoldify_ and **DD** for _DDColor_). Conversely all combinations of _Deoldify_ and _DDColor_ performed well.  Confirming the positive impact on the final result, already observed in the previous analysis, obtained by combining the 2 models. 
 
-## Conclusions ##
+## Conclusions
 
 In Summary **DDeoldify** is able to provide often a final colorized image that is better than the image obtained from the individual models, and can be considered an improvement respect to the current Models.  The suggested configuration for _video encoding_ is: 
 
@@ -178,11 +216,15 @@ In Summary **DDeoldify** is able to provide often a final colorized image that i
 
 willing to accept a decrease in encoding speed of about 40% it is possible to improve _a little_ the colorization process by using the configuration:
 
-* **DS+DD**: Deoldify (with model _Stable_ & render_factor = 30) + DDColor (with model _Artistic_ and render_factor = 30)
+* **DS+DD**: Deoldify (with model _Video_ & render_factor = 30) + DDColor (with model _Artistic_ and render_factor = 30)
+
+It is also suggested to enable the post-process filters: _Chroma Smoothing_ and _Chroma Stabilization_. Unfortunately is not possible provide a _one size fits-all solution_ and the filter parameters need to be adjusted depending on the type of video to be colored.  
 
 As a final consideration I would like to point out that the test results showed that the images coloring technology is mature enough to be used concretely both for coloring images and, thanks to **Hybrid**, videos.
 
+## Acknowledgements
 
+I would like to thank Selur, author of [Hybrid](https://www.selur.de/), for his wise advices and for having developed a gorgeous interface for this filter. Despite the large number of parameters and the complexity of managing them appropriately, the interface developed by Selur makes its use easy even for non-experts users.
 
 
   

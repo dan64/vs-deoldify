@@ -1,3 +1,18 @@
+"""
+------------------------------------------------------------------------------- 
+Author: Jason Antic
+Date: 2019-08-20
+version: 
+LastEditors: Dan64
+LastEditTime: 2024-02-29
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+module that contains the main functions to control deoldify's colorization process.
+This module has been modified to be compatible with Vapoursynth. All the calls to
+ffmpeg, youtube, matplotlib were removed because non necessary in Vapoursynth.
+All the interface functions has been changed to work with PIL images.
+"""
 from ..fastai.core import *
 from ..fastai.vision import *
 from .filters import IFilter, MasterFilter, ColorizerFilter
