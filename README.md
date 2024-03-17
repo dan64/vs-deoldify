@@ -65,7 +65,7 @@ See `__init__.py` for the description of the parameters.
 ```
 input_size = render_factor * 16
 ``` 
-Has been added also the option **chroma resize**, when this option is enabled, the frame size used for the models _inference_ will be used in all frames processing filters. This option allows to speed up the encoding by about 20%, but it has the disadvantage of canceling all changes made by the _post-process_ filters to the luma.
+Has been added also the option **chroma resize**, when this option is enabled, the frame size used for the models _inference_ will be used in all frames processing filters. This option allows to speed up the encoding of HD movies by about 150%, but it has the disadvantage of canceling all changes made by the _post-process_ filters on frames luminosity.
 
 ## Filter Usage
 
