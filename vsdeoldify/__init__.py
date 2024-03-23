@@ -368,7 +368,7 @@ def dd_video_stabilizer(clip: vs.VideoNode, chroma_resize: list = [False, 32], c
         clip_colored = darkness_tweak(clip_colored, dark_threshold=dark_threshold, white_threshold=white_threshold, dark_sat=dark_sat, dark_bright=dark_bright) 
     
     if colimit_enabled:
-        clip_colored = vs_clip_chroma_stabilizer(clip_colored, deviation = colimit_deviation)
+        clip_colored = vs_clip_chroma_stabilizer(clip_colored, deviation=colimit_deviation)
         
     if colstab_merge_enabled:
         clip_colored = _color_stabilizer_ex(clip_colored, nframes = colstab_nframes, mode=colstab_mode, steps=colstab_steps, scenechange = colstab_scenechange)
@@ -389,7 +389,8 @@ wrapper to function vs_clip_color_stabilizer() with management parameter "steps"
 """
 def _color_stabilizer_ex(clip: vs.VideoNode = None, nframes: int = 5, mode: str = "center", steps: int = 1, scenechange: bool = True) -> vs.VideoNode:
     
-    for int in range(0, steps+1):
+    max_steps = max(min(steps, 3), 1)
+    for i in range(0, max_steps):
         clip = vs_clip_color_stabilizer(clip, nframes = nframes, mode=mode, scenechange = scenechange)
             
     return clip
