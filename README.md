@@ -78,14 +78,19 @@ The main filters introduced are:
 
 **Chroma Smoothing** : This filter allows to to reduce the _vibrancy_ of colors assigned by Deoldify/DDcolor by using the parameters _de-saturation_ and _de-vibrancy_ (the effect on _vibrancy_ will be visible only if the option **chroma resize** is enabled, otherwise this parameter has effect on the _luminosity_). The area impacted by the filter is defined by the thresholds dark/white. All the pixels with luma below the dark threshold will be impacted by the filter, while the pixels above the white threshold will be left untouched. All the pixels in the middle will be gradually impacted depending on the luma value.
 
-**Chroma Stabilization**: This filter will try to stabilize the frames colors. As explained previously since the frames are colored individually, the colors can change significantly from one frame to the next, introducing a disturbing psychedelic flashing effect. This filter try to reduce this by averaging the chroma component of the frames. The average is performed using a number of frames specified in the _Frames_ parameter. 
+**Chroma Stabilization**: This filter will try to stabilize the frames' colors. As explained previously since the frames are colored individually, the colors can change significantly from one frame to the next, introducing a disturbing psychedelic flashing effect. This filter try to reduce this by averaging the chroma component of the frames. The average is performed using a number of frames specified in the _Frames_ parameter. 
 Are implemented 3 averaging methods 
 
-1. _Center average_: the current frame is averaged using the past and future frames
-2. _Left average_: the current frame is averaged using only the past frames
-3. _Right average_: the current frame is averaged using only the future frames
+1. _Arithmetic average_: the current frame is averaged using equal weights on the past and future frames
+2. _Weighted average_: the current frame is averaged using a weighed mean of the past and future frames, where the weight decrease with the time (far frames have lower weight respect to the nearest frames). 
+
 
 It is possible to apply this filter to the output of each coloring model and at the final output obtained by combining the color models (D+D). 
+
+**Chroma Limiter**: This filter will try to stabilize the frames' colors using a chroma temporal limiter: the filter will limit the chroma components of current frame to have an 
+absolute percentage deviation respect to the previous frame not higher than _alpha_  (called also _max_deviation_).  
+
+**Tweak Luma**: This filter is available only for DDColor and has been added because has been observed that the DDcolor's _inference_ is quite poor on dark scenes. This filter will force the luma of input image to don't be below the threshold defined by the parameter _Luma_min_. It will be also possible to apply to the input image a gamma correction, if the luma is below the value defined by the parameter _Gamma_min_.
  
 ### Merging the models
 
@@ -95,9 +100,9 @@ As explained previously, this filter is able to combine the results provided by 
 
 2. _Adaptive Luma Merge_: given that the DDcolor perfomance is quite bad on dark scenes, with this method the images are combined by decreasing the weight assigned to DDcolor frames when the luma is below the _luma_threshold_. For example with: luma_threshold = 0.6 and alpha = 1, the weight assigned to DDcolor frames will start to decrease linearly when the luma < 60% till _min_weight_. For _alpha_=2, the weight begins to decrease quadratically.      
 
-3. _Constrained Chroma Merge_:  given that the colors provided by Deoldify's _Video_ model are more conservative and stable than the colors obtained with DDcolor. The frames are combined by assigning a limit to the amount of difference in chroma values between Deoldify and DDcolor. This limit is defined by the parameter _threshold_. The limit is applied to the frame converted to "YUV". For example when threshold=0.1, the chroma    values "U","V" of DDcolor frame will be constrained to have an absolute percentage difference respect to "U","V" provided by Deoldify not higher than 10%.  
+3. _Constrained Chroma Merge_:  given that the colors provided by Deoldify's _Video_ model are more conservative and stable than the colors obtained with DDcolor. The frames are combined by assigning a limit to the amount of difference in chroma values between Deoldify and DDcolor. This limit is defined by the parameter _threshold_. The limit is applied to the frame converted to "YUV". For example when threshold=0.1, the chroma    values "U","V" of DDcolor frame will be constrained to have an absolute percentage difference respect to "U","V" provided by Deoldify not higher than 10%.  If _merge_weight_ is < 1.0, the chroma limited DDColor frames will be will be merged again with the frames of Deoldify using the _Simple Merge_.
 
- 4. _Luma Masked Merge_: the behaviour is similar to the method _Adaptive Luma Merge_. With this method the frames are combined using a _masked merge_. The pixels of DDColor's frame with luma < _luma_limit_  will be filled with the (de-saturated) pixels of Deoldify, while the pixels above the _white_limit_ threshold will be left untouched. All the pixels in the middle will be gradually replaced depending on the luma value. If the parameter _weight_ > 0 the resulting masked frames will be merged again with the non de-saturated frames of Deoldify using the _Simple Merge_.
+ 4. _Luma Masked Merge_: the behaviour is similar to the method _Adaptive Luma Merge_. With this method the frames are combined using a _masked merge_. The pixels of DDColor's frame with luma < _luma_limit_  will be filled with the (de-saturated) pixels of Deoldify, while the pixels above the _white_limit_ threshold will be left untouched. All the pixels in the middle will be gradually replaced depending on the luma value. If the parameter  _merge_weight_ is < 1.0, the resulting masked frames will be merged again with the non de-saturated frames of Deoldify using the _Simple Merge_.
 
 With the only exception of _Simple Merge_ all merging methods are levereging on the fact that usually the Deoldify _Video_ model provides frames which are more stable, this feature is exploited to stabilize also DDColor.
 
