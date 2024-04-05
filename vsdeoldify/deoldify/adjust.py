@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-03-23
+LastEditTime: 2024-04-05
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -26,9 +26,25 @@ Description:
 ------------------------------------------------------------------------------- 
 main function used to combine the colored images with deoldify() and ddcolor()
 """
-def combine_models(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, sat: list = [1,1], hue: list = [0,0], method: int = 0, clipb_weight: float = 0.5, luma_threshold: float = 0.6, alpha: float = 1.0, min_weight: float = 0.15, chroma_threshold: float = 0.2, luma_mask_limit: float = 0.4, luma_white_limit: float = 0.7, luma_mask_sat = 1.0) -> vs.VideoNode:
+def combine_models(clip_a: vs.VideoNode = None, clip_b: vs.VideoNode = None, method: int = 0, sat: list = [1,1], hue: list = [0,0], clipb_weight: float = 0.5, CMC_p: float = 0.2, LMM_p: list = [0.3, 0.6, 1.0], ALM_p: list = [0.3, 0.6, 1.0], invert_clips: bool = False) -> vs.VideoNode:
 
     #vs.core.log_message(2, "combine_models: method=" + str(method) + ", clipa = " + str(clipa) + ", clipb = " + str(clipb))
+    
+    # unpack combine_params
+    chroma_threshold = CMC_p
+    luma_mask_limit = LMM_p[0]
+    luma_white_limit = LMM_p[1]
+    luma_mask_sat = LMM_p[2] 
+    luma_threshold = ALM_p[0]
+    alpha = ALM_p[1]
+    min_weight = ALM_p[2]
+
+    if invert_clips:
+        clipa = clip_b
+        clipb = clip_a
+    else:
+        clipa = clip_a
+        clipb = clip_b 
     
     if clipa is not None:
         clipa = tweak(clipa, hue=hue[0], sat=sat[0])
@@ -41,11 +57,11 @@ def combine_models(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, sat: 
     if method == 2:
         return SimpleMerge(clipa, clipb, clipb_weight)
     if method == 3:
-        return AdaptiveLumaMerge(clipa, clipb, luma_threshold, alpha, clipb_weight, min_weight)
-    if method == 4:
         return ConstrainedChromaMerge(clipa, clipb, clipb_weight, chroma_threshold)    
+    if method == 4:
+        return LumaMaskedMerge(clipa, clipb, luma_mask_limit, luma_white_limit, luma_mask_sat, clipb_weight) 
     if method == 5:
-        return LumaMaskedMerge(clipa, clipb, luma_mask_limit, luma_white_limit, luma_mask_sat, clipb_weight)    
+        return AdaptiveLumaMerge(clipa, clipb, luma_threshold, alpha, clipb_weight, min_weight)
     else:
         raise vs.Error("deoldify: only dd_method=(0,5) is supported")
 """
@@ -164,8 +180,7 @@ Description:
 The the pixels with luma below dark_threshold will be desaturared to level defined
 by the dark_sat parameter.
 """
-def darkness_tweak(clip: vs.VideoNode = None, dark_threshold: float = 0.3, white_threshold: float = 0.6, dark_sat: float = 0.8, dark_bright: float = -0.10) -> vs.VideoNode:  
-    
+def vs_chroma_bright_tweak(clip: vs.VideoNode = None, dark_threshold: float = 0.3, white_threshold: float = 0.6, dark_sat: float = 0.8, dark_bright: float = -0.10) -> vs.VideoNode:      
     def merge_frame(n, f, dark_limit: float = 0.3, white_limit: float = 0.6, dark_bright: float = -0.10, dark_sat: float = 0.8):                
         img1 = frame_to_image(f)
         img2 = image_tweak(img1, bright=dark_bright, sat=dark_sat) 
@@ -176,18 +191,6 @@ def darkness_tweak(clip: vs.VideoNode = None, dark_threshold: float = 0.3, white
         return image_to_frame(img_m, f.copy())                
     return clip.std.ModifyFrame(clips=clip, selector=partial(merge_frame, dark_limit=dark_threshold, white_limit=white_threshold, dark_bright=dark_bright, dark_sat=dark_sat))
 
-def vs_darkness_tweak(clip: vs.VideoNode = None, dark_threshold: float = 0.3, white_threshold: float = 0.6, dark_sat: float = 0.2, dark_bright: float = -0.01) -> vs.VideoNode: 
-    
-    clip_dark = tweak(clip, bright=dark_bright, sat=dark_sat)
-    def merge_frame(n, f, dark_limit: float = 0.3, white_limit: float = 0.6):                
-        img1 = frame_to_image(f[0])
-        img2 = frame_to_image(f[1]) 
-        if dark_limit == white_limit:
-            img_m = image_luma_merge(img2, img1, dark_limit)
-        else:
-            img_m = w_image_luma_merge(img2, img1, dark_limit, white_limit)
-        return image_to_frame(img_m, f[0].copy())                
-    return clip.std.ModifyFrame(clips=[clip, clip_dark], selector=partial(merge_frame, dark_limit = dark_threshold, white_limit = white_threshold))    
 """
 ------------------------------------------------------------------------------- 
 Author: Dan64
@@ -198,14 +201,14 @@ This function force the average luma of a video clip to don't be below the value
 defined by the parameter "luma_min". The function allow to modify the gamma
 of the clip if the average luma is below the parameter "gamma_luma_min"  
 """
-def constrained_tweak(clip: vs.VideoNode = None, luma_min: float = 0.1, gamma: float = 1, gamma_luma_min: float = 0) -> vs.VideoNode:
+def constrained_tweak(clip: vs.VideoNode = None, luma_min: float = 0.1, gamma: float = 1, gamma_luma_min: float = 0, gamma_alpha: float = 0, gamma_min: float = 0.5) -> vs.VideoNode:
 
-    def change_frame(n, f, luma_min: float = 0.1, gamma: float = 1, gamma_luma_min: float = 0):    
+    def change_frame(n, f, luma_min: float = 0.1, gamma: float = 1, gamma_luma_min: float = 0, gamma_alpha: float = 0, gamma_min: float = 0.5):    
         img = frame_to_image(f)       
-        img_m = luma_adjusted_levels(img, luma_min, gamma, gamma_luma_min)
+        img_m = luma_adjusted_levels(img, luma_min, gamma, gamma_luma_min, gamma_alpha, gamma_min)
         return image_to_frame(img_m, f.copy())                
 
-    clipm = clip.std.ModifyFrame(clips=clip, selector=partial(change_frame, luma_min=luma_min, gamma=gamma, gamma_luma_min=gamma_luma_min))
+    clipm = clip.std.ModifyFrame(clips=clip, selector=partial(change_frame, luma_min=luma_min, gamma=gamma, gamma_luma_min=gamma_luma_min, gamma_alpha=gamma_alpha, gamma_min=gamma_min))
 
     return clipm
 
@@ -217,7 +220,7 @@ Description:
 ------------------------------------------------------------------------------- 
 Function to copy the luma of video Clip "orig" in the video "clip" 
 """
-def recover_clip_luma(orig: vs.VideoNode = None, clip: vs.VideoNode = None) -> vs.VideoNode:
+def vs_recover_clip_luma(orig: vs.VideoNode = None, clip: vs.VideoNode = None) -> vs.VideoNode:
     def copy_luma_frame(n, f):    
         img_orig = frame_to_image(f[0])
         img_clip = frame_to_image(f[1])        
@@ -413,7 +416,17 @@ def image_weighted_merge(img1: Image, img2: Image, weight: float = 0.5) -> Image
             
     return Image.fromarray(img_new)
 
+def np_weighted_merge(img1_np: np.ndarray, img2_np: np.ndarray, weight: float = 0.5) -> Image:
+    
+    img_new = np.copy(img1_np)
 
+    img_m = np.multiply(img1_np, 1-weight).clip(0, 255).astype(int) + np.multiply(img2_np, weight).clip(0, 255).astype(int)  
+    img_new[:, :, 0] = img_m[:, :, 0]
+    img_new[:, :, 1] = img_m[:, :, 1]
+    img_new[:, :, 2] = img_m[:, :, 2]
+            
+    return img_new
+    
 """
 ------------------------------------------------------------------------------- 
 Author: Dan64
@@ -569,7 +582,7 @@ This function force the average luma of an image to don't be below the value
 defined by the parameter "luma_min". The function allow to modify the gamma
 of image if the average luma is below the parameter "gamma_luma_min"  
 """
-def luma_adjusted_levels(img: Image, luma_min: float = 0, gamma: float = 1.0, gamma_luma_min : float = 0, i_min: int = 16, i_max: int = 235)  -> float:
+def luma_adjusted_levels(img: Image, luma_min: float = 0, gamma: float = 1.0, gamma_luma_min: float = 0, gamma_alpha: float = 0, gamma_min: float = 0.2, i_min: int = 0, i_max: int = 255) -> Image:
         
     img_np = np.asarray(img)
     
@@ -594,7 +607,11 @@ def luma_adjusted_levels(img: Image, luma_min: float = 0, gamma: float = 1.0, ga
         y_new = y
     
     if gamma != 1 and luma < gamma_luma_min:
-        y_new = np.power(y_new / 255, 1/gamma)
+        if gamma_alpha != 0:
+            g_new = max(gamma * pow(luma/gamma_luma_min, gamma_alpha), gamma_min)
+        else:
+            g_new = gamma
+        y_new = np.power(y_new / 255, 1/g_new)
         y_new = np.multiply(y_new, 255).clip(i_min, i_max).astype(int) 
 
     yuv_new[:, :, 0] = y_new
@@ -868,7 +885,7 @@ Function which try to stabilize the colors of a clip using color temporal stabil
 As stabilizer is used the Vapoursynth function "std.AverageFrames()", the mode, can
 be: "arithmetic", "weighted"
 """
-def vs_clip_color_stabilizer(clip: vs.VideoNode = None, nframes: int = 5, mode: str = "weighted", scenechange: bool = True) -> vs.VideoNode:
+def vs_clip_color_stabilizer(clip: vs.VideoNode = None, nframes: int = 5, mode: str = "A", scenechange: bool = True) -> vs.VideoNode:
 
     if nframes%2==0:
         nframes +=1
@@ -876,9 +893,9 @@ def vs_clip_color_stabilizer(clip: vs.VideoNode = None, nframes: int = 5, mode: 
     N = max(3, min(nframes, 15))
     
     match mode:
-        case "arithmetic" | "center":       # for compatibility with version 2.0.0
+        case "A" | "arithmetic" | "center":       # for compatibility with version 2.0.0
             weight_list = _build_avg_arithmetic(N) 
-        case "weighted" | "left" | "right": # for compatibility with version 2.0.0
+        case "W" | "weighted" | "left" | "right": # for compatibility with version 2.0.0
             weight_list = _build_avg_weighted(N)
         case _:
             raise vs.Error("ddeoldify: unknown average method: " + mode)    
@@ -888,10 +905,53 @@ def vs_clip_color_stabilizer(clip: vs.VideoNode = None, nframes: int = 5, mode: 
     # convert the clip format for AverageFrames to YUV    
     clip_yuv = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="limited")   
     # apply AverageFrames to YUV colorspace      
-    clip_yuv = vs.core.std.AverageFrames(clip_yuv, weight_list, scenechange = True, planes=[1,2])  
+    clip_yuv = vs.core.std.AverageFrames(clip_yuv, weight_list, scale = 100, scenechange = scenechange, planes=[1,2])  
     # convert the clip format for deoldify to RGB24 
     clip_rgb = clip_yuv.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="limited", dither_type="error_diffusion") 
         
+    return clip_rgb
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description: 
+------------------------------------------------------------------------------- 
+Filter which try to stabilize the colors of a clip using color temporal stabilizer.
+The stabilization is performed by averaging past/future frames. Since the non matched
+areas of past/future frames are gray because is missing in the past/future the color 
+information, the filter will fill the gray areas with the pixels of current frames 
+(eventually de-saturated with the parameter "sat"). The image restored in this way is
+blended with the non restored image using the parameter "weight" (if =0 no blending 
+is applied). The gray areas are selected by the threshold parameter "tht". All the pixels
+in the HSV color space with "S" < "tht" will be considered gray. If "tht=0" no color
+frame restore is applied.
+"""
+def vs_chroma_stabilizer_ex(clip: vs.VideoNode = None, nframes: int = 5, mode: str = "A", sat: float = 1.0, tht: int = 0, weight: float = 0.5, tht_scen: float = 0.8, algo: int = 0) -> vs.VideoNode:
+
+    if tht == 0:
+        return vs_clip_color_stabilizer(clip, nframes, mode, scenechange=True)
+        
+    if nframes%2==0:
+        nframes +=1
+        
+    N = max(3, min(nframes, 15))
+    
+    match mode:
+        case "A" | "arithmetic" | "center":       # for compatibility with version 2.0.0
+            weight_list = _build_avg_arithmetic(N) 
+        case "W" | "weighted" | "left" | "right": # for compatibility with version 2.0.0
+            weight_list = _build_avg_weighted(N)
+        case _:
+            raise vs.Error("ddeoldify: unknown average method: " + mode)    
+    
+    #vs.core.log_message(2, "algo= " + str(algo)) 
+    
+    if algo == 0:
+        clip_rgb = _average_clips_ex(clip=clip, weight_list=weight_list, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen)
+    else:
+        clip_rgb = _average_frames_ex(clip=clip, weight_list=weight_list, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen)
+         
     return clip_rgb
 
 def _build_avg_arithmetic(nframes: int = 5) -> list:
@@ -946,7 +1006,7 @@ Description:
 Function to which try to stabilize the chroma of a clip using chroma temporal limiter,
 the chroma of current frame will be forced to be inside the range defined by max_deviation  
 """
-def vs_clip_chroma_stabilizer(clip: vs.VideoNode = None, deviation: float = 0.05) -> vs.VideoNode:
+def vs_chroma_limiter(clip: vs.VideoNode = None, deviation: float = 0.05) -> vs.VideoNode:
     max_deviation = max(min(deviation, 0.5), 0.01)
     def limit_chroma_frame(n, f, clip_base: vs.VideoNode = None, max_deviation: float = 0.05):
         f_out = f.copy()
@@ -1023,38 +1083,137 @@ def _chroma_temporal_limiter(cur_img: Image, prv_img: Image, alpha: float = 0.05
 ------------------------------------------------------------------------------- 
 Author: Dan64
 ------------------------------------------------------------------------------- 
-Description: ONLY FOR TESTING 
+Description:
 ------------------------------------------------------------------------------- 
 Function which try to stabilize the colors of a clip using color temporal stabilizer,
-the colors of current frame will be averaged with the ones of previous frames
-(very slow).  
+the colors of current frame will be averaged with the ones of previous frames.  
+(based on ModifyFrame)
 """
-def _average_frames(clip: vs.VideoNode = None, weight_list: list = None) -> vs.VideoNode:
+def _average_frames_ex(clip: vs.VideoNode = None, weight_list: list = None, sat: float = 1.0, tht: int = 0, weight: float = 0.2, tht_scen: float = 0.8) -> vs.VideoNode:
     
-    def smooth_frame(n, f, clip_base: vs.VideoNode = None, weight_list: list = None):
+    def smooth_frame(n, f, clip_base: vs.VideoNode = None, weight_list: list = None, sat: float = 1.0, tht: int = 0, weight: float = 0.2, tht_scen: float = 0.8) -> vs.VideoFrame:
         max_frames = len(weight_list)
+        tot_frames = clip_base.num_frames - 10
         f_out = f.copy()
-        if n < max_frames:
+        if n < max_frames or n > tot_frames:
             return f_out
         img_f = list()
+        img_base = frame_to_image(f)
         Nh = round((max_frames-1)/2)
         for i in range(0, Nh):
             Ni = n - (Nh - i)
-            img_f.append(frame_to_image(clip_base.get_frame(Ni)))
-        img_f.append(frame_to_image(f))
+            img_f.append(restore_color(img_base, frame_to_image(clip_base.get_frame(Ni)), sat, tht, weight, tht_scen))
+        img_f.append(img_base)
         for i in range(0, Nh):
-            Ni = n + (i+1)        
-            img_f.append(frame_to_image(clip_base.get_frame(Ni)))
+            Ni = n + (i+1)
+            img_f.append(restore_color(img_base, frame_to_image(clip_base.get_frame(Ni)), sat, tht, weight, tht_scen))
         img_m = _color_temporal_stabilizer(img_f, weight_list)
         return image_to_frame(img_m, f_out)    
-    clip = clip.std.ModifyFrame(clips=[clip], selector=partial(smooth_frame, clip_base=clip, weight_list=weight_list))
+    clip = clip.std.ModifyFrame(clips=[clip], selector=partial(smooth_frame, clip_base=clip, weight_list=weight_list, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen))
     return clip
 
 """
 ------------------------------------------------------------------------------- 
 Author: Dan64
 ------------------------------------------------------------------------------- 
-Description: ONLY FOR TESTING
+Description:
+------------------------------------------------------------------------------- 
+Function which try to stabilize the colors of a clip using color temporal stabilizer,
+the colors of current frame will be averaged with the ones of previous frames.
+(based on AverageFrames)
+"""
+def _average_clips_ex(clip: vs.VideoNode = None, weight_list: list = None, sat: float = 1.0, tht: int = 0, weight: float = 0.2, tht_scen: float = 0.8) -> vs.VideoNode:
+
+    max_frames = len(weight_list)
+    clips = list()
+    clip_yuv = clip.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="limited", dither_type="error_diffusion")
+    Nh = round((max_frames-1)/2)
+    for i in range(0, Nh):
+        Ni = -(Nh - i)
+        clip_i = vs_get_clip_frame(clip=clip, nframe=Ni)
+        clip_i = vs_recover_clip_color(clip=clip_i, clip_color=clip, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen, return_mask=False)
+        clips.append(clip_i.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="limited", dither_type="error_diffusion"))
+    clips.append(clip_yuv)
+    for i in range(0, Nh):
+        Ni = i + 1
+        clip_i = vs_get_clip_frame(clip=clip, nframe=Ni)
+        clip_i = vs_recover_clip_color(clip=clip_i, clip_color=clip, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen, return_mask=False)
+        clips.append(clip_i.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="limited", dither_type="error_diffusion"))
+    clip_avg = vs.core.std.AverageFrames(clips=clips, weights=weight_list, scale=100, planes=[1,2]) 
+    # convert the clip format for deoldify to RGB24 
+    clip_rgb = clip_avg.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="limited", dither_type="error_diffusion") 
+    
+    return clip_rgb
+    
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+wrapper to function AverageFrames() to get frames fast.
+"""    
+def vs_get_clip_frame(clip: vs.VideoNode, nframe: int = 0) -> vs.VideoNode:
+    
+    if nframe == 0:
+        return clip
+    
+    n = abs(nframe)
+    
+    if n > 15:
+        raise vs.Error("ddeoldify: nframe must be between: -15, +15")
+    
+    weights_list = list()
+    
+    for i in range(-n, n+1):
+        if (i == nframe):
+            weights_list.append(100)
+        else:
+            weights_list.append(0)
+    
+    vs_format = clip.format.id
+    
+    # clip converted
+    clip_yuv = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="limited")    
+    
+    # apply AverageFrames to YUV colorspace      
+    clip_yuv = vs.core.std.AverageFrames(clip_yuv, weights_list, scale = 100, scenechange = False, planes=[1,2])  
+    
+    # convert to the original clip format
+    if (clip.format.color_family == "YUV"):
+        clip = clip_yuv.resize.Bicubic(format=vs_format)     
+    else:
+        clip = clip_yuv.resize.Bicubic(format=vs_format, matrix_in_s="709", range_s="limited", dither_type="error_diffusion")
+    
+    return clip
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description: 
+------------------------------------------------------------------------------- 
+wrapper to function restore_color() to restore gray frames.
+""" 
+def vs_recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = None, sat: float = 1.0, tht: int = 0, 
+    weight: float = 0.2, tht_scen: float = 0.8, return_mask: bool = False) -> vs.VideoNode:
+  
+    def color_frame(n, f, sat: float = 1.0, tht: int = 0, weight: float = 0.2, tht_scen: float = 0.8, return_mask: bool = False):        
+        f_out = f[0].copy()        
+        if n < 15:
+            return f_out        
+        img_gray = frame_to_image(f[0])
+        img_color = frame_to_image(f[1])
+        img_restored = restore_color(img_color, img_gray, sat, tht, weight, tht_scen, return_mask)
+        return image_to_frame(img_restored, f_out)    
+    clip = clip.std.ModifyFrame(clips=[clip, clip_color], selector=partial(color_frame, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen, return_mask=return_mask))
+    return clip
+    
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
 ------------------------------------------------------------------------------- 
 Temporal color stabilizer the UV chroma of current frame are averaged with the
 values of previous "nframes"  
@@ -1086,6 +1245,43 @@ def _color_temporal_stabilizer(img_f: list, weight_list: list = None) -> Image:
     yuv_new[:, :, 2] = yuv_m[:, :, 2]
             
     return Image.fromarray(cv2.cvtColor(yuv_new, cv2.COLOR_YUV2RGB))
+ 
+def restore_color(img_color: Image = None, img_gray: Image = None, sat: float=1.0, tht: int = 80, weight: float = 0, tht_scen=0.8, return_mask: bool=False) -> Image:
+      
+    np_color = np.asarray(img_color)
+    np_gray = np.asarray(img_gray)
+       
+    hsv_color = cv2.cvtColor(np_color, cv2.COLOR_RGB2HSV)
+    hsv_gray = cv2.cvtColor(np_gray, cv2.COLOR_RGB2HSV)
+    
+    # desatured the color image
+    hsv_color[:, :, 1] = hsv_color[:, :, 1] * min(max(sat, 0), 1)
+    
+    np_color_sat = cv2.cvtColor(hsv_color, cv2.COLOR_HSV2RGB)
+    
+    hsv_s = hsv_gray[:, :, 1]
+    
+    hsv_mask = np.where(hsv_s < tht, 255, 0) # white only gray pixels
+    
+    scenechange = np.mean(hsv_mask)/255
+    
+    if (tht_scen > 0 and tht_scen < 1 and  scenechange > tht_scen):
+        return np_gray
+    
+    mask_rgb = np_gray.copy();
+    
+    for i in range(3):
+        mask_rgb[:,:,i] = hsv_mask
+    
+    if return_mask:
+        return Image.fromarray(mask_rgb,'RGB').convert('RGB') 
+        
+    np_restored = np_image_mask_merge(np_gray, np_color_sat, mask_rgb)
+    
+    if weight > 0:
+        np_restored = np_weighted_merge(np_restored, np_gray, weight)
+    
+    return Image.fromarray(np_restored,'RGB').convert('RGB') 
 
 """
 ------------------------------------------------------------------------------- 

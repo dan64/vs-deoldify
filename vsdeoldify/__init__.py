@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-03-23
+LastEditTime: 2024-04-05
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -24,7 +24,6 @@ from .deoldify.device_id import DeviceId
 
 from .deoldify.visualize import *
 from .deoldify.adjust import *
-from vsddcolor import ddcolor
 
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, message=".*?Your .*? set is empty.*?")
@@ -33,7 +32,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, message="Arguments oth
 warnings.filterwarnings("ignore", category=UserWarning, message="Arguments other than a weight enum or `None`.*?")
 warnings.filterwarnings("ignore", category=UserWarning, message="torch.nn.utils.weight_norm is deprecated.*?")
 
-__version__ = "2.0.1"
+__version__ = "3.0.0"
 
 package_dir = os.path.dirname(os.path.realpath(__file__))
 model_dir = os.path.join(package_dir, "models")
@@ -42,6 +41,7 @@ model_dir = os.path.join(package_dir, "models")
 torch.backends.cudnn.benchmark=True
 
 import vapoursynth as vs
+
 
 """
 ------------------------------------------------------------------------------- 
@@ -52,95 +52,95 @@ Description:
 wrapper to deoldify() functions with additional filters pre-process and post-process
 """
 def ddeoldify(
-    clip: vs.VideoNode, model: int = 0, render_factor: int = 24, sat: list = [1.0,1.0], hue: list = [0.0,0.0], dd_model: int = 1, dd_render_factor: int = 24, dd_tweak_luma_bind: list = [False, 0.4, 0.4], dd_tweak_bright: float = 0.0, dd_tweak_cont: float = 1, dd_tweak_gamma: float = 1.0, dd_method: int = 2, merge_weight: float = 0.5, dd_method_params: list = [0.6, 2.0, 0.15, 0.2, False], chroma_resize: bool = True, luma_mask: list = [0.3, 0.6, 1.0], dark_darkness: list = [False, 0.1, 0.2, 0.5, 0.8], color_stabilizer: list = [False, False, False, 5, 'arithmetic', True], color_limiter: list = [False, 0.02], device_index: int = 0, n_threads: int = 8, dd_num_streams: int = 1, torch_hub_dir: str = model_dir, stack_frames: bool = True) -> vs.VideoNode:
-    """A Deep Learning based project for colorizing and restoring old images and video 
+    clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = [0, 24, 1.0, 0.0], ddcolor_p: list = [1, 24, 1.0, 0.0, True], ddtweak: bool = False, ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.2, 0.5, 1.5, 0.5],  cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0], alm_p: list = [0.8, 1.0, 0.15], dark: bool = False, dark_p: list = [0.3, 0.8], cmb_sw: bool = False, device_index: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
+    """A Deep Learning based project for colorizing and restoring old images and video using Deoldify and DDColor 
 
-    :param clip:               clip to process, only RGB24 format is supported.
-    :param model:              deoldify model to use (default = 0):
-                                  0 = ColorizeVideo_gen
-                                  1 = ColorizeStable_gen
-                                  2 = ColorizeArtistic_gen
-    :param render_factor:      render factor for the model, range: 10-44 (default = 24).
-    :param sat:                list with the saturation parameters to apply to color models (default = [1,1])
-                                  [0] : saturation for deoldify, range [0-10] 
-                                  [1] : saturation for ddcolor, range [0-10]                                  
-    :param hue:                list with the hue parameters to apply to color models (default = [0,0])    
-                                  [0] : hue for deoldify
-                                  [1] : hue for ddcolor                    
-    :param dd_model:           ddcolor model (default = 1): 
-                                  0 = ddcolor_modelscope, 
-                                  1 = ddcolor_artistic
-    :param dd_render_factor:   ddcolor input size equivalent to render_factor, if = 0 will be auto selected 
-                                (default = 24) [range: 0, 10-64] 
-    :param dd_tweak_luma_bind: parameters for luma constrained ddcolor preprocess
-                                  [0] : luma_constrained_tweak -> luma constrained ddcolor preprocess enabled (default = False), range: [True, False]
-                                            when enaabled the average luma of a video clip will be forced to don't be below the value
-                                            defined by the parameter "luma_min". The function allow to modify the gamma
-                                            of the clip if the average luma is below the parameter "gamma_luma_min"      
-                                  [1] : luma_min -> luma (%) min value for tweak activation (default = 0, non activation), range [0-1]
-                                  [2] : gamma_luma_min -> luma (%) min value for gamma tweak activation (default = 0, non activation), range [0-1]
-    :param dd_tweak_bright     ddcolor tweak's bright (default = 0)
-    :param dd_tweak_cont       ddcolor tweak's constrast (default = 1)
-    :param dd_tweak_gamma      ddcolor tweak's gamma (default = 1)                                  
-    :param dd_method:          method used to combine deoldify with ddcolor (default = 2): 
-                                  0 : deoldify only (no merge)
-                                  1 : ddcolor only (no merge)                                 
-                                  2 : Simple Merge: 
-                                        the images are combined using a weighted merge, where the parameter clipb_weight
-                                        represent the weight assigned to the colors provided by ddcolor() 
-                                  3 : Adaptive Luma Merge:
+    :param clip:                clip to process, only RGB24 format is supported.
+    :param method:              method used to combine deoldify() with ddcolor() (default = 2): 
+                                    0 : deoldify only (no merge)
+                                    1 : ddcolor only (no merge)                                 
+                                    2 : Simple Merge (default): 
+                                        the frames are combined using a weighted merge, where the parameter "mweight"
+                                        represent the weight assigned to the colors provided by the ddcolor() frames.
+                                        With this method is suggested a starting weight < 50% (ex. = 40%).                                         
+                                    3 : Constrained Chroma Merge:
+                                        given that the colors provided by deoldify() are more conservative and stable 
+                                        than the colors obtained with ddcolor(). The frames are combined by assigning
+                                        a limit to the amount of difference in chroma values between deoldify() and
+                                        ddcolor() this limit is defined by the threshold parameter "cmc_tresh". 
+                                        The limit is applied to the image converted to "YUV". For example when 
+                                        cmc_tresh=0.2, the chroma values "U","V" of ddcolor() frame will be constrained 
+                                        to have an absolute percentage difference respect to "U","V" provided by deoldify()
+                                        not higher than 20%. The final limited frame will be merged again with the deoldify()
+                                        frame. With this method is suggested a starting weight > 50% (ex. = 60%).                                         
+                                    4 : Luma Masked Merge:   
+                                        the frames are combined using a masked merge, the pixels of ddcolor() with luma < "luma_mask_limit"
+                                        will be filled with the pixels of deoldify(). If "luma_white_limit" > "luma_mask_limit" the mask will 
+                                        apply a gradient till "luma_white_limit". If the parameter "mweight" > 0 the final masked frame will 
+                                        be merged again with the deoldify() frame. With this method is suggested a starting weight > 60%
+                                        (ex. = 70%).
+                                    5 : Adaptive Luma Merge:
                                         given that the ddcolor() perfomance is quite bad on dark scenes, the images are 
-                                        combinaed by decreasing the weight assigned to ddcolor() when the luma is 
-                                        below a given threshold given by: luma_threshold. 
+                                        combined by decreasing the weight assigned to ddcolor() when the luma is 
+                                        below a given threshold given by: luma_threshold. The weight is calculated using
+                                        the formula: merge_weight = max(mweight * (luma/luma_threshold)^alpha, min_weight).
                                         For example with: luma_threshold = 0.6 and alpha = 1, the weight assigned to 
                                         ddcolor() will start to decrease linearly when the luma < 60% till "min_weight".
-                                        For alpha=2, begins to decrease quadratically.      
-                                  4 : Constrained Chroma Merge:
-                                        given that the colors provided by deoldify() are more conservative and stable 
-                                        than the colors obtained with ddcolor() images are combined by assigning
-                                        a limit to the amount of difference in chroma values between deoldify() and
-                                        ddcolor() this limit is defined by the parameter threshold. The limit is applied
-                                        to the image converted to "YUV". For example when threshold=0.1, the chroma
-                                        values "U","V" of ddcolor() image will be constrained to have an absolute
-                                        percentage difference respect to "U","V" provided by deoldify() not higher than 10%  
-                                  5 : Luma Masked Merge:   
-                                        the clips are combined using a mask merge, the pixels of clipb with luma < luma_mask_limit
-                                        will be filled with the pixels of clipa, if the parameter clipm_weight > 0
-                                        the masked image will be merged with clipa  
-    :param ddcolor_weight      weight given to ddcolor clip in all merge methods, range [0-1] (0.01=1%)                                    
-    :param dd_method_params:   list with the parameters to apply to selected dd_method:
-                                 [0] : luma_threshold, used by: AdaptiveLumaMerge, range [0-1] (0.01=1%) 
-                                 [1] : alpha (float), used by: AdaptiveLumaMerge, range [>0] 
-                                 [2] : min_weight, used by: AdaptiveLumaMerge, range [0-1] (0.01=1%) 
-                                 [3] : chroma_threshold (%), used by: ConstrainedChromaMerge range [0-1] (0.01=1%) 
-                                 [4] : if true invert the clip order in the Merge methods
-    :param chroma_resize:      if True will be enabled the chroma_resize: the cololorization will be applied to a clip with the same 
-                               size used for the models inference(), but the final resolution will be the one of the original clip.
-    :param luma_mask:          parameters for method: Luma Masked Merge (dd_method=5)
-                                 [0] : luma_mask_limit, luma limit for build the mask used in Luma Masked Merge, range [0-1] (0.01=1%) 
-                                 [1] : luma_white_limit, if > luma_mask_limit will be applied a gradient till luma_white_limit, range [0-1] (0.01=1%)
-                                 [2] : luma_mask_sat: if < 1 the ddcolor dark pixels will substitute with the desaturated deoldify pixels, range [0-1] (0.01=1%) 
-    :param dark_darkness:      parameters for dark the portion of the clip with luma below a given threshold
-                                 [0] : darkness_enabled (bool), if true the filter is enabled 
-                                 [1] : dark_threshold, luma threshold to select the dark area, range [0-1] (0.01=1%)  
-                                 [2] : white_threshold, if > dark_threshold will be applied a gradient till white_threshold, range [0-1] (0.01=1%)  
-                                 [3] : dark_sat: amount of desaturation to apply to the dark area, range [0-1] 
-                                 [4] : dark_bright (float): darkness parameter it used to reduce the "V" component in "HSV" colorspace, range [0, 1] 
-    :param color_stabilizer:   parameters for the temporal color stabilizer
-                                 [0] : colstab_merge_enabled (bool), if true the filter will be applied after the merge of Deoldify and DDColor
-                                 [1] : colstab_deoldify_enabled (bool), if true the filter will be applied after Deoldify
-                                 [2] : colstab_ddcolor_enabled (bool), if true the filter will be applied after DDColor
-                                 [3] : colstab_nframes, number of frames to be used in the stabilizer, range[3-15]
-                                 [4] : colstab_mode, type of average used by the stabilizer: range['arithmetic', 'weighted']                                 
-                                 [5] : colstab_scenechange, if true the futures frames will not be used in case of scene change detection, range [True,False] 
-    :param color_limiter:      parameters for the temporal color limiter
-                                     [0] : colimit_enabled (bool), if true the filter will be applied after the merge of Deoldify and DDColor
-                                     [1] : colimit_deviation, chroma of current frame will be forced to be inside the range defined by "deviation", range[0.01-0.5]
-    :param device_index:       device ordinal of the GPU, choices: GPU0...GPU7, CPU=99 (default = 0)
-    :param n_threads:          number of threads used by numpy, range: 1-32 (default = 8)
-    :param dd_num_streams:     number of CUDA streams to enqueue the kernels (default = 1)
-    :param torch_hub_dir:      torch hub dir location, default is model directory,
-                               if set to None will switch to torch cache dir.
+                                        For alpha=2, begins to decrease quadratically (because luma/luma_threshold < 1).
+                                        With this method is suggested a starting weight > 70% (ex. = 80%).                                         
+                                    The methods 3 and 4 are similar to Simple Merge, but before the merge with deoldify()
+                                    the ddcolor() frame is limited in the chroma changes (method 3) or limited based on the luma
+                                    (method 4). The method 5 is a Simple Merge where the weight decrease with luma.         
+    :param mweight:             weight given to ddcolor's clip in all merge methods, range [0-1] (0.01=1%) 
+    :param deoldify_p:          parameters for deoldify():            
+                                   [0] deoldify model to use (default = 0):
+                                       0 = ColorizeVideo_gen
+                                       1 = ColorizeStable_gen
+                                       2 = ColorizeArtistic_gen
+                                   [1] render factor for the model, range: 10-44 (default = 24).
+                                   [2] saturation parameter to apply to deoldify color model (default = 1)
+                                   [3] hue parameter to apply to deoldify color model (default = 0)
+    :param ddcolor_p:           parameters for ddcolor(): 
+                                   [0] ddcolor model (default = 1): 
+                                       0 = ddcolor_modelscope, 
+                                       1 = ddcolor_artistic
+                                   [1] render factor for the model, if=0 will be auto selected 
+                                       (default = 24), range: [0, 10-64] 
+                                   [2] saturation parameter to apply to deoldify color model (default = 1)
+                                   [3] hue parameter to apply to deoldify color model (default = 0)
+                                   [4] enable/disable FP16 in ddcolor inference
+    :param ddtweak:             enabled/disable tweak parameters for ddcolor(), range [True,False]                                   
+    :param ddtweak_p:           tweak parameters for ddcolor():                                   
+                                   [0] : ddcolor tweak's bright (default = 0)
+                                   [1] : ddcolor tweak's constrast (default = 1), if < 1 ddcolor provides de-saturated frames
+                                   [2] : ddcolor tweak's gamma (default = 1) 
+                                   [3] : luma constrained gamma -> luma constrained gamma correction enabled (default = False), range: [True, False]
+                                            When enabled the average luma of a video clip will be forced to don't be below the value
+                                            defined by the parameter "luma_min". The function allow to modify the gamma
+                                            of the clip if the average luma is below the parameter "gamma_luma_min". A gamma value > 2.0 improves 
+                                            the ddcolor stability on bright scenes, while a gamma < 1 improves the ddcolor stability on 
+                                            dark scenes. The decrease of the gamma with luma is activated using a gamma_alpha != 0.                                                
+                                   [4] : luma_min: luma (%) min value for tweak activation (default = 0.2), if=0 is not activated, range [0-1]
+                                   [5] : gamma_luma_min: luma (%) min value for gamma tweak activation (default = 0.5), if=0 is not activated, range [0-1]
+                                   [6] : gamma_alpha: the gamma will decrease with the luma g = max(gamma * pow(luma/gamma_luma_min, gamma_alpha), gamma_min),
+                                         for a movie with a lot of dark scenes is suggested alpha > 1, if=0 is not activated, range [>=0]
+                                   [7] : gamma_min: minimum value for gamma, range (default=0.5) [>0.1]
+    :param cmc_tresh:           chroma_threshold (%), used by: Constrained "Chroma Merge range" [0-1] (0.01=1%)
+    :param lmm_p:               parameters for method: "Luma Masked Merge" (see method=4 for a full explanation) 
+                                   [0] : luma_mask_limit: luma limit for build the mask used in Luma Masked Merge, range [0-1] (0.01=1%) 
+                                   [1] : luma_white_limit: the mask will appliey a gradient till luma_white_limit, range [0-1] (0.01=1%)
+                                   [2] : luma_mask_sat: if < 1 the ddcolor dark pixels will substitute with the desaturated deoldify pixels, range [0-1] (0.01=1%)    
+    :param alm_p:               parameters for method: "Adaptive Luma Merge" (see method=5 for a full explanation) 
+                                   [0] : luma_threshold: threshold for the gradient merge, range [0-1] (0.01=1%) 
+                                   [1] : alpha: exponent parameter used for the weight calculation, range [>0] 
+                                   [2] : min_weight: min merge weight, range [0-1] (0.01=1%)
+    :param dark:                enable/disable darkness filter, range [True,False]                                        
+    :param dark_p:              parameters for darken the clip's dark portions, which sometimes are wrongly colored by the color models
+                                   [0] : dark_threshold, luma threshold to select the dark area, range [0.1-0.5] (0.01=1%)  
+                                   [1] : dark_amount: amount of desaturation to apply to the dark area, range [0-1] 
+    :param cmb_sw:              if true switch the clip order in all the combining methods, range [True,False]                                               
+    :param device_index:        device ordinal of the GPU, choices: GPU0...GPU7, CPU=99 (default = 0)
+    :param torch_dir:           torch hub dir location, default is model directory, if set to None will switch to torch cache dir.
     """
     
     if (not torch.cuda.is_available() and device_index != 99):
@@ -149,123 +149,71 @@ def ddeoldify(
     if not isinstance(clip, vs.VideoNode):
         raise vs.Error("ddeoldify: this is not a clip")
 
-    if model not in range(3):
-        raise vs.Error("ddeoldify: model must be 0,1,2")
-
+    chroma_resize = True
+    merge_weight = mweight
+    
+    # unpack deoldify_params
+    deoldify_model = deoldify_p[0]
+    deoldify_rf = deoldify_p[1] 
+    deoldify_sat = deoldify_p[2]
+    deoldify_hue = deoldify_p[3]
+    
+    # unpack deoldify_params
+    ddcolor_model = ddcolor_p[0]
+    ddcolor_rf = ddcolor_p[1] 
+    ddcolor_sat = ddcolor_p[2]
+    ddcolor_hue = ddcolor_p[3]
+    ddcolor_enable_fp16 = ddcolor_p[4]
+    
+    # unpack dark
+    darkness_enabled = dark
+    dark_threshold = 0.1
+    white_threshold = min(max(dark_p[0], dark_threshold), 0.50) 
+    dark_sat = min(max(1.1 - dark_p[1], 0.10), 0.80)  
+    dark_bright = -min(max(dark_p[1], 0.20), 0.90) #change the sign to reduce the bright        
+    
     if os.path.getsize(os.path.join(model_dir, "ColorizeVideo_gen.pth")) == 0:
         raise vs.Error("ddeoldify: model files have not been downloaded.")
 
     if device_index > 7 and device_index != 99:
         raise vs.Error("ddeoldify: wrong device_index, choices are: GPU0...GPU7, CPU=99")
-    
-    if render_factor not in range(10, 45):
-        raise vs.Error("ddeoldify: dd_render_factor must be between: 10-44")
-    
-    if dd_render_factor != 0 and dd_render_factor not in range(10, 65):
-        raise vs.Error("ddeoldify: dd_render_factor must be between: 10-64")
+        
+    if ddcolor_rf != 0 and ddcolor_rf not in range(10, 65):
+        raise vs.Error("ddeoldify: ddcolor render_factor must be between: 10-64")
             
-    if n_threads not in range(1, 32):
-        n_threads = 8
-
     if clip.format.id != vs.RGB24:
         # clip not in RGB24 format, it will be converted
         if (clip.format.color_family == "YUV"):
             clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="limited", dither_type="error_diffusion") 
         else:
             clip = clip.resize.Bicubic(format=vs.RGB24, range_s="limited") 
-       
-    os.environ['NUMEXPR_MAX_THREADS'] = str(n_threads)
-     
+           
     #choices: GPU0...GPU7, CPU=99 
     device.set(device=DeviceId(device_index))
     
-    if torch_hub_dir != None:
-        torch.hub.set_dir(torch_hub_dir)      
+    if torch_dir != None:
+        torch.hub.set_dir(torch_dir)      
          
-    if dd_render_factor == 0:
-        dd_render_factor = min(max(math.trunc(0.4 * clip.width / 16), 16), 48)
-    
-    # frame size calculation for inference()    
-    dd_frame_size = min(dd_render_factor * 16, clip.width)
-    
+    if ddcolor_rf == 0:
+        ddcolor_rf = min(max(math.trunc(0.4 * clip.width / 16), 16), 48)    
+         
     clipb_weight = merge_weight
     
     if chroma_resize:
+        frame_size = min(max(ddcolor_rf, deoldify_rf) * 16, clip.width)     # frame size calculation for inference()  
         clip_orig = clip;
-        clip = clip.resize.Spline64(width=dd_frame_size, height=dd_frame_size) 
-                
-    # unpack method params
-    luma_threshold = dd_method_params[0]
-    alpha = dd_method_params[1]
-    min_weight = dd_method_params[2]
-    chroma_threshold = dd_method_params[3]
-    invert_clips = dd_method_params[4]
-
-     # unpack luma_mask
-    luma_mask_limit = luma_mask[0]
-    luma_white_limit = luma_mask[1]
-    luma_mask_sat = luma_mask[2]  
-
-    # unpack dark_darkness
-    darkness_enabled = dark_darkness[0]
-    dark_threshold = dark_darkness[1]
-    white_threshold = dark_darkness[2]
-    dark_sat = dark_darkness[3]
-    dark_bright = -dark_darkness[4] #change the sign to reduce the bright    
+        clip = clip.resize.Spline64(width=frame_size, height=frame_size) 
+                    
+    clipa = _deoldify(clip, method=method, model=deoldify_model, render_factor=deoldify_rf, package_dir=package_dir) 
+    clipb = _ddcolor(clip, method=method, model=ddcolor_model, render_factor=ddcolor_rf, tweaks_enabled=ddtweak, tweaks=ddtweak_p, enable_fp16=ddcolor_enable_fp16, device_index=device_index)             
+           
+    clip_colored = combine_models(clip_a=clipa, clip_b=clipb, method=method, sat=[deoldify_sat, ddcolor_sat], hue=[deoldify_hue, ddcolor_hue], clipb_weight=merge_weight, CMC_p=cmc_tresh, LMM_p=lmm_p, ALM_p = alm_p, invert_clips=cmb_sw)
     
-    # unpack color_stabilizer
-    colstab_merge_enabled = color_stabilizer[0]
-    colstab_deoldify_enabled = color_stabilizer[1]
-    colstab_ddcolor_enabled = color_stabilizer[2]
-    colstab_nframes = color_stabilizer[3]
-    colstab_mode = color_stabilizer[4]
-    colstab_scenechange = color_stabilizer[5]
-    
-     # unpack color_limiter
-    colimit_enabled = color_limiter[0]
-    colimit_deviation = color_limiter[1]
-    
-    if dd_method == 0 or (dd_method != 1):
-        match model:
-            case 0:
-                colorizer = get_image_colorizer(root_folder=Path(package_dir), artistic=False,isvideo=True) 
-            case 1:
-                colorizer = get_image_colorizer(root_folder=Path(package_dir), artistic=False,isvideo=False) 
-            case 2:
-                colorizer = get_image_colorizer(root_folder=Path(package_dir), artistic=True,isvideo=False) 
-            
-        clipa = _get_deoldify_colorize(clip, colorizer=colorizer, render_factor=render_factor)        
-    else:
-        clipa = None
-    
-    if dd_method == 1 or (dd_method != 0):                
-        clipb = _get_ddcolor_colorize(clip,  model=dd_model, input_size=dd_frame_size, tweak_luma_bind=dd_tweak_luma_bind, bright=dd_tweak_bright, cont=dd_tweak_cont, gamma=dd_tweak_gamma, device_index=device_index, num_streams=dd_num_streams)
-    else:
-        clipb = None
-    
-    if (clipa is not None) and colstab_deoldify_enabled:
-            clipa = vs_clip_color_stabilizer(clipa, nframes = colstab_nframes, mode=colstab_mode, scenechange = colstab_scenechange)
-
-    if (clipb is not None) and colstab_ddcolor_enabled:
-            clipb = vs_clip_color_stabilizer(clipb, nframes = colstab_nframes, mode=colstab_mode, scenechange = colstab_scenechange)
-    
-    if invert_clips:     
-        clip_colored = combine_models(clipa=clipb, clipb=clipa, sat=sat, hue=hue, method=dd_method, clipb_weight=clipb_weight, luma_threshold=luma_threshold, alpha=alpha, min_weight=min_weight, chroma_threshold=chroma_threshold, luma_mask_limit=luma_mask_limit, luma_white_limit=luma_white_limit, luma_mask_sat=luma_mask_sat)
-    else:
-        clip_colored = combine_models(clipa=clipa, clipb=clipb, sat=sat, hue=hue, method=dd_method, clipb_weight=clipb_weight, luma_threshold=luma_threshold, alpha=alpha, min_weight=min_weight, chroma_threshold=chroma_threshold, luma_mask_limit=luma_mask_limit, luma_white_limit=luma_white_limit, luma_mask_sat=luma_mask_sat)
-
     if darkness_enabled:
-        clip_colored = darkness_tweak(clip_colored, dark_threshold=dark_threshold, white_threshold=white_threshold, dark_sat=dark_sat, dark_bright=dark_bright)  
-    
-    if colimit_enabled:
-        clip_colored = vs_clip_chroma_stabilizer(clip_colored, deviation = colimit_deviation)    
-    
-    if colstab_merge_enabled:
-        clip_colored = vs_clip_color_stabilizer(clip_colored, nframes = colstab_nframes, mode=colstab_mode, scenechange = colstab_scenechange)
-            
+        clip_colored = vs_chroma_bright_tweak(clip_colored, dark_threshold=dark_threshold, white_threshold=white_threshold, dark_sat=dark_sat, dark_bright=dark_bright)  
+                
     if chroma_resize:
-        clip_colored = clip_colored.resize.Spline64(width=clip_orig.width, height=clip_orig.height) 
-        return recover_clip_luma(clip_orig, clip_colored)
+        return _clip_chroma_resize(clip_orig, clip_colored)
     else:
         return clip_colored
 
@@ -275,43 +223,37 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
-Chroma resize filter, derived from ddeoldify 
-"""
-def dd_chroma_resize(clip_hires: vs.VideoNode, clip_lowres: vs.VideoNode) -> vs.VideoNode:
-    clip_resized = clip_lowres.resize.Spline64(width=clip_hires.width, height=clip_hires.height) 
-    return recover_clip_luma(clip_hires, clip_resized)
-
-"""
-------------------------------------------------------------------------------- 
-Author: Dan64
-------------------------------------------------------------------------------- 
-Description:
-------------------------------------------------------------------------------- 
 Video color stabilization filter, derived from ddeoldify
 """
-def dd_video_stabilizer(clip: vs.VideoNode, chroma_resize: list = [False, 32], color_smoothing: list = [False, 0.1, 0.2, 0.5, 0.8], color_stabilizer: list = [False, 5, 'arithmetic', 1, True], color_limiter: list = [False, 0.02]) -> vs.VideoNode:
-    """Video color stabilization filter, derived from ddeoldify. 
-        :param clip:               clip to process, only RGB24 format is supported.
-        :param chroma_resize:      parameters for the chroma resizer pre-filter 
-                                     [0] : if True the chroma resizer is enabled 
-                                     [1] : render_factor to apply to the chroma_resizer
-                                   size used for the models inference(), but the final resolution will be the one of the original clip.
-        :param color_smoothing:    parameters for dark the portion of the clip with luma below a given threshold
-                                     [0] : darkness_enabled (bool), if true the filter is enabled 
-                                     [1] : dark_threshold, luma threshold to select the dark area, range [0-1] (0.01=1%)  
-                                     [2] : white_threshold, if > dark_threshold will be applied a gradient till white_threshold, range [0-1] (0.01=1%)  
-                                     [3] : dark_sat: amount of desaturation to apply to the dark area, range [0-1] 
-                                     [4] : dark_bright (float): darkness parameter it used to reduce the "V" component in "HSV" colorspace, range [0, 1] 
-        :param color_stabilizer:   parameters for the temporal color stabilizer
-                                     [0] : colstab_merge_enabled (bool), if true the filter will be applied after the merge of Deoldify and DDColor
-                                     [1] : colstab_nframes, number of frames to be used in the stabilizer, range[3-31]
-                                     [2] : colstab_mode, type of average used by the stabilizer: range['arithmetic', 'weighted']
-                                     [3] : colstab_steps: number of average repetition (max 3) 
-                                     [4] : colstab_scenechange, if true the futures frames will not be used in case of scene change detection, range [True,False] 
-        :param color_limiter:      parameters for the temporal color limiter
-                                     [0] : colimit_enabled (bool), if true the filter will be applied after the merge of Deoldify and DDColor
-                                     [1] : colimit_deviation, chroma of current frame will be forced to be inside the range defined by "deviation", range[0.01-0.5]
-        
+def ddeoldify_stabilizer(clip: vs.VideoNode, render_factor: int = 24, smooth: bool = False, smooth_p: list = [0.3, 0.7, 0.9, 0.05], stab: bool = False, stab_p: list = [5, 'A', 1, 15, 0.2, 0.15]) -> vs.VideoNode:
+    """Video color stabilization filter, which can be applied to stabilize the chroma components in ddeoldify colored clips. 
+        :param clip:                clip to process, only RGB24 format is supported.
+        :param render_factor:       render_factor to apply to the filters, the frame size will be reduced to speed-up the filters, 
+                                    but the final resolution will be the one of the original clip. If = 0 will be auto selected. 
+                                    This approach takes advantage of the fact that human eyes are much less sensitive to
+                                    imperfections in chrominance compared to luminance. This means that it is possible to speed-up
+                                    the chroma filters and get a great high-resolution result in the end, range: [0, 10-64]                                       
+        :param smooth:              enable/disable chroma smoothing, range [True, False]          
+        :param smooth_p:            parameters to adjust the saturation and "vibrancy" of the clip.
+                                      [0] : dark_threshold, luma threshold to select the dark area, range [0-1] (0.01=1%)  
+                                      [1] : white_threshold, if > dark_threshold will be applied a gradient till white_threshold, range [0-1] (0.01=1%)  
+                                      [2] : dark_sat, amount of de-saturation to apply to the dark area, range [0-1] 
+                                      [3] : dark_bright, darkness parameter it used to reduce the "V" component in "HSV" colorspace, range [0, 1] 
+        :param stab:                enable/disable chroma stabilizer, range [True, False]                                        
+        :param stab_p:              parameters for the temporal color stabilizer
+                                      [0] : nframes, number of frames to be used in the stabilizer, range[3-15]
+                                      [1] : mode, type of average used by the stabilizer: range['A'='arithmetic', 'W'='weighted']
+                                      [2] : sat: saturation applied to the restored gray prixels [0,1]
+                                      [3] : tht, threshold to detect gray pixels, range [0,235], if=0 is not applied the restore,
+                                            its value depends on merge method used, suggested values are:
+                                                method 0: tht = 5
+                                                method 1: tht = 60 (ddcolor provides very saturared frames)
+                                                method 2: tht = 15
+                                                method 3: tht = 20
+                                                method 4: tht = 5
+                                                method 5: tht = 10
+                                      [4] : weight, weight to blend the restored imaage (default=0.2), range [0-1], if=0 is not applied the blending 
+                                      [5] : tht_scen, threshold for scene change detection (default = 0.15), if=0 is not activated, range [0.01-0.50]
     """
 
     if not isinstance(clip, vs.VideoNode):
@@ -324,76 +266,50 @@ def dd_video_stabilizer(clip: vs.VideoNode, chroma_resize: list = [False, 32], c
         else:
             clip = clip.resize.Bicubic(format=vs.RGB24, range_s="limited") 
         
-    # unpack chroma_resize
-    chroma_resize_enabled = chroma_resize[0]
-    render_factor = chroma_resize[1]
+    # enable chroma_resize
+    chroma_resize_enabled = True
     
     if render_factor != 0 and render_factor not in range(16, 65):
-        raise vs.Error("ddeoldify_video_stabilizer: dd_render_factor must be between: 16-65")
+        raise vs.Error("ddeoldify_stabilizer: render_factor must be between: 16-64")
         
     if render_factor == 0:
         render_factor = min(max(math.trunc(0.4 * clip.width / 16), 16), 64)
-    
-    # frame size calculation for inference()    
-    frame_size = min(render_factor * 16, clip.width)
-    
+                
     if chroma_resize_enabled:
+        frame_size = min(render_factor * 16, clip.width) # frame size calculation for filters
         clip_orig = clip;
         clip = clip.resize.Spline64(width=frame_size, height=frame_size) 
             
-    # unpack color_smoothing
-    darkness_enabled = color_smoothing[0]
-    dark_threshold = color_smoothing[1]
-    white_threshold = color_smoothing[2]
-    dark_sat = color_smoothing[3]
-    dark_bright = -color_smoothing[4] #change the sign to reduce the bright
+    # unpack chroma_smoothing
+    chroma_smoothing_enabled = smooth
+    dark_threshold = smooth_p[0]
+    white_threshold = smooth_p[1]
+    dark_sat = smooth_p[2]
+    dark_bright = -smooth_p[3] #change the sign to reduce the bright
     
-    # unpack color_stabilizer
-    colstab_merge_enabled = color_stabilizer[0]
-    colstab_nframes = color_stabilizer[1]
-    colstab_mode = color_stabilizer[2]
-    colstab_steps = color_stabilizer[3]
-    colstab_scenechange = color_stabilizer[4]
+    # unpack chroma_stabilizer
+    colstab_enabled = stab
+    colstab_nframes = stab_p[0]
+    colstab_mode = stab_p[1]
+    colstab_sat = stab_p[2]
+    colstab_tht = stab_p[3]
+    colstab_weight = stab_p[4]
+    colstab_tht_scen = stab_p[5]
+    colstab_algo = 0
     
-    # unpack color_limiter
-    colimit_enabled = color_limiter[0]
-    colimit_deviation = color_limiter[1]
-    
-    if colstab_steps not in range(1,4):
-        raise vs.Error("ddeoldify: steps must be between: 1-3")
-                
     clip_colored = clip
     
-    if darkness_enabled:
-        clip_colored = darkness_tweak(clip_colored, dark_threshold=dark_threshold, white_threshold=white_threshold, dark_sat=dark_sat, dark_bright=dark_bright) 
-    
-    if colimit_enabled:
-        clip_colored = vs_clip_chroma_stabilizer(clip_colored, deviation=colimit_deviation)
+    if chroma_smoothing_enabled:
+        clip_colored = vs_chroma_bright_tweak(clip_colored, dark_threshold=dark_threshold, white_threshold=white_threshold, dark_sat=dark_sat, dark_bright=dark_bright) 
         
-    if colstab_merge_enabled:
-        clip_colored = _color_stabilizer_ex(clip_colored, nframes = colstab_nframes, mode=colstab_mode, steps=colstab_steps, scenechange = colstab_scenechange)
+    if colstab_enabled:
+        clip_colored = vs_chroma_stabilizer_ex(clip_colored, nframes=colstab_nframes, mode=colstab_mode, sat=colstab_sat, tht=colstab_tht, weight=colstab_weight, algo=colstab_algo)
         
     if chroma_resize_enabled:
-        clip_colored = clip_colored.resize.Spline64(width=clip_orig.width, height=clip_orig.height) 
-        return recover_clip_luma(clip_orig, clip_colored)
+        return _clip_chroma_resize(clip_orig, clip_colored)
     else:
         return clip_colored
 
-"""
-------------------------------------------------------------------------------- 
-Author: Dan64
-------------------------------------------------------------------------------- 
-Description:
-------------------------------------------------------------------------------- 
-wrapper to function vs_clip_color_stabilizer() with management parameter "steps"
-"""
-def _color_stabilizer_ex(clip: vs.VideoNode = None, nframes: int = 5, mode: str = "center", steps: int = 1, scenechange: bool = True) -> vs.VideoNode:
-    
-    max_steps = max(min(steps, 3), 1)
-    for i in range(0, max_steps):
-        clip = vs_clip_color_stabilizer(clip, nframes = nframes, mode=mode, scenechange = scenechange)
-            
-    return clip
 
 """
 ------------------------------------------------------------------------------- 
@@ -401,10 +317,21 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
-wrapper to deoldify 
+wrapper to deoldify. 
 """
-def _get_deoldify_colorize(clip: vs.VideoNode, colorizer: ModelImageVisualizer = None, render_factor: int = 24) -> vs.VideoNode: 
+def _deoldify(clip: vs.VideoNode, method: int = 2, model: int = 0, render_factor: int = 24, package_dir: str = "") -> vs.VideoNode: 
     
+    if method == 1:
+        return None
+        
+    match model:
+        case 0:
+            colorizer = get_image_colorizer(root_folder=Path(package_dir), artistic=False,isvideo=True) 
+        case 1:
+            colorizer = get_image_colorizer(root_folder=Path(package_dir), artistic=False,isvideo=False) 
+        case 2:
+            colorizer = get_image_colorizer(root_folder=Path(package_dir), artistic=True,isvideo=False) 
+                    
     def ddeoldify_colorize(n: int, f: vs.VideoFrame, colorizer: ModelImageVisualizer = None, render_factor: int = 24) -> vs.VideoFrame:
         img_orig = frame_to_image(f)
         img_color = colorizer.get_transformed_pil_image(img_orig, render_factor=render_factor, post_process=True)
@@ -418,26 +345,83 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
-wrapper to function ddcolor() with tweak pre-process and recover luma post-process
+wrapper to function ddcolor() with tweak pre-process.
 """
-def _get_ddcolor_colorize(clip: vs.VideoNode, model: int = 0, input_size: int = 384, tweak_luma_bind: list = [False, 0.0, 0.0], bright: float = 0, cont: float = 1, gamma: float = 1, luma_stab: float = 0, device_index: int = 0, num_streams: int = 1) -> vs.VideoNode:
-    #if luma_stab > 0:
-    #    clipb = clip_luma_stabilizer(clip, luma_stab)
-    # unpack tweak_luma_bind params
-    luma_constrained_tweak=tweak_luma_bind[0]
-    luma_min = tweak_luma_bind[1] 
-    gamma_luma_min = tweak_luma_bind[2]
-    if (luma_constrained_tweak):
-        clipb = tweak(clip, cont=cont) # constrained tweak on image contrast is not implemented
-        clipb = constrained_tweak(clipb, luma_min = luma_min, gamma=gamma, gamma_luma_min = gamma_luma_min)
+def _ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 0, render_factor: int = 24, tweaks_enabled: bool = False, tweaks: list = [0.0, 0.9, 0.7, False, 0.3, 0.3], enable_fp16: bool = True, device_index: int = 0, num_streams: int = 1) -> vs.VideoNode:
+    
+    if method == 0:
+        return None
+    else: 
+        import vsddcolor
+    
+    input_size = render_factor * 16
+       
+    # unpack tweaks
+    bright = tweaks[0]
+    cont = tweaks[1]
+    gamma = tweaks[2]
+    luma_constrained_tweak=tweaks[3]
+    luma_min = tweaks[4] 
+    gamma_luma_min = tweaks[5]
+    gamma_alpha = tweaks[6]
+    gamma_min = tweaks[7]
+    
+    if tweaks_enabled:     
+        if (luma_constrained_tweak):
+            clipb = tweak(clip, bright=bright, cont=cont) # contrast and bright are adjusted before the constrainded luma and gamma
+            clipb = constrained_tweak(clipb, luma_min = luma_min, gamma=gamma, gamma_luma_min = gamma_luma_min, gamma_alpha = gamma_alpha, gamma_min=gamma_min)
+        else:
+            clipb = tweak(clip, bright=bright, cont=cont, gamma=gamma)
     else:
-        clipb = tweak(clip, bright=bright, cont=cont, gamma=gamma)
+        clipb = clip
     # adjusting clip's color space to RGBH for vsDDColor
-    clipb = ddcolor(clipb.resize.Bicubic(format=vs.RGBH, range_s="limited"), model=model, input_size=input_size, device_index=device_index, num_streams=num_streams)    
+    if enable_fp16:
+        clipb = vsddcolor.ddcolor(clipb.resize.Bicubic(format=vs.RGBH, range_s="limited"), model=model, input_size=input_size, device_index=device_index, num_streams=num_streams)
+    else:        
+        clipb = vsddcolor.ddcolor(clipb.resize.Bicubic(format=vs.RGBS, range_s="limited"), model=model, input_size=input_size, device_index=device_index, num_streams=num_streams) 
+    
     # adjusting color space to RGB24 for deoldify
     clipb_rgb = clipb.resize.Bicubic(format=vs.RGB24, range_s="limited")
-    if (bright == 0 and cont == 1 and gamma == 1) or (luma_constrained_tweak == False):
-        return clipb_rgb
+    if tweaks_enabled:
+        return vs_recover_clip_luma(clip, clipb_rgb)
     else:
-        return recover_clip_luma(clip, clipb_rgb)
+        return clipb_rgb
 
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description: ONLY FOR TESTING
+------------------------------------------------------------------------------- 
+wrapper to function vs_recover_clip_luma().
+"""
+def _clip_chroma_resize(clip_hires: vs.VideoNode, clip_lowres: vs.VideoNode) -> vs.VideoNode:
+    clip_resized = clip_lowres.resize.Spline64(width=clip_hires.width, height=clip_hires.height) 
+    return vs_recover_clip_luma(clip_hires, clip_resized)
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description: ONLY FOR TESTING
+------------------------------------------------------------------------------- 
+wrapper to function vs_get_clip_frame() to get frames fast.
+"""
+def _get_clip_frame(clip: vs.VideoNode, nframe: int = 0) -> vs.VideoNode:
+    
+    clip = vs_get_clip_frame(clip=clip, nframe=nframe)
+    return clip    
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description: ONLY FOR TESTING
+------------------------------------------------------------------------------- 
+wrapper to function vs_recover_clip_color() to restore gray frames.
+""" 
+def _recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = None, sat: float = 1.0, tht: int = 0, 
+    weight: float = 0.2, tht_scen: float = 0.8, return_mask: bool = False) -> vs.VideoNode:
+  
+    clip = vs_recover_clip_color(clip=clip, clip_color=clip_color, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen, return_mask=return_mask)
+    return clip

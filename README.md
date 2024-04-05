@@ -49,23 +49,25 @@ python -m vsddcolor
 ## Usage
 ```python
 from vsdeoldify import ddeoldify
-# DeOldify  with DDColor weighed at 50%
+# DeOldify  with DDColor weighed at 40%
 clip = ddeoldify(clip)
 # DeOldify only model
-clip = ddeoldify(clip, dd_method=0)
+clip = ddeoldify(clip, method=0)
 # DDColor only model
-clip = ddeoldify(clip, dd_method=1)
+clip = ddeoldify(clip, method=1)
 
+# To apply video color stabilization filters for ddeoldify
+from vsdeoldify import ddeoldify_stabilizer
+clip = ddeoldify_stabilizer(clip, smooth=True, stab=True)
 ```
 
 See `__init__.py` for the description of the parameters.
 
-**NOTE**: In the _DDColor_ version included with **DDeoldify** the parameter _input_size_ has changed name in _dd_render_factor_ because I changed the range of values of this parameter to be equivalent to _render_factor_ in _Deoldify_, the relationship between these 2 parameters is the following:
+**NOTE**: In the _DDColor_ version included with **DDeoldify** the parameter _input_size_ has changed name in _render_factor_ because were changed the range of values of this parameter to be equivalent to _render_factor_ in _Deoldify_, the relationship between these 2 parameters is the following:
 
 ```
 input_size = render_factor * 16
 ``` 
-Has been added also the option **chroma resize**, when this option is enabled, the frame size used for the models _inference_ will be used in all frames processing filters. This option allows to speed up the encoding of HD movies by about 150%, but it has the disadvantage (or advantage) of transforming the changes made by the _post-process_ filters on _luminosity_ in changes on the chroma.
 
 ## Filter Usage
 
@@ -84,27 +86,27 @@ Are implemented 2 averaging methods:
 1. _Arithmetic average_: the current frame is averaged using equal weights on the past and future frames
 2. _Weighted average_: the current frame is averaged using a weighed mean of the past and future frames, where the weight decrease with the time (far frames have lower weight respect to the nearest frames). 
 
+As explained previously the stabilization is performed by averaging the past/future frames. Since the non matched areas of past/future frames are _gray_ because is missing in the past/future the _color information_, the filter will apply a _color restore_ procedure that fills the gray areas with the pixels of current frames (eventually de-saturated with the parameter "sat"). The image restored in this way is blended with the non restored image using the parameter "weight". The gray areas are selected by the threshold parameter "tht". All the pixels in the HSV color space with "S" < "tht" will be considered gray. If is detected a scene change (controlled by the parameter "tht_scen"), the _color restore_ is not applied.  
 
-It is possible to apply this filter to the output of each coloring model and at the final output obtained by combining the color models (D+D). 
-
-**Chroma Limiter**: This filter will try to stabilize the frames' colors using a chroma temporal limiter: the filter will limit the chroma components of current frame to have an 
-absolute percentage deviation respect to the previous frame not higher than _alpha_  (called also _max_deviation_).  
-
-**Tweak Luma**: This filter is available only for DDColor and has been added because has been observed that the DDcolor's _inference_ is quite poor on dark scenes. This filter will force the luma of input image to don't be below the threshold defined by the parameter _Luma_min_. It will be also possible to apply to the input image a gamma correction, if the luma is below the value defined by the parameter _Gamma_min_.
+**DDColor Tweaks**: This filter is available only for DDColor and has been added because has been observed that the DDcolor's _inference_ is quite poor on dark/bright scenes depending on the luma value. This filter will force the luma of input image to don't be below the threshold defined by the parameter _luma_min_.  Moreover this filter allows to apply a dynamic gamma correction. The gamma adjustment will be applied when the average luma is below the parameter _gamma_luma_min_. A _gamma_ value > 2.0 improves the DDColor stability on bright scenes, while a _gamma_ < 1 improves the DDColor stability on  dark scenes. 
  
 ### Merging the models
 
-As explained previously, this filter is able to combine the results provided by DeOldify and DDColor, to perform this combination has been implemented 4 methods:
+As explained previously, this filter is able to combine the results provided by DeOldify and DDColor, to perform this combination has been implemented 6 methods:
 
-1. _Simple Merge_: the frames are combined using a _weighted merge_, where the parameter _merge_weight_ represent the weight assigned to the frames provided by the DDcolor model. 
+0. _DeOldify_ only coloring model.
 
-2. _Adaptive Luma Merge_: given that the DDcolor perfomance is quite bad on dark scenes, with this method the images are combined by decreasing the weight assigned to DDcolor frames when the luma is below the _luma_threshold_. For example with: luma_threshold = 0.6 and alpha = 1, the weight assigned to DDcolor frames will start to decrease linearly when the luma < 60% till _min_weight_. For _alpha_=2, the weight begins to decrease quadratically.      
+1. _DDColor_ only color model.
+
+2. _Simple Merge_: the frames are combined using a _weighted merge_, where the parameter _merge_weight_ represent the weight assigned to the frames provided by the DDcolor model. 
 
 3. _Constrained Chroma Merge_:  given that the colors provided by Deoldify's _Video_ model are more conservative and stable than the colors obtained with DDcolor. The frames are combined by assigning a limit to the amount of difference in chroma values between Deoldify and DDcolor. This limit is defined by the parameter _threshold_. The limit is applied to the frame converted to "YUV". For example when threshold=0.1, the chroma    values "U","V" of DDcolor frame will be constrained to have an absolute percentage difference respect to "U","V" provided by Deoldify not higher than 10%.  If _merge_weight_ is < 1.0, the chroma limited DDColor frames will be will be merged again with the frames of Deoldify using the _Simple Merge_.
 
  4. _Luma Masked Merge_: the behaviour is similar to the method _Adaptive Luma Merge_. With this method the frames are combined using a _masked merge_. The pixels of DDColor's frame with luma < _luma_limit_  will be filled with the (de-saturated) pixels of Deoldify, while the pixels above the _white_limit_ threshold will be left untouched. All the pixels in the middle will be gradually replaced depending on the luma value. If the parameter  _merge_weight_ is < 1.0, the resulting masked frames will be merged again with the non de-saturated frames of Deoldify using the _Simple Merge_.
 
-With the only exception of _Simple Merge_ all merging methods are levereging on the fact that usually the Deoldify _Video_ model provides frames which are more stable, this feature is exploited to stabilize also DDColor.
+5. _Adaptive Luma Merge_: given that the DDcolor perfomance is quite bad on dark scenes, with this method the images are combined by decreasing the weight assigned to DDcolor frames when the luma is below the _luma_threshold_. For example with: luma_threshold = 0.6 and alpha = 1, the weight assigned to DDcolor frames will start to decrease linearly when the luma < 60% till _min_weight_. For _alpha_=2, the weight begins to decrease quadratically.      
+
+The merging methods 2-5 are levereging on the fact that usually the Deoldify _Video_ model provides frames which are more stable, this feature is exploited to stabilize also DDColor. The methods 3 and 4 are similar to _Simple Merge_, but before the merge with _DeOldify_ the _DDColor_ frame is limited in the chroma changes (method 3) or limited based on the luma (method 4). The method 5 is a _Simple Merge_ where the weight decrease with luma. 
 
 ## Comparison of Models
 
@@ -222,7 +224,7 @@ willing to accept a decrease in encoding speed of about 40% it is possible to im
 
 * **DS+DD**: Deoldify (with model _Video_ & render_factor = 30) + DDColor (with model _Artistic_ and render_factor = 30)
 
-It is also suggested to enable the post-process filters: _Chroma Smoothing_ and _Chroma Stabilization_. Unfortunately is not possible provide a _one size fits-all solution_ and the filter parameters need to be adjusted depending on the type of video to be colored.  
+It is also suggested to enable the _DDColor Tweaks_  (to apply the dynamic gamma correction) and the post-process filters: _Chroma Smoothing_ and _Chroma Stabilization_. Unfortunately is not possible provide a _one size fits-all solution_ and the filter parameters need to be adjusted depending on the type of video to be colored.  
 
 As a final consideration I would like to point out that the test results showed that the images coloring technology is mature enough to be used concretely both for coloring images and, thanks to **Hybrid**, videos.
 
