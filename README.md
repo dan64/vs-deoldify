@@ -58,7 +58,7 @@ clip = ddeoldify(clip, method=1)
 
 # To apply video color stabilization filters for ddeoldify
 from vsdeoldify import ddeoldify_stabilizer
-clip = ddeoldify_stabilizer(clip, smooth=True, stab=True)
+clip = ddeoldify_stabilizer(clip, dark=True, smooth=True, stab=True)
 ```
 
 See `__init__.py` for the description of the parameters.

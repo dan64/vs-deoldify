@@ -52,7 +52,7 @@ Description:
 wrapper to deoldify() functions with additional filters pre-process and post-process
 """
 def ddeoldify(
-    clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = [0, 24, 1.0, 0.0], ddcolor_p: list = [1, 24, 1.0, 0.0, True], ddtweak: bool = False, ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.2, 0.5, 1.5, 0.5],  cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0], alm_p: list = [0.8, 1.0, 0.15], dark: bool = False, dark_p: list = [0.3, 0.8], cmb_sw: bool = False, device_index: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
+    clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = [0, 24, 1.0, 0.0], ddcolor_p: list = [1, 24, 1.0, 0.0, True], ddtweak: bool = False, ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.2, 0.5, 1.5, 0.5],  cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0], alm_p: list = [0.8, 1.0, 0.15], cmb_sw: bool = False, device_index: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
     """A Deep Learning based project for colorizing and restoring old images and video using Deoldify and DDColor 
 
     :param clip:                clip to process, only RGB24 format is supported.
@@ -133,11 +133,7 @@ def ddeoldify(
     :param alm_p:               parameters for method: "Adaptive Luma Merge" (see method=5 for a full explanation) 
                                    [0] : luma_threshold: threshold for the gradient merge, range [0-1] (0.01=1%) 
                                    [1] : alpha: exponent parameter used for the weight calculation, range [>0] 
-                                   [2] : min_weight: min merge weight, range [0-1] (0.01=1%)
-    :param dark:                enable/disable darkness filter, range [True,False]                                        
-    :param dark_p:              parameters for darken the clip's dark portions, which sometimes are wrongly colored by the color models
-                                   [0] : dark_threshold, luma threshold to select the dark area, range [0.1-0.5] (0.01=1%)  
-                                   [1] : dark_amount: amount of desaturation to apply to the dark area, range [0-1] 
+                                   [2] : min_weight: min merge weight, range [0-1] (0.01=1%)    
     :param cmb_sw:              if true switch the clip order in all the combining methods, range [True,False]                                               
     :param device_index:        device ordinal of the GPU, choices: GPU0...GPU7, CPU=99 (default = 0)
     :param torch_dir:           torch hub dir location, default is model directory, if set to None will switch to torch cache dir.
@@ -163,14 +159,7 @@ def ddeoldify(
     ddcolor_rf = ddcolor_p[1] 
     ddcolor_sat = ddcolor_p[2]
     ddcolor_hue = ddcolor_p[3]
-    ddcolor_enable_fp16 = ddcolor_p[4]
-    
-    # unpack dark
-    darkness_enabled = dark
-    dark_threshold = 0.1
-    white_threshold = min(max(dark_p[0], dark_threshold), 0.50) 
-    dark_sat = min(max(1.1 - dark_p[1], 0.10), 0.80)  
-    dark_bright = -min(max(dark_p[1], 0.20), 0.90) #change the sign to reduce the bright        
+    ddcolor_enable_fp16 = ddcolor_p[4]       
     
     if os.path.getsize(os.path.join(model_dir, "ColorizeVideo_gen.pth")) == 0:
         raise vs.Error("ddeoldify: model files have not been downloaded.")
@@ -209,9 +198,6 @@ def ddeoldify(
            
     clip_colored = combine_models(clip_a=clipa, clip_b=clipb, method=method, sat=[deoldify_sat, ddcolor_sat], hue=[deoldify_hue, ddcolor_hue], clipb_weight=merge_weight, CMC_p=cmc_tresh, LMM_p=lmm_p, ALM_p = alm_p, invert_clips=cmb_sw)
     
-    if darkness_enabled:
-        clip_colored = vs_chroma_bright_tweak(clip_colored, dark_threshold=dark_threshold, white_threshold=white_threshold, dark_sat=dark_sat, dark_bright=dark_bright)  
-                
     if chroma_resize:
         return _clip_chroma_resize(clip_orig, clip_colored)
     else:
@@ -225,14 +211,13 @@ Description:
 ------------------------------------------------------------------------------- 
 Video color stabilization filter, derived from ddeoldify
 """
-def ddeoldify_stabilizer(clip: vs.VideoNode, render_factor: int = 24, smooth: bool = False, smooth_p: list = [0.3, 0.7, 0.9, 0.05], stab: bool = False, stab_p: list = [5, 'A', 1, 15, 0.2, 0.15]) -> vs.VideoNode:
+def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = [0.3, 0.8], smooth: bool = False, smooth_p: list = [0.3, 0.7, 0.9, 0.05], stab: bool = False, stab_p: list = [5, 'A', 1, 15, 0.2, 0.15], render_factor: int = 24) -> vs.VideoNode:
     """Video color stabilization filter, which can be applied to stabilize the chroma components in ddeoldify colored clips. 
         :param clip:                clip to process, only RGB24 format is supported.
-        :param render_factor:       render_factor to apply to the filters, the frame size will be reduced to speed-up the filters, 
-                                    but the final resolution will be the one of the original clip. If = 0 will be auto selected. 
-                                    This approach takes advantage of the fact that human eyes are much less sensitive to
-                                    imperfections in chrominance compared to luminance. This means that it is possible to speed-up
-                                    the chroma filters and get a great high-resolution result in the end, range: [0, 10-64]                                       
+        :param dark:                enable/disable darkness filter, range [True,False]                                        
+        :param dark_p:              parameters for darken the clip's dark portions, which sometimes are wrongly colored by the color models
+                                      [0] : dark_threshold, luma threshold to select the dark area, range [0.1-0.5] (0.01=1%)  
+                                      [1] : dark_amount: amount of desaturation to apply to the dark area, range [0-1]                                   
         :param smooth:              enable/disable chroma smoothing, range [True, False]          
         :param smooth_p:            parameters to adjust the saturation and "vibrancy" of the clip.
                                       [0] : dark_threshold, luma threshold to select the dark area, range [0-1] (0.01=1%)  
@@ -254,6 +239,11 @@ def ddeoldify_stabilizer(clip: vs.VideoNode, render_factor: int = 24, smooth: bo
                                                 method 5: tht = 10
                                       [4] : weight, weight to blend the restored imaage (default=0.2), range [0-1], if=0 is not applied the blending 
                                       [5] : tht_scen, threshold for scene change detection (default = 0.15), if=0 is not activated, range [0.01-0.50]
+        :param render_factor:       render_factor to apply to the filters, the frame size will be reduced to speed-up the filters, 
+                                    but the final resolution will be the one of the original clip. If = 0 will be auto selected. 
+                                    This approach takes advantage of the fact that human eyes are much less sensitive to
+                                    imperfections in chrominance compared to luminance. This means that it is possible to speed-up
+                                    the chroma filters and get a great high-resolution result in the end, range: [0, 10-64]            
     """
 
     if not isinstance(clip, vs.VideoNode):
@@ -279,6 +269,13 @@ def ddeoldify_stabilizer(clip: vs.VideoNode, render_factor: int = 24, smooth: bo
         frame_size = min(render_factor * 16, clip.width) # frame size calculation for filters
         clip_orig = clip;
         clip = clip.resize.Spline64(width=frame_size, height=frame_size) 
+    
+    # unpack dark
+    dark_enabled = dark
+    d_threshold = 0.1
+    d_white_thresh = min(max(dark_p[0], d_threshold), 0.50) 
+    d_sat = min(max(1.1 - dark_p[1], 0.10), 0.80)  
+    d_bright = -min(max(dark_p[1], 0.20), 0.90) #change the sign to reduce the bright        
             
     # unpack chroma_smoothing
     chroma_smoothing_enabled = smooth
@@ -299,6 +296,9 @@ def ddeoldify_stabilizer(clip: vs.VideoNode, render_factor: int = 24, smooth: bo
     
     clip_colored = clip
     
+    if dark_enabled:
+        clip_colored = vs_chroma_bright_tweak(clip_colored, dark_threshold=d_threshold, white_threshold=d_white_thresh, dark_sat=d_sat, dark_bright=d_bright)  
+                    
     if chroma_smoothing_enabled:
         clip_colored = vs_chroma_bright_tweak(clip_colored, dark_threshold=dark_threshold, white_threshold=white_threshold, dark_sat=dark_sat, dark_bright=dark_bright) 
         
