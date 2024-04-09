@@ -105,7 +105,7 @@ for example this assignment:
 ```
 chroma_range = "290:330,rose"
 ``` 
-specify the range of hue colors: 290-360, because "rose" is hue wheel name that correspond to the range:330-360.
+specify the range of hue colors: 290-360, because "rose" is [hue wheel name](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/ddeoldify_hue_wheel.jpg) that correspond to the range:330-360.
 
 It is possible to specify more ranges by using the comma "," separator.
 
@@ -120,10 +120,10 @@ in this case it is necessary to specify also the de-saturation parameter "sat" a
 for example with this assignment: 
 
 ```
-chroma_range = "300:330|0.4,0.2"
+chroma_range = "300:340|0.4,0.2"
 ``` 
 
-the hue colors in the range 300-340 will be de-saturated by the amount 0.4 and the final frame will be blended by applying a 20% de-saturation of 0.4 an all the pixels.  
+the hue colors in the range 300-340 will be de-saturated by the amount 0.4 and the final frame will be blended by applying a 20% de-saturation of 0.4 an all the pixels (if weight=0, no blending is applied).  
 
 
  
