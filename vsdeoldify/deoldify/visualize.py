@@ -4,7 +4,7 @@ Author: Jason Antic
 Date: 2019-08-20
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-02-29
+LastEditTime: 2024-04-08
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -32,11 +32,11 @@ class ModelImageVisualizer:
         torch.cuda.empty_cache()
         # gc.collect()
 
-    def _open_pil_image(self, path: Path) -> Image:
+    def _open_image(self, path: Path) -> Image:
         return PIL.Image.open(path).convert('RGB')
 
     
-    def get_transformed_pil_image(
+    def get_transformed_image(
         self,
         orig_image: Image,
         figsize: Tuple[int, int] = (20, 20),

@@ -89,6 +89,43 @@ Are implemented 2 averaging methods:
 As explained previously the stabilization is performed by averaging the past/future frames. Since the non matched areas of past/future frames are _gray_ because is missing in the past/future the _color information_, the filter will apply a _color restore_ procedure that fills the gray areas with the pixels of current frames (eventually de-saturated with the parameter "sat"). The image restored in this way is blended with the non restored image using the parameter "weight". The gray areas are selected by the threshold parameter "tht". All the pixels in the HSV color space with "S" < "tht" will be considered gray. If is detected a scene change (controlled by the parameter "tht_scen"), the _color restore_ is not applied.  
 
 **DDColor Tweaks**: This filter is available only for DDColor and has been added because has been observed that the DDcolor's _inference_ is quite poor on dark/bright scenes depending on the luma value. This filter will force the luma of input image to don't be below the threshold defined by the parameter _luma_min_.  Moreover this filter allows to apply a dynamic gamma correction. The gamma adjustment will be applied when the average luma is below the parameter _gamma_luma_min_. A _gamma_ value > 2.0 improves the DDColor stability on bright scenes, while a _gamma_ < 1 improves the DDColor stability on  dark scenes. 
+
+### Chroma Adjustment
+
+Unfortunately when are applied to movies the color models are subject to assign unstable colors to the frames especially on the red/violet chroma range. This problem is more visible on DDColor than on DeOldify.
+To mitigate this issue was necessary to implement some kind of chroma adjustment. This adjustment allows to de-saturate all the colors included in a given color range. The color range must be specified in the HSV color space. This color space is useful because all the chroma is represented by only the parameter "Hue". In this color space the colors are specified in degree (from 0 to 360), as shown in the DDeoldify Hue Wheel.
+It is possible to apply this adjustment on all filters described previously.
+Depending on the filter the adjustment can be enabled using the following syntax:
+
+```
+chroma_range = "hue_start:hue_end" or "hue_wheel_name"
+``` 
+for example this assignment: 
+
+```
+chroma_range = "290:330,rose"
+``` 
+specify the range of hue colors: 290-360, because "rose" is hue wheel name that correspond to the range:330-360.
+
+It is possible to specify more ranges by using the comma "," separator.
+
+When the de-saturation information is not already available in the filter's parameters, it necessary to use the following syntax:
+
+```
+chroma_adjustment = "chroma_range|sat,weight"
+``` 
+
+in this case it is necessary to specify also the de-saturation parameter "sat" and the blending parameter "weight".
+
+for example with this assignment: 
+
+```
+chroma_range = "300:330|0.4,0.2"
+``` 
+
+the hue colors in the range 300-340 will be de-saturated by the amount 0.4 and the final frame will be blended by applying a 20% de-saturation of 0.4 an all the pixels.  
+
+
  
 ### Merging the models
 
