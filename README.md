@@ -93,7 +93,7 @@ As explained previously the stabilization is performed by averaging the past/fut
 ### Chroma Adjustment
 
 Unfortunately when are applied to movies the color models are subject to assign unstable colors to the frames especially on the red/violet chroma range. This problem is more visible on DDColor than on DeOldify.
-To mitigate this issue was necessary to implement some kind of chroma adjustment. This adjustment allows to de-saturate all the colors included in a given color range. The color range must be specified in the HSV color space. This color space is useful because all the chroma is represented by only the parameter "Hue". In this color space the colors are specified in degree (from 0 to 360), as shown in the DDeoldify Hue Wheel.
+To mitigate this issue was necessary to implement some kind of chroma adjustment. This adjustment allows to de-saturate all the colors included in a given color range. The color range must be specified in the HSV color space. This color space is useful because all the chroma is represented by only the parameter "Hue". In this color space the colors are specified in degree (from 0 to 360), as shown in the [DDeoldify Hue Wheel](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/ddeoldify_hue_wheel.jpg).
 It is possible to apply this adjustment on all filters described previously.
 Depending on the filter the adjustment can be enabled using the following syntax:
 
