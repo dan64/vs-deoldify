@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-04-08
+LastEditTime: 2024-04-10
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -64,7 +64,8 @@ def vs_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 0, render_facto
     else: 
         import vsddcolor
     
-    input_size = render_factor * 16
+    # input size must a multiple of 32
+    input_size = math.trunc(render_factor/2)*32
        
     # unpack tweaks
     bright = tweaks[0]
@@ -98,7 +99,7 @@ def vs_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 0, render_facto
     clipb_rgb = clipb.resize.Bicubic(format=vs.RGB24, range_s="limited")
     
     if tweaks_enabled and hue_adjust != 'none':
-        clipb_rgb = vs_adjust_clip_hue(clipb_rgb, hue_adjust)
+        clipb_rgb = vs_adjust_clip_hue(clipb_rgb, hue_adjust.lower())
     
     if tweaks_enabled:
         return vs_recover_clip_luma(clip, clipb_rgb)

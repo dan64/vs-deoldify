@@ -11,7 +11,7 @@ exclude = [
 
 [project]
 name = "vsdeoldify"
-version = "3.1.0"
+version = "3.1.1"
 description = "Deoldify function for VapourSynth"
 readme = "README.md"
 requires-python = ">=3.10"

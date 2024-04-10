@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-04-09
+LastEditTime: 2024-04-10
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -33,7 +33,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, message="Arguments oth
 warnings.filterwarnings("ignore", category=UserWarning, message="Arguments other than a weight enum or `None`.*?")
 warnings.filterwarnings("ignore", category=UserWarning, message="torch.nn.utils.weight_norm is deprecated.*?")
 
-__version__ = "3.1.0"
+__version__ = "3.1.1"
 
 package_dir = os.path.dirname(os.path.realpath(__file__))
 model_dir = os.path.join(package_dir, "models")
@@ -53,7 +53,7 @@ Description:
 wrapper to deoldify() functions with additional filters pre-process and post-process
 """
 def ddeoldify(
-    clip: vs.VideoNode, method: int = 2, mweight: float = 0.5, deoldify_p: list = [0, 24, 1.0, 0.0], ddcolor_p: list = [1, 24, 1.0, 0.0, True], ddtweak: bool = False, ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.2, 0.5, 1.5, 0.5, "70:90,300:360|0.2,0"],  cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0], alm_p: list = [0.8, 1.0, 0.15], cmb_sw: bool = False, device_index: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
+    clip: vs.VideoNode, method: int = 2, mweight: float = 0.5, deoldify_p: list = [0, 24, 1.0, 0.0], ddcolor_p: list = [1, 24, 1.0, 0.0, True], ddtweak: bool = False, ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.2, 0.5, 1.5, 0.5, "300:360|0.3,0.2"],  cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0], alm_p: list = [0.8, 1.0, 0.15], cmb_sw: bool = False, device_index: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
     """A Deep Learning based project for colorizing and restoring old images and video using Deoldify and DDColor 
 
     :param clip:                clip to process, only RGB24 format is supported.
@@ -213,7 +213,7 @@ Description:
 ------------------------------------------------------------------------------- 
 Video color stabilization filter, derived from ddeoldify
 """
-def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = [0.3, 0.8, "0:20"], smooth: bool = False, smooth_p: list = [0.3, 0.7, 0.9, 0.05, "none"], stab: bool = False, stab_p: list = [5, 'A', 1, 15, 0.2, 0.15, "290:360|0.4,0.2"], render_factor: int = 24) -> vs.VideoNode:
+def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = [0.2, 0.8, "0:30,300:360"], smooth: bool = False, smooth_p: list = [0.3, 0.7, 0.9, 0.05, "none"], stab: bool = False, stab_p: list = [5, 'A', 1, 15, 0.2, 0.15, "300:360|0.5,0.0"], render_factor: int = 24) -> vs.VideoNode:
     """Video color stabilization filter, which can be applied to stabilize the chroma components in ddeoldify colored clips. 
         :param clip:                clip to process, only RGB24 format is supported.
         :param dark:                enable/disable darkness filter, range [True,False]                                        
@@ -312,10 +312,10 @@ def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = 
     clip_colored = clip
     
     if dark_enabled:
-        clip_colored = vs_dark_tweak(clip_colored, dark_threshold=dark_threshold, dark_amount=dark_amount, dark_hue_adjust=dark_hue_adjust)  
+        clip_colored = vs_dark_tweak(clip_colored, dark_threshold=dark_threshold, dark_amount=dark_amount, dark_hue_adjust=dark_hue_adjust.lower())  
                     
     if chroma_smoothing_enabled:
-        clip_colored = vs_chroma_bright_tweak(clip_colored, black_threshold=black_threshold, white_threshold=white_threshold, dark_sat=dark_sat, dark_bright=dark_bright, chroma_adjust=chroma_adjust) 
+        clip_colored = vs_chroma_bright_tweak(clip_colored, black_threshold=black_threshold, white_threshold=white_threshold, dark_sat=dark_sat, dark_bright=dark_bright, chroma_adjust=chroma_adjust.lower()) 
         
     if stab_enabled:
         clip_colored = vs_chroma_stabilizer_ex(clip_colored, nframes=stab_nframes, mode=stab_mode, sat=stab_sat, tht=stab_tht, weight=stab_weight, hue_adjust=stab_hue_adjust.lower(), algo=stab_algo)
