@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-04-08
+LastEditTime: 2024-04-29
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -42,7 +42,7 @@ def restore_color(img_color: Image = None, img_gray: Image = None, sat: float=1.
     hsv_gray = cv2.cvtColor(np_gray, cv2.COLOR_RGB2HSV)
     
     # desatured the color image
-    hsv_color[:, :, 1] = hsv_color[:, :, 1] * min(max(sat, 0), 1)
+    hsv_color[:, :, 1] = hsv_color[:, :, 1] * min(max(sat, 0), 10)
     
     np_color_sat = cv2.cvtColor(hsv_color, cv2.COLOR_HSV2RGB)
     
@@ -96,13 +96,17 @@ def adjust_hue_range(img_color: Image = None, hue_adjust: str='none', return_mas
     
     param = _parse_hue_adjust(hue_adjust)
     
+    if param==None:
+        return img_color
+    
     hue_range = param[0]
     sat = param[1]
-    weight = param[2]
+    hue = param[2]
+    weight = param[3]
             
-    return adjust_chroma(img_color=img_color, hue_range=hue_range, sat=sat, weight=weight, return_mask=return_mask)
+    return adjust_chroma(img_color=img_color, hue_range=hue_range, sat=sat, hue=hue, weight=weight, return_mask=return_mask)
 
-def adjust_chroma(img_color: Image = None, hue_range: str='none', sat: float = 0.3, weight: float = 0, return_mask: bool=False) -> Image:
+def adjust_chroma(img_color: Image = None, hue_range: str='none', sat: float = 0.3, hue: int = 0, weight: float = 0, return_mask: bool=False) -> Image:
     
     if hue_range=='none' or hue_range=='':
         return img_color
@@ -114,8 +118,13 @@ def adjust_chroma(img_color: Image = None, hue_range: str='none', sat: float = 0
     
     hsv_color = cv2.cvtColor(np_color, cv2.COLOR_RGB2HSV)       
     
-    # desatured the color image to gray
-    np_gray[:, :, 1] = np_gray[:, :, 1] * min(max(sat, 0), 1)
+    #apply hue correction, range [-180.+180], converted to [-90.+90] 
+    if hue != 0:
+        np_gray[:, :, 0] = np_gray[:, :, 0] + hue*0.5
+    
+    # desatured the color image
+    if sat != 1:
+        np_gray[:, :, 1] = np_gray[:, :, 1] * min(max(sat, 0), 10)
     
     np_gray_rgb = cv2.cvtColor(np_gray, cv2.COLOR_HSV2RGB)
     
@@ -136,9 +145,74 @@ def adjust_chroma(img_color: Image = None, hue_range: str='none', sat: float = 0
     np_restored = np_image_mask_merge(np_color, np_gray_rgb, mask_rgb)
     
     if weight > 0:
-        np_restored = np_weighted_merge(np_restored, np_gray_rgb, weight)
+        if hue==0:
+            np_restored = np_weighted_merge(np_restored, np_gray_rgb, weight)
+        else:
+            np_restored = np_weighted_merge(np_restored, np_color, weight)
     
     return Image.fromarray(np_restored,'RGB').convert('RGB') 
+
+def np_image_chroma_tweak(img_color_rgb: np.ndarray, sat: float = 1, bright: float = 0, hue: int = 0, hue_adjust: str='none') -> np.ndarray:
+
+    if (sat == 1 and bright == 0 and hue == 0 and hue_adjust == 'none'):
+        return img_color_rgb  # non changes
+       
+    hsv = cv2.cvtColor(img_color_rgb, cv2.COLOR_RGB2HSV)
+    
+    hsv[:, :, 0] = np_hue_add(hsv[:, :, 0], hue)
+    hsv[:, :, 1] = hsv[:, :, 1] * min(max(sat, 0), 10)
+    hsv[:, :, 2] = hsv[:, :, 2] * min(max(1 + bright, 0), 10)
+                     
+    np_color_rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+        
+    if hue_adjust=='none' or hue_adjust=='':
+        return np_color_rgb
+    
+    param = _parse_hue_adjust(hue_adjust)
+    
+    if param==None:
+        return np_color_rgb
+           
+    hue_range = param[0]
+    sat = param[1]    
+    hue = param[2] #override hue with the new value
+    weight = param[3]
+    
+    np_gray = np_color_rgb.copy()    
+    np_gray = cv2.cvtColor(np_gray, cv2.COLOR_RGB2HSV)    
+    
+    hsv_color = hsv.copy()
+    
+    #apply hue correction, range [-180.+180], converted to [-90.+90] 
+    if hue != 0:
+        np_gray[:, :, 0] = np_hue_add(np_gray[:, :, 0], hue)
+    
+    # desatured the color image
+    if sat != 1:
+        np_gray[:, :, 1] = np_gray[:, :, 1] * min(max(sat, 0), 10)
+    
+    np_gray_rgb = cv2.cvtColor(np_gray, cv2.COLOR_HSV2RGB)
+    
+    hsv_s = hsv_color[:, :, 0]
+    
+    cond = _build_hue_conditions(hsv_s, hue_range)  
+    
+    hsv_mask = np.where(cond, 255, 0) # white only gray pixels
+       
+    mask_rgb = img_color_rgb.copy();
+    
+    for i in range(3):
+        mask_rgb[:,:,i] = hsv_mask       
+        
+    np_restored = np_image_mask_merge(img_color_rgb, np_gray_rgb, mask_rgb)
+    
+    if hue==0:
+        np_restored = np_weighted_merge(np_restored, np_gray_rgb, weight)
+    else:
+        np_restored = np_weighted_merge(np_restored, img_color_rgb, weight)
+            
+    return np_restored
+
 
 def np_adjust_chroma2(np_color_rgb: np.ndarray, np_gray_rgb: np.ndarray, hue_range: str='none', return_mask: bool=False) -> np.ndarray:
     
@@ -165,14 +239,37 @@ def np_adjust_chroma2(np_color_rgb: np.ndarray, np_gray_rgb: np.ndarray, hue_ran
     return np_restored
 
 def _parse_hue_adjust(hue_adjust: str='none') -> ():
+
     p = hue_adjust.split("|")
     
-    if len(p)!=2:
+    hue_range = ""
+    sat = 1.0
+    hue = 0;
+    weight = 0;
+    
+    num = len(p) 
+    if num < 1 or num > 2:
         return None
+    
+    hue_range = p[0]
+    
+    if p==1:
+        return (hue_range, sat, hue, weight)
     
     sw = p[1].split(",") 
     
-    return (p[0], float(sw[0]), float(sw[1]))
+    if (sw[0])[0] in ('-', '+'):
+        hue = int(sw[0])
+    else:
+        sat = float(sw[0])
+
+    if sat > 10:   # fix wrong input
+        hue = int(sat)
+        sat = 1.0
+    
+    weight = float(sw[1])
+    
+    return (hue_range, sat, hue, weight)
   
 
 def _build_hue_conditions(hsv_s: np.ndarray=None, hue_range: str= None) -> np.ndarray:
@@ -229,4 +326,27 @@ def _parse_hue_range(hue_range: str = None) -> ():
                 raise vs.Error("ddeoldify: unknown hue name: " + hue_range)    
     
     return rng
+
+def get_color_tune(hue_name: str = None) -> str:
+    #For color increments, each block in a given "hue_range" represents a Hue change of 30.     
+    match hue_name:
+        case "magenta":
+            rng = "270:300"
+        case "magenta/violet":
+            rng = "270:330"
+        case "violet":
+            rng = "300:330" 
+        case "violet/red":
+            rng = "300:360"
+        case "blue/magenta":
+            rng = "240:300" 
+        case "yellow":
+            rng = "60:90"
+        case "yellow/orange":
+            rng = "30:90" 
+        case "yellow/green":
+            rng = "60:120"
+        case _:
+            raise vs.Error("ddeoldify: unknown color tune: " + hue_name)    
     
+    return rng    

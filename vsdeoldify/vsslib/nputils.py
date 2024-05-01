@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-04-05
+LastEditTime: 2024-04-27
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -217,6 +217,25 @@ def chroma_np_post_process(img_np: np.ndarray, orig_np: np.ndarray) -> np.ndarra
     orig_copy[:, :, 1:3] = img_yuv[:, :, 1:3]
     return cv2.cvtColor(orig_copy, cv2.COLOR_YUV2RGB)
 
-
-
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+Function to add hue correction in cv2 HSV color space. 
+hue range [-360.+360], converted to [-180.+180] 
+"""
+def np_hue_add(hsv_s: np.ndarray=None, hue: int = 0):
+    
+    if hue==0:
+        return hsv_s
+    
+    hue_half = 0.5 * min(max(hue,-360), 360)
+        
+    hsv_s = hsv_s + hue_half
+    hsv_s = np.where(hsv_s > 180, hsv_s-180, hsv_s)
+    hsv_s = np.where(hsv_s < 0, hsv_s+180, hsv_s)
+    
+    return hsv_s 
 

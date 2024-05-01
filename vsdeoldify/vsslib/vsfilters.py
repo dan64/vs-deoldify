@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-04-08
+LastEditTime: 2024-04-27
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -348,13 +348,29 @@ def vs_chroma_bright_tweak(clip: vs.VideoNode = None, black_threshold: float = 0
     
     def merge_frame(n, f, black_limit: float = 0.3, white_limit: float = 0.6, dark_bright: float = -0.10, dark_sat: float = 0.8, chroma_adjust: str='none'):                
         img1 = frame_to_image(f)
-        img2 = image_tweak(img1, bright=dark_bright, sat=dark_sat, hue_range=chroma_adjust) 
+        img2 = image_chroma_tweak(img1, bright=dark_bright, sat=dark_sat, hue_adjust=chroma_adjust) 
         if black_limit == white_limit:
             img_m = image_luma_merge(img2, img1, black_limit)
         else:
             img_m = w_image_luma_merge(img2, img1, black_limit, white_limit)
         return image_to_frame(img_m, f.copy())                
     return clip.std.ModifyFrame(clips=clip, selector=partial(merge_frame, black_limit=black_threshold, white_limit=white_threshold, dark_bright=dark_bright, dark_sat=dark_sat, chroma_adjust=chroma_adjust))
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+Direct color mapping using the "chroma adjustment".
+"""
+def vs_colormap(clip: vs.VideoNode = None, colormap: str='none') -> vs.VideoNode:      
+    
+    def merge_frame(n, f, chroma_adjust: str='none'):                
+        img = frame_to_image(f)
+        img_m = image_chroma_tweak(img, hue_adjust=chroma_adjust) 
+        return image_to_frame(img_m, f.copy())                
+    return clip.std.ModifyFrame(clips=clip, selector=partial(merge_frame, chroma_adjust=colormap))
 
 """
 ------------------------------------------------------------------------------- 

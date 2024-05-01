@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-04-10
+LastEditTime: 2024-04-30
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -33,7 +33,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, message="Arguments oth
 warnings.filterwarnings("ignore", category=UserWarning, message="Arguments other than a weight enum or `None`.*?")
 warnings.filterwarnings("ignore", category=UserWarning, message="torch.nn.utils.weight_norm is deprecated.*?")
 
-__version__ = "3.1.1"
+__version__ = "3.5.0"
 
 package_dir = os.path.dirname(os.path.realpath(__file__))
 model_dir = os.path.join(package_dir, "models")
@@ -43,6 +43,124 @@ torch.backends.cudnn.benchmark=True
 
 import vapoursynth as vs
 
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+wrapper to deoldify() function with "presets" management
+"""
+def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorFix: str = 'Violet/Red', ColorTune: str = 'Light', ColorMap: str = 'None', enable_fp16: bool = True) -> vs.VideoNode:
+    """Main vsdeoldify function supporting the Presets
+    
+    :param clip:                clip to process, only RGB24 format is supported.
+    :param Preset:              Preset to control the encoding speed/quality.
+                                Allowed values are:
+                                    'Placebo', 
+                                    'VerySlow', 
+                                    'Slower', 
+                                    'Slow', 
+                                    'Medium', 
+                                    'Fast',  (default)
+                                    'Faster', 
+                                    'VeryFast'                                    
+    :param ColorFix:            This parameter allows to reduce color noise on determinated chroma ranges.
+                                Allowed values are:
+                                    'None',  
+                                    'Magenta', 
+                                    'Magenta/Violet', 
+                                    'Violet', 
+                                    'Violet/Red', (default) 
+                                    'Blue/Magenta', 
+                                    'Yellow', 
+                                    'Yellow/Orange', 
+                                    'Yellow/Green'
+    :param ColorTune:           This parameter allows to define the intensity of noise reduction applied by ColorFix.
+                                Allowed values are:
+                                    'Light',  (default)
+                                    'Medium', 
+                                    'Strong', 
+    :param ColorMap:            This parameter allows to change a given color range to another color. 
+                                Allowed values are:
+                                    'None', (default)
+                                    'Blue->Brown', 
+                                    'Blue->Red', 
+                                    'Blue->Green', 
+                                    'Green->Brown', 
+                                    'Green->Red', 
+                                    'Green->Blue', 
+                                    'Red->Brown', 
+                                    'Red->Blue'    
+    :param enable_fp16:         Enable/disable FP16 in ddcolor inference, range [True, False]                                    
+    """
+    # Select presets / tuning
+    Preset = Preset.lower()
+    presets = ['placebo', 'veryslow', 'slower', 'slow', 'medium', 'fast', 'faster', 'veryfast']
+    preset0_rf = [34, 32, 30, 28, 26, 24, 20, 16]
+    preset1_rf = [48, 44, 36, 32, 28, 24, 20, 16]
+    
+    try:
+        pr_id = presets.index(Preset)
+    except ValueError:
+        raise vs.Error("ddeoldify: Preset choice is invalid for '" + pr_id + "'")
+    
+    deoldify_rf = preset0_rf[pr_id]
+    ddcolor_rf = preset1_rf[pr_id]
+    
+    #vs.core.log_message(2, "Preset index: " + str(pr_id) )
+
+    # Select ColorTune for ColorFix
+    ColorTune = ColorTune.lower()
+    color_tune = ['light', 'medium', 'strong']  
+    hue_tune = ["0.8,0.1", "0.5,0.1", "0.2,0.1"]       
+    hue_tune2 = ["0.9,0", "0.7,0", "0.5,0"]       
+    
+    try:
+        tn_id = color_tune.index(ColorTune)
+    except ValueError:
+        raise vs.Error("ddeoldify: ColorTune choice is invalid for '" + ColorTune + "'")
+        
+    
+    # Select ColorFix for ddcolor/stabilizer
+    ColorFix = ColorFix.lower()
+    color_fix = ['none', 'magenta', 'magenta/violet', 'violet', 'violet/red', 'blue/magenta', 'yellow', 'yellow/orange', 'yellow/green']  
+    hue_fix = ["none", "270:300", "270:330", "300:330", "300:360", "220:280" , "60:90", "30:90", "60:120"]       
+
+    try:
+        co_id = color_fix.index(ColorFix)
+    except ValueError:
+        raise vs.Error("ddeoldify: ColorFix choice is invalid for '" + ColorFix + "'")
+    
+    if co_id == 0:
+        hue_range = "none"
+        hue_range2 = "none"
+    else:    
+        hue_range = hue_fix[co_id] + "|" + hue_tune[tn_id]
+        hue_range2 = hue_fix[co_id] + "|" + hue_tune2[tn_id]
+        
+    # Select Color Mapping
+    ColorMap = ColorMap.lower()    
+    colormap = ['none', 'blue->brown', 'blue->red', 'blue->green', 'green->brown', 'green->red', 'green->blue', 'red->brown', 'red->blue']
+    hue_map = ["none", "180:280|+140,0.1", "180:280|+100,0.1", "180:280|+220,0.1", "80:180|+260,0.1", "80:180|+220,0.1", "80:180|+140,0.1", "300:360,0:20|+40,0.3", "300:360,0:20|+260,0.3"]
+        
+    try:
+        cl_id = colormap.index(ColorMap)
+    except ValueError:
+        raise vs.Error("ddeoldify: ColorMap choice is invalid for '" + ColorMap + "'")
+    
+    chroma_adjust = hue_map[cl_id] 
+    
+    clip_colored = ddeoldify(clip, method=2, mweight=0.5, deoldify_p=[0, deoldify_rf, 1.0, 0.0], ddcolor_p=[1, ddcolor_rf, 1.0, 0.0, enable_fp16], ddtweak=True, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range])              
+    
+    if pr_id > 5 and cl_id > 0:    
+        clip_colored = ddeoldify_stabilizer(clip_colored, colormap=chroma_adjust)
+    elif pr_id > 3:       
+        clip_colored = ddeoldify_stabilizer(clip_colored, dark=True, dark_p= [0.2, 0.8], smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, chroma_adjust], stab=True, stab_p=[5, 'A', 1, 15, 0.2, 0.15])
+    else:
+        clip_colored = ddeoldify_stabilizer(clip_colored, dark=True, dark_p= [0.2, 0.8], smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, chroma_adjust], stab=True, stab_p=[5, 'A', 1, 15, 0.2, 0.15, hue_range2])
+        
+    return clip_colored
 
 """
 ------------------------------------------------------------------------------- 
@@ -53,7 +171,7 @@ Description:
 wrapper to deoldify() functions with additional filters pre-process and post-process
 """
 def ddeoldify(
-    clip: vs.VideoNode, method: int = 2, mweight: float = 0.5, deoldify_p: list = [0, 24, 1.0, 0.0], ddcolor_p: list = [1, 24, 1.0, 0.0, True], ddtweak: bool = False, ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.2, 0.5, 1.5, 0.5, "300:360|0.3,0.2"],  cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0], alm_p: list = [0.8, 1.0, 0.15], cmb_sw: bool = False, device_index: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
+    clip: vs.VideoNode, method: int = 2, mweight: float = 0.5, deoldify_p: list = [0, 24, 1.0, 0.0], ddcolor_p: list = [1, 24, 1.0, 0.0, True], dotweak: bool = False, dotweak_p: list = [0.0, 1.0, 1.0, False, 0.2, 0.5, 1.5, 0.5], ddtweak: bool = False, ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.3,0.1"],  cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0], alm_p: list = [0.8, 1.0, 0.15], cmb_sw: bool = False, device_index: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
     """A Deep Learning based project for colorizing and restoring old images and video using Deoldify and DDColor 
 
     :param clip:                clip to process, only RGB24 format is supported.
@@ -110,6 +228,23 @@ def ddeoldify(
                                    [2] saturation parameter to apply to deoldify color model (default = 1)
                                    [3] hue parameter to apply to deoldify color model (default = 0)
                                    [4] enable/disable FP16 in ddcolor inference
+    :param dotweak:             enabled/disable tweak parameters for deoldify(), range [True,False]                                   
+    :param dotweak_p:           tweak parameters for ddeoldify():                                   
+                                   [0] : ddcolor tweak's bright (default = 0)
+                                   [1] : ddcolor tweak's constrast (default = 1), if < 1 ddeoldify provides de-saturated frames
+                                   [2] : ddcolor tweak's gamma (default = 1) 
+                                   [3] : luma constrained gamma -> luma constrained gamma correction enabled (default = False), range: [True, False]
+                                            When enabled the average luma of a video clip will be forced to don't be below the value
+                                            defined by the parameter "luma_min". The function allow to modify the gamma
+                                            of the clip if the average luma is below the parameter "gamma_luma_min". A gamma value > 2.0 improves 
+                                            the ddcolor stability on bright scenes, while a gamma < 1 improves the ddcolor stability on 
+                                            dark scenes. The decrease of the gamma with luma is activated using a gamma_alpha != 0.                                                
+                                   [4] : luma_min: luma (%) min value for tweak activation (default = 0.2), if=0 is not activated, range [0-1]
+                                   [5] : gamma_luma_min: luma (%) min value for gamma tweak activation (default = 0.5), if=0 is not activated, range [0-1]
+                                   [6] : gamma_alpha: the gamma will decrease with the luma g = max(gamma * pow(luma/gamma_luma_min, gamma_alpha), gamma_min),
+                                         for a movie with a lot of dark scenes is suggested alpha > 1, if=0 is not activated, range [>=0]
+                                   [7] : gamma_min: minimum value for gamma, range (default=0.5) [>0.1]
+                                   [8] : "chroma adjustment" parameter (optional), if="none" is disabled (see the README) 
     :param ddtweak:             enabled/disable tweak parameters for ddcolor(), range [True,False]                                   
     :param ddtweak_p:           tweak parameters for ddcolor():                                   
                                    [0] : ddcolor tweak's bright (default = 0)
@@ -195,7 +330,7 @@ def ddeoldify(
         clip_orig = clip;
         clip = clip.resize.Spline64(width=frame_size, height=frame_size) 
                     
-    clipa = vs_deoldify(clip, method=method, model=deoldify_model, render_factor=deoldify_rf, package_dir=package_dir) 
+    clipa = vs_deoldify(clip, method=method, model=deoldify_model, render_factor=deoldify_rf, tweaks_enabled=dotweak, tweaks=dotweak_p, package_dir=package_dir) 
     clipb = vs_ddcolor(clip, method=method, model=ddcolor_model, render_factor=ddcolor_rf, tweaks_enabled=ddtweak, tweaks=ddtweak_p, enable_fp16=ddcolor_enable_fp16, device_index=device_index)             
            
     clip_colored = vs_combine_models(clip_a=clipa, clip_b=clipb, method=method, sat=[deoldify_sat, ddcolor_sat], hue=[deoldify_hue, ddcolor_hue], clipb_weight=merge_weight, CMC_p=cmc_tresh, LMM_p=lmm_p, ALM_p = alm_p, invert_clips=cmb_sw)
@@ -213,7 +348,7 @@ Description:
 ------------------------------------------------------------------------------- 
 Video color stabilization filter, derived from ddeoldify
 """
-def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = [0.2, 0.8, "0:30,300:360"], smooth: bool = False, smooth_p: list = [0.3, 0.7, 0.9, 0.05, "none"], stab: bool = False, stab_p: list = [5, 'A', 1, 15, 0.2, 0.15, "300:360|0.5,0.0"], render_factor: int = 24) -> vs.VideoNode:
+def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = [0.2, 0.8], smooth: bool = False, smooth_p: list = [0.3, 0.7, 0.9, 0.0, "none"], stab: bool = False, stab_p: list = [5, 'A', 1, 15, 0.2, 0.15], colormap: str = "none", render_factor: int = 24) -> vs.VideoNode:
     """Video color stabilization filter, which can be applied to stabilize the chroma components in ddeoldify colored clips. 
         :param clip:                clip to process, only RGB24 format is supported.
         :param dark:                enable/disable darkness filter, range [True,False]                                        
@@ -244,6 +379,7 @@ def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = 
                                       [4] : weight, weight to blend the restored imaage (default=0.2), range [0-1], if=0 is not applied the blending 
                                       [5] : tht_scen, threshold for scene change detection (default = 0.15), if=0 is not activated, range [0.01-0.50]
                                       [6] : "chroma adjustment" parameter (optional), if="none" is disabled (see the README) 
+        :param colormap             direct hue/color mapping, without luma filtering, using the "chroma adjustment" parameter, if="none" is disabled 
         :param render_factor:       render_factor to apply to the filters, the frame size will be reduced to speed-up the filters, 
                                     but the final resolution will be the one of the original clip. If = 0 will be auto selected. 
                                     This approach takes advantage of the fact that human eyes are much less sensitive to
@@ -294,7 +430,11 @@ def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = 
         chroma_adjust = smooth_p[4]
     else:
         chroma_adjust = 'none'
-        
+
+    # define colormap
+    colormap = colormap.lower()
+    colormap_enabled = (colormap != "none" and colormap != "")    
+    
     # unpack chroma_stabilizer
     stab_enabled = stab
     stab_nframes = stab_p[0]
@@ -316,7 +456,10 @@ def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = 
                     
     if chroma_smoothing_enabled:
         clip_colored = vs_chroma_bright_tweak(clip_colored, black_threshold=black_threshold, white_threshold=white_threshold, dark_sat=dark_sat, dark_bright=dark_bright, chroma_adjust=chroma_adjust.lower()) 
-        
+    
+    if colormap_enabled:
+        clip_colored = vs_colormap(clip_colored, colormap=colormap) 
+    
     if stab_enabled:
         clip_colored = vs_chroma_stabilizer_ex(clip_colored, nframes=stab_nframes, mode=stab_mode, sat=stab_sat, tht=stab_tht, weight=stab_weight, hue_adjust=stab_hue_adjust.lower(), algo=stab_algo)
         

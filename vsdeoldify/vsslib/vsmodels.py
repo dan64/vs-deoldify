@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-04-10
+LastEditTime: 2024-04-27
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -29,11 +29,46 @@ Description:
 ------------------------------------------------------------------------------- 
 wrapper to deoldify. 
 """
-def vs_deoldify(clip: vs.VideoNode, method: int = 2, model: int = 0, render_factor: int = 24, package_dir: str = "") -> vs.VideoNode: 
+def vs_deoldify(clip: vs.VideoNode, method: int = 2, model: int = 0, render_factor: int = 24, tweaks_enabled: bool = False, tweaks: list = [0.0, 0.9, 0.7, False, 0.3, 0.3], package_dir: str = "") -> vs.VideoNode: 
     
     if method == 1:
         return None
+    
+    # unpack tweaks
+    bright = tweaks[0]
+    cont = tweaks[1]
+    gamma = tweaks[2]
+    luma_constrained_tweak=tweaks[3]
+    luma_min = tweaks[4] 
+    gamma_luma_min = tweaks[5]
+    gamma_alpha = tweaks[6]
+    gamma_min = tweaks[7]    
+    if (len(tweaks) > 8):
+        hue_adjust = tweaks[8]
+    else:
+        hue_adjust = 'none'
+    
+    if tweaks_enabled:     
+        if luma_constrained_tweak:
+            clipa = vs_tweak(clip, bright=bright, cont=cont) # contrast and bright are adjusted before the constrainded luma and gamma
+            clipa = constrained_tweak(clipa, luma_min = luma_min, gamma=gamma, gamma_luma_min = gamma_luma_min, gamma_alpha = gamma_alpha, gamma_min=gamma_min)
+        else:
+            clipa = vs_tweak(clip, bright=bright, cont=cont, gamma=gamma)
+    else:
+        clipa = clip
         
+    clipa_rgb =  _deoldify(clipa, model, render_factor, package_dir)    
+    
+    if tweaks_enabled and hue_adjust != 'none':
+        clipa_rgb = vs_adjust_clip_hue(clipa_rgb, hue_adjust.lower())
+    
+    if tweaks_enabled:
+        return vs_recover_clip_luma(clip, clipa_rgb)
+    else:
+        return clipa_rgb    
+
+def _deoldify(clip: vs.VideoNode, model: int = 0, render_factor: int = 24, package_dir: str = "") -> vs.VideoNode: 
+            
     match model:
         case 0:
             colorizer = get_image_colorizer(root_folder=Path(package_dir), artistic=False,isvideo=True) 

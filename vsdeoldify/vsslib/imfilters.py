@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-04-08
+LastEditTime: 2024-04-27
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -17,6 +17,7 @@ from PIL import Image, ImageMath
 
 from .nputils import *
 from .restcolor import np_adjust_chroma2
+from .restcolor import np_image_chroma_tweak
 
 
 """
@@ -60,8 +61,8 @@ Description:
 merge image1 with image2 using the image mask (mask_white->img_white, mask_black->img_dark) 
 """
 def image_luma_merge(img_dark: Image, img_white: Image, luma: float = 0, return_mask: bool = False) -> Image:
-    img1_np = np.array(img1)
-    img2_np = np.array(img2)
+    img1_np = np.array(img_dark)
+    img2_np = np.array(img_white)
     # the mask is built using the second image
     mask_np = np_rgb_to_gray(img2_np, luma)
     
@@ -327,13 +328,13 @@ Description:
 ------------------------------------------------------------------------------- 
 Simple function adjust hue and decrease saturation/brightness of an image.    
 The ranges that OpenCV manage for HSV format are the following:
-- Hue range is [0,179], 
-- Saturation range is [0,255] 
-- Value range is [0,255].
+- Hue: range is [-180,+180], 
+- Saturation: range is [0,10] 
+- Value: range is [-1,10].
 For the 8-bit images, H is converted to H/2 to fit to the [0,255] range. 
-So the range of hue in the HSV color space of OpenCV is [0,179]
+So the range of hue in the HSV color space of OpenCV is [-90,+90]
 """
-def image_tweak(img: Image, sat: float = 1, bright: float = 0, hue: float = 0, hue_range: str='none') -> Image:
+def image_tweak(img: Image, sat: float = 1, bright: float = 0, hue: int = 0, hue_range: str='none') -> Image:
 
     if (sat == 1 and bright == 0 and hue == 0):
         return img  # non changes
@@ -344,16 +345,27 @@ def image_tweak(img: Image, sat: float = 1, bright: float = 0, hue: float = 0, h
     
     return Image.fromarray(img_rgb,'RGB').convert('RGB') 
 
-def np_image_tweak(img_np: np.ndarray, sat: float = 1, bright: float = 0, hue: float = 0, hue_range: str='none') -> np.ndarray:
+def image_chroma_tweak(img: Image, sat: float = 1, bright: float = 0, hue: int = 0, hue_adjust: str='none') -> Image:
+    
+    if (sat == 1 and bright == 0 and hue == 0 and hue_adjust == "none"):
+        return img  # non changes
+    
+    img_np = np.asarray(img)
+        
+    img_rgb = np_image_chroma_tweak(img_np, sat, bright, hue, hue_adjust)
+    
+    return Image.fromarray(img_rgb,'RGB').convert('RGB') 
+
+def np_image_tweak(img_np: np.ndarray, sat: float = 1, bright: float = 0, hue: int = 0, hue_range: str='none') -> np.ndarray:
 
     if (sat == 1 and bright == 0 and hue == 0 and hue_range == 'none'):
         return img_np  # non changes
        
     hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
-    
-    hsv[:, :, 0] = hsv[:, :, 0] * min(max(1 + hue, 0),2)
-    hsv[:, :, 1] = hsv[:, :, 1] * min(max(sat, 0), 1)
-    hsv[:, :, 2] = hsv[:, :, 2] * min(max(1 + bright, 0), 1)
+        
+    hsv[:, :, 0] = np_hue_add(hsv[:, :, 0], hue)
+    hsv[:, :, 1] = hsv[:, :, 1] * min(max(sat, 0), 10)
+    hsv[:, :, 2] = hsv[:, :, 2] * min(max(1 + bright, 0), 10)
                      
     img_rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
     
