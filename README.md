@@ -49,16 +49,18 @@ python -m vsddcolor
 ## Usage
 ```python
 from vsdeoldify import ddeoldify
-# DeOldify  with DDColor weighed at 40%
-clip = ddeoldify(clip)
+# DeOldify with DDColor, Preset = "fast"
+clip = ddeoldify_main(clip=clip, Preset="fast")
 # DeOldify only model
 clip = ddeoldify(clip, method=0)
 # DDColor only model
 clip = ddeoldify(clip, method=1)
 
 # To apply video color stabilization filters for ddeoldify
-from vsdeoldify import ddeoldify_stabilizer
 clip = ddeoldify_stabilizer(clip, dark=True, smooth=True, stab=True)
+
+# Simplest way to use Presets
+clip = ddeoldify_main(clip=clip, Preset="fast", ColorFix="violet/red", ColorTune="medium", ColorMap="none")
 ```
 
 See `__init__.py` for the description of the parameters.
@@ -78,7 +80,9 @@ To try to solve this problem has been developed _pre-_ and _post-_ process filte
 
 The main filters introduced are:
 
-**Chroma Smoothing** : This filter allows to to reduce the _vibrancy_ of colors assigned by Deoldify/DDcolor by using the parameters _de-saturation_ and _de-vibrancy_ (the effect on _vibrancy_ will be visible only if the option **chroma resize** is enabled, otherwise this parameter has effect on the _luminosity_). The area impacted by the filter is defined by the thresholds dark/white. All the pixels with luma below the dark threshold will be impacted by the filter, while the pixels above the white threshold will be left untouched. All the pixels in the middle will be gradually impacted depending on the luma value.
+**Degrain** : Since a BW clip with noise/grain can create artifacts on colored frames, this filter allows to reduce the noise/grain contained in the frames. This filter is applied only to the frames to be colored. At the end of the coloring process the original noise/grain of the clip is restored. The strength of the filter has range [0-5], the suggested value is 3 (if = 0 the filter is not applied).  
+
+**Chroma Smoothing** : This filter allows to reduce the _vibrancy_ of colors assigned by Deoldify/DDcolor by using the parameters _de-saturation_ and _de-vibrancy_ (the effect on _vibrancy_ will be visible only if the option **chroma resize** is enabled, otherwise this parameter has effect on the _luminosity_). The area impacted by the filter is defined by the thresholds dark/white. All the pixels with luma below the dark threshold will be impacted by the filter, while the pixels above the white threshold will be left untouched. All the pixels in the middle will be gradually impacted depending on the luma value.
 
 **Chroma Stabilization**: This filter will try to stabilize the frames' colors. As explained previously since the frames are colored individually, the colors can change significantly from one frame to the next, introducing a disturbing psychedelic flashing effect. This filter try to reduce this by averaging the chroma component of the frames. The average is performed using a number of frames specified in the _Frames_ parameter. 
 Are implemented 2 averaging methods: 
@@ -125,8 +129,12 @@ chroma_range = "300:340|0.4,0.2"
 
 the hue colors in the range 300-340 will be de-saturated by the amount 0.4 and the final frame will be blended by applying a 20% de-saturation of 0.4 an all the pixels (if weight=0, no blending is applied).  
 
+To simplify the usage of this filter has been added the Preset _ColorFix_ which allows to fix a given range of chroma combination. The strength of the filter is controlled by the the Preset _ColorTune_.
 
- 
+#### Color Mapping
+
+Using an approach similar to _Chroma Adjustment_ has been introduced the possibility to remap a given gange of colors in another chroma range. This remapping is controlled by the Preset _ColorMap_. For example the preset "blue->brown" allows to remap all the chroma combinations of _blue_ in the color _brown_. It is not expected that this filter can be applied on a full movie, but it could be useful to remap the color on some portion of a movie.    
+
 ### Merging the models
 
 As explained previously, this filter is able to combine the results provided by DeOldify and DDColor, to perform this combination has been implemented 6 methods:
