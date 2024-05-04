@@ -126,12 +126,12 @@ def vs_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 0, render_facto
         clipb = clip
     # adjusting clip's color space to RGBH for vsDDColor
     if enable_fp16:
-        clipb = vsddcolor.ddcolor(clipb.resize.Bicubic(format=vs.RGBH, range_s="limited"), model=model, input_size=input_size, device_index=device_index, num_streams=num_streams)
+        clipb = vsddcolor.ddcolor(clipb.resize.Bicubic(format=vs.RGBH, range_s="full"), model=model, input_size=input_size, device_index=device_index, num_streams=num_streams)
     else:        
-        clipb = vsddcolor.ddcolor(clipb.resize.Bicubic(format=vs.RGBS, range_s="limited"), model=model, input_size=input_size, device_index=device_index, num_streams=num_streams) 
+        clipb = vsddcolor.ddcolor(clipb.resize.Bicubic(format=vs.RGBS, range_s="full"), model=model, input_size=input_size, device_index=device_index, num_streams=num_streams) 
     
     # adjusting color space to RGB24 for deoldify
-    clipb_rgb = clipb.resize.Bicubic(format=vs.RGB24, range_s="limited")
+    clipb_rgb = clipb.resize.Bicubic(format=vs.RGB24, range_s="full")
     
     if tweaks_enabled and hue_adjust != 'none':
         clipb_rgb = vs_adjust_clip_hue(clipb_rgb, hue_adjust.lower())

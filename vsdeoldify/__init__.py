@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-04-30
+LastEditTime: 2024-05-03
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -51,10 +51,11 @@ Description:
 ------------------------------------------------------------------------------- 
 wrapper to deoldify() function with "presets" management
 """
-def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorFix: str = 'Violet/Red', ColorTune: str = 'Light', ColorMap: str = 'None', enable_fp16: bool = True) -> vs.VideoNode:
+def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorFix: str = 'Violet/Red', ColorTune: str = 'Light', ColorMap: str = 'None', degrain_strength: int = 0, enable_fp16: bool = True) -> vs.VideoNode:
     """Main vsdeoldify function supporting the Presets
     
     :param clip:                clip to process, only RGB24 format is supported.
+                                (please remove any noise/grain from the clip using the provided option "degrain_strength=3", because the noise/grain can create artifacts on colored frames).
     :param Preset:              Preset to control the encoding speed/quality.
                                 Allowed values are:
                                     'Placebo', 
@@ -92,6 +93,7 @@ def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorFix: str = 'Vi
                                     'Green->Blue', 
                                     'Red->Brown', 
                                     'Red->Blue'    
+    :param degrain_strength:    strenght of denoise/degrain pre-filter applied on BW clip, if = 0 the pre-filter is disabled, range [0-5], suggested = 3                                
     :param enable_fp16:         Enable/disable FP16 in ddcolor inference, range [True, False]                                    
     """
     # Select presets / tuning
@@ -151,7 +153,7 @@ def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorFix: str = 'Vi
     
     chroma_adjust = hue_map[cl_id] 
     
-    clip_colored = ddeoldify(clip, method=2, mweight=0.5, deoldify_p=[0, deoldify_rf, 1.0, 0.0], ddcolor_p=[1, ddcolor_rf, 1.0, 0.0, enable_fp16], ddtweak=True, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range])              
+    clip_colored = ddeoldify(clip, method=2, mweight=0.5, deoldify_p=[0, deoldify_rf, 1.0, 0.0], ddcolor_p=[1, ddcolor_rf, 1.0, 0.0, enable_fp16], ddtweak=True, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range], degrain_strength=degrain_strength)              
     
     if pr_id > 5 and cl_id > 0:    
         clip_colored = ddeoldify_stabilizer(clip_colored, colormap=chroma_adjust)
@@ -171,10 +173,11 @@ Description:
 wrapper to deoldify() functions with additional filters pre-process and post-process
 """
 def ddeoldify(
-    clip: vs.VideoNode, method: int = 2, mweight: float = 0.5, deoldify_p: list = [0, 24, 1.0, 0.0], ddcolor_p: list = [1, 24, 1.0, 0.0, True], dotweak: bool = False, dotweak_p: list = [0.0, 1.0, 1.0, False, 0.2, 0.5, 1.5, 0.5], ddtweak: bool = False, ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.3,0.1"],  cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0], alm_p: list = [0.8, 1.0, 0.15], cmb_sw: bool = False, device_index: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
+    clip: vs.VideoNode, method: int = 2, mweight: float = 0.5, deoldify_p: list = [0, 24, 1.0, 0.0], ddcolor_p: list = [1, 24, 1.0, 0.0, True], dotweak: bool = False, dotweak_p: list = [0.0, 1.0, 1.0, False, 0.2, 0.5, 1.5, 0.5], ddtweak: bool = False, ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.8,0.1"],  degrain_strength: int = 0, cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0], alm_p: list = [0.8, 1.0, 0.15], cmb_sw: bool = False, device_index: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
     """A Deep Learning based project for colorizing and restoring old images and video using Deoldify and DDColor 
 
-    :param clip:                clip to process, only RGB24 format is supported.
+    :param clip:                clip to process, only RGB24 format is supported 
+                                (please remove any noise/grain from the clip using the provided option "degrain_strength=3", because the noise/grain can create artifacts on colored frames).
     :param method:              method used to combine deoldify() with ddcolor() (default = 2): 
                                     0 : deoldify only (no merge)
                                     1 : ddcolor only (no merge)                                 
@@ -262,6 +265,7 @@ def ddeoldify(
                                          for a movie with a lot of dark scenes is suggested alpha > 1, if=0 is not activated, range [>=0]
                                    [7] : gamma_min: minimum value for gamma, range (default=0.5) [>0.1]
                                    [8] : "chroma adjustment" parameter (optional), if="none" is disabled (see the README) 
+    :param degrain_strength:    strenght of denoise/degrain pre-filter applied on BW clip, if = 0 the pre-filter is disabled, range [0-5], suggested = 3 
     :param cmc_tresh:           chroma_threshold (%), used by: Constrained "Chroma Merge range" [0-1] (0.01=1%)
     :param lmm_p:               parameters for method: "Luma Masked Merge" (see method=4 for a full explanation) 
                                    [0] : luma_mask_limit: luma limit for build the mask used in Luma Masked Merge, range [0-1] (0.01=1%) 
@@ -281,8 +285,8 @@ def ddeoldify(
 
     if not isinstance(clip, vs.VideoNode):
         raise vs.Error("ddeoldify: this is not a clip")
-
-    chroma_resize = True
+    
+    chroma_resize = True  # always enabled
     merge_weight = mweight
     
     # unpack deoldify_params
@@ -310,9 +314,9 @@ def ddeoldify(
     if clip.format.id != vs.RGB24:
         # clip not in RGB24 format, it will be converted
         if (clip.format.color_family == "YUV"):
-            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="limited", dither_type="error_diffusion") 
+            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion") 
         else:
-            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="limited") 
+            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full") 
            
     #choices: GPU0...GPU7, CPU=99 
     device.set(device=DeviceId(device_index))
@@ -329,7 +333,15 @@ def ddeoldify(
         frame_size = min(max(ddcolor_rf, deoldify_rf) * 16, clip.width)     # frame size calculation for inference()  
         clip_orig = clip;
         clip = clip.resize.Spline64(width=frame_size, height=frame_size) 
-                    
+    
+    try:
+        d_clip = vs_degrain(clip, strength=degrain_strength, device_id=device_index)
+    except:
+        vs.core.log_message(2, "ddeoldify: KNLMeansCL is not installed/loaded properly")   
+        d_clip = clip
+    
+    clip = d_clip
+    
     clipa = vs_deoldify(clip, method=method, model=deoldify_model, render_factor=deoldify_rf, tweaks_enabled=dotweak, tweaks=dotweak_p, package_dir=package_dir) 
     clipb = vs_ddcolor(clip, method=method, model=ddcolor_model, render_factor=ddcolor_rf, tweaks_enabled=ddtweak, tweaks=ddtweak_p, enable_fp16=ddcolor_enable_fp16, device_index=device_index)             
            
@@ -368,7 +380,7 @@ def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = 
                                       [0] : nframes, number of frames to be used in the stabilizer, range[3-15]
                                       [1] : mode, type of average used by the stabilizer: range['A'='arithmetic', 'W'='weighted']
                                       [2] : sat: saturation applied to the restored gray prixels [0,1]
-                                      [3] : tht, threshold to detect gray pixels, range [0,235], if=0 is not applied the restore,
+                                      [3] : tht, threshold to detect gray pixels, range [0,255], if=0 is not applied the restore,
                                             its value depends on merge method used, suggested values are:
                                                 method 0: tht = 5
                                                 method 1: tht = 60 (ddcolor provides very saturared frames)
@@ -393,9 +405,9 @@ def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = 
     if clip.format.id != vs.RGB24:
         # clip not in RGB24 format, it will be converted
         if (clip.format.color_family == "YUV"):
-            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="limited", dither_type="error_diffusion") 
+            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion") 
         else:
-            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="limited") 
+            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full") 
         
     # enable chroma_resize
     chroma_resize_enabled = True

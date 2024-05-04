@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-04-27
+LastEditTime: 2024-05-03
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -49,11 +49,11 @@ def vs_clip_color_stabilizer(clip: vs.VideoNode = None, nframes: int = 5, mode: 
     #vs.core.log_message(2, "weight_list= " + str(len(weight_list))) 
 
     # convert the clip format for AverageFrames to YUV    
-    clip_yuv = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="limited")   
+    clip_yuv = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="full")   
     # apply AverageFrames to YUV colorspace      
     clip_yuv = vs.core.std.AverageFrames(clip_yuv, weight_list, scale = 100, scenechange = scenechange, planes=[1,2])  
     # convert the clip format for deoldify to RGB24 
-    clip_rgb = clip_yuv.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="limited", dither_type="error_diffusion") 
+    clip_rgb = clip_yuv.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion") 
         
     return clip_rgb
 
@@ -190,22 +190,22 @@ def _average_clips_ex(clip: vs.VideoNode = None, weight_list: list = None, sat: 
 
     max_frames = len(weight_list)
     clips = list()
-    clip_yuv = clip.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="limited", dither_type="error_diffusion")
+    clip_yuv = clip.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full", dither_type="error_diffusion")
     Nh = round((max_frames-1)/2)
     for i in range(0, Nh):
         Ni = -(Nh - i)
         clip_i = vs_get_clip_frame(clip=clip, nframe=Ni)
         clip_i = vs_recover_clip_color(clip=clip_i, clip_color=clip, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen, hue_adjust=hue_adjust, return_mask=False)
-        clips.append(clip_i.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="limited", dither_type="error_diffusion"))
+        clips.append(clip_i.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full", dither_type="error_diffusion"))
     clips.append(clip_yuv)
     for i in range(0, Nh):
         Ni = i + 1
         clip_i = vs_get_clip_frame(clip=clip, nframe=Ni)
         clip_i = vs_recover_clip_color(clip=clip_i, clip_color=clip, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen, hue_adjust=hue_adjust, return_mask=False)
-        clips.append(clip_i.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="limited", dither_type="error_diffusion"))
+        clips.append(clip_i.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full", dither_type="error_diffusion"))
     clip_avg = vs.core.std.AverageFrames(clips=clips, weights=weight_list, scale=100, planes=[1,2]) 
     # convert the clip format for deoldify to RGB24 
-    clip_rgb = clip_avg.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="limited", dither_type="error_diffusion") 
+    clip_rgb = clip_avg.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion") 
     
     return clip_rgb
     
@@ -238,7 +238,7 @@ def vs_get_clip_frame(clip: vs.VideoNode, nframe: int = 0) -> vs.VideoNode:
     vs_format = clip.format.id
     
     # clip converted
-    clip_yuv = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="limited")    
+    clip_yuv = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="full")    
     
     # apply AverageFrames to YUV colorspace      
     clip_yuv = vs.core.std.AverageFrames(clip_yuv, weights_list, scale = 100, scenechange = False, planes=[1,2])  
@@ -247,7 +247,7 @@ def vs_get_clip_frame(clip: vs.VideoNode, nframe: int = 0) -> vs.VideoNode:
     if (clip.format.color_family == "YUV"):
         clip = clip_yuv.resize.Bicubic(format=vs_format)     
     else:
-        clip = clip_yuv.resize.Bicubic(format=vs_format, matrix_in_s="709", range_s="limited", dither_type="error_diffusion")
+        clip = clip_yuv.resize.Bicubic(format=vs_format, matrix_in_s="709", range_s="full", dither_type="error_diffusion")
     
     return clip
 
@@ -429,7 +429,7 @@ Description:
 This function is an extension of the Tweak() function available in Hybrid with
 the possibility to change also the gamma of a video clip.    
 """
-def vs_tweak(clip: vs.VideoNode, hue: float = 0, sat: float = 1, bright: float = 0, cont: float = 1, gamma: float = 1, coring: bool = True) -> vs.VideoNode:
+def vs_tweak(clip: vs.VideoNode, hue: float = 0, sat: float = 1, bright: float = 0, cont: float = 1, gamma: float = 1, coring: bool = False) -> vs.VideoNode:
 
     if (hue == 0 and sat == 1 and bright == 0 and cont == 1 and gamma == 1):
         return clip  # non changes
@@ -437,7 +437,7 @@ def vs_tweak(clip: vs.VideoNode, hue: float = 0, sat: float = 1, bright: float =
     c = vs.core
     
     # convert the format for tewak
-    clip = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="limited")
+    clip = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="full")
     
     if (hue != 0 or sat != 1) and clip.format.color_family != vs.GRAY:
 
@@ -490,7 +490,7 @@ def vs_tweak(clip: vs.VideoNode, hue: float = 0, sat: float = 1, bright: float =
             clip = clip.std.Expr(expr=[expression, "", ""])
             
     # convert the clip format for deoldify and std.Levels() to RGB24 
-    clip_rgb = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="limited", dither_type="error_diffusion") 
+    clip_rgb = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion") 
     
     if gamma != 1:
         clip_rgb = clip_rgb.std.Levels(gamma=gamma) 
@@ -515,6 +515,44 @@ def vs_recover_clip_luma(orig: vs.VideoNode = None, clip: vs.VideoNode = None) -
     clip = clip.std.ModifyFrame(clips=[orig, clip], selector=copy_luma_frame)
     return clip
 
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+Function to remove noise/grain from clip, strenght control the amount of noise/grain removed, 
+if = 0 the filter is not applied. It is based on function KNLMeansCL() with GPU suppot enabled.
+"""
+def vs_degrain(clip: vs.VideoNode = None, strength: int = 3, device_id: int = 0) -> vs.VideoNode:
+    
+    if strength == 0:
+        return clip
+    
+    match strength:
+        case 1:       
+          dstr = 1.5
+          dtmp = 1
+        case 2:
+          dstr = 2.5
+          dtmp = 1
+        case 3:
+          dstr = 3.5
+          dtmp = 1
+        case 4:
+          dstr = 5.5
+          dtmp = 2
+        case 5:
+          dstr = 8.5
+          dtemp = 2
+        case _:
+            raise vs.Error("ddeoldify: not supported strength value: " + strength)      
+    
+    clip = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="full")   
+    clip = vs.core.knlm.KNLMeansCL(clip=clip, d=dtemp, a=2, s=4, h=dstr, channels='Y', device_type="gpu", device_id=device_id)
+    clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion") 
+    
+    return clip
 
 """
 ------------------------------------------------------------------------------- 
@@ -550,7 +588,7 @@ def vs_adaptive_Merge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, cl
     def merge_frame(n, f, core, clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clipb_weight: float = 0.0):               
         clip1 = clipa[n]
         clip2 = clipb[n] 
-        clip2_yuv = clip2.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="limited") 
+        clip2_yuv = clip2.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="full") 
         clip2_avg_y = vs.core.std.PlaneStats(clip2_yuv, plane=0)
         luma = clip2_avg_y.get_frame(0).props['PlaneStatsAverage']
         #vs.core.log_message(2, "Luma(" + str(n) + ") = " + str(luma))
