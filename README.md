@@ -133,7 +133,10 @@ To simplify the usage of this filter has been added the Preset _ColorFix_ which 
 
 #### Color Mapping
 
-Using an approach similar to _Chroma Adjustment_ has been introduced the possibility to remap a given gange of colors in another chroma range. This remapping is controlled by the Preset _ColorMap_. For example the preset "blue->brown" allows to remap all the chroma combinations of _blue_ in the color _brown_. It is not expected that this filter can be applied on a full movie, but it could be useful to remap the color on some portion of a movie.    
+Using an approach similar to _Chroma Adjustment_ has been introduced the possibility to remap a given gange of colors in another chroma range. This remapping is controlled by the Preset _ColorMap_. For example the preset "blue->brown" allows to remap all the chroma combinations of _blue_ in the color _brown_. It is not expected that this filter can be applied on a full movie, but it could be useful to remap the color on some portion of a movie.
+
+In the post [ColorMapping Guide for vsDeOldify](https://forum.selur.net/thread-3697-post-22507.html) are provided useful tips on how to use both the _Chroma Adjustment_ and _Color Mapping_ features provided by this filter. 
+  
 
 ### Merging the models
 
