@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-04-27
+LastEditTime: 2024-05-08
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -92,7 +92,7 @@ Description:
 ------------------------------------------------------------------------------- 
 wrapper to function ddcolor() with tweak pre-process.
 """
-def vs_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 0, render_factor: int = 24, tweaks_enabled: bool = False, tweaks: list = [0.0, 0.9, 0.7, False, 0.3, 0.3], enable_fp16: bool = True, device_index: int = 0, num_streams: int = 1) -> vs.VideoNode:
+def vs_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 0, render_factor: int = 24, tweaks_enabled: bool = False, tweaks: list = [0.0, 0.9, 0.7, False, 0.3, 0.3], dstrength: int = 0, enable_fp16: bool = True, device_index: int = 0, num_streams: int = 1) -> vs.VideoNode:
     
     if method == 0:
         return None
@@ -101,7 +101,14 @@ def vs_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 0, render_facto
     
     # input size must a multiple of 32
     input_size = math.trunc(render_factor/2)*32
-       
+    
+    try:
+        d_clip = vs_degrain(clip, strength=dstrength, device_id=device_index)
+    except Exception as error:
+        vs.core.log_message(2, "ddeoldify: KNLMeansCL error -> " + str(error))   
+        d_clip = clip    
+    clip = d_clip 
+    
     # unpack tweaks
     bright = tweaks[0]
     cont = tweaks[1]
@@ -123,7 +130,7 @@ def vs_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 0, render_facto
         else:
             clipb = vs_tweak(clip, bright=bright, cont=cont, gamma=gamma)
     else:
-        clipb = clip
+        clipb = clip       
     # adjusting clip's color space to RGBH for vsDDColor
     if enable_fp16:
         clipb = vsddcolor.ddcolor(clipb.resize.Bicubic(format=vs.RGBH, range_s="full"), model=model, input_size=input_size, device_index=device_index, num_streams=num_streams)

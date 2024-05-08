@@ -80,7 +80,7 @@ To try to solve this problem has been developed _pre-_ and _post-_ process filte
 
 The main filters introduced are:
 
-**Degrain** : Since a BW clip with noise/grain can create artifacts on colored frames, this filter allows to reduce the noise/grain contained in the frames. This filter is applied only to the frames to be colored. At the end of the coloring process the original noise/grain of the clip is restored. The strength of the filter has range [0-5], the suggested value is 3 (if = 0 the filter is not applied).  
+**Degrain** : Since a BW clip with noise/grain can create artifacts on colored frames (this effect is more evident with DDColor), this filter allows to reduce the noise/grain contained in the frames. This filter is applied only to the frames to be colored by DDColor. At the end of the coloring process the original noise/grain of the clip is restored. The strength of the filter has range [0-5], the suggested value is 1 (if = 0 the filter is not applied).  
 
 **Chroma Smoothing** : This filter allows to reduce the _vibrancy_ of colors assigned by Deoldify/DDcolor by using the parameters _de-saturation_ and _de-vibrancy_ (the effect on _vibrancy_ will be visible only if the option **chroma resize** is enabled, otherwise this parameter has effect on the _luminosity_). The area impacted by the filter is defined by the thresholds dark/white. All the pixels with luma below the dark threshold will be impacted by the filter, while the pixels above the white threshold will be left untouched. All the pixels in the middle will be gradually impacted depending on the luma value.
 

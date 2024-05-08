@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-04-29
+LastEditTime: 2024-05-08
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -27,7 +27,7 @@ Description:
 Restore the colors of past/future frame. The restore is applied using a mask
 to selectect only the gray images on HSV color space.
 The ranges that OpenCV manage for HSV format are the following:
-- Hue range is [0,179], 
+- Hue range is [-180,+180], 
 - Saturation range is [0,255] 
 - Value range is [0,255].
 For the 8-bit images, H is converted to H/2 to fit to the [0,255] range. 
@@ -53,7 +53,7 @@ def restore_color(img_color: Image = None, img_gray: Image = None, sat: float=1.
     scenechange = np.mean(hsv_mask)/255
     
     if (tht_scen > 0 and tht_scen < 1 and  scenechange > tht_scen):
-        if hue_adjust:
+        if hue_adjust!="" and hue_adjust!="none":
             return adjust_hue_range(img_gray, hue_adjust=hue_adjust)
         else:
             return img_gray
@@ -69,11 +69,14 @@ def restore_color(img_color: Image = None, img_gray: Image = None, sat: float=1.
     np_restored = np_image_mask_merge(np_gray, np_color_sat, mask_rgb)
     
     if weight > 0:
-        np_restored = np_weighted_merge(np_restored, np_gray, weight)
+        np_restored = np_weighted_merge(np_restored, np_gray, weight)  # merge with gray frame
+    if weight < 0:
+        np_restored = np_weighted_merge(np_restored, np_color_sat, -weight) # merge with colored frame
+        
     
     img_restored = Image.fromarray(np_restored,'RGB').convert('RGB') 
     
-    if hue_adjust:
+    if hue_adjust!="" and hue_adjust!="none":
         return adjust_hue_range(img_restored, hue_adjust=hue_adjust)
     else:
         return img_restored
@@ -87,7 +90,11 @@ Description:
 Change a given range of colors in HSV color space. 
 The range is defined by the hue values in degree (range: 0-360)
 In OpenCV, for the 8-bit images, H is converted to H/2 to fit to the [0,255] range. 
-So the range of hue in the HSV color space of OpenCV is [0,179]
+So the range of hue in the HSV color space of OpenCV is [0,179].
+hue_range syntax: "hue1_min:hue1_max,..,hueN_min,hueN_max|adjust, weight"
+where:
+adjust: if > 0 and < 10 -> saturation parameter else -> hue_shift
+weight: if > 0 -> merge with desaturared frame, if < 0 -> merge with colored orginal frame
 """
 def adjust_hue_range(img_color: Image = None, hue_adjust: str='none', return_mask: bool=False) -> Image:
     
@@ -118,9 +125,9 @@ def adjust_chroma(img_color: Image = None, hue_range: str='none', sat: float = 0
     
     hsv_color = cv2.cvtColor(np_color, cv2.COLOR_RGB2HSV)       
     
-    #apply hue correction, range [-180.+180], converted to [-90.+90] 
+    #apply hue correction, range [-180,+180]
     if hue != 0:
-        np_gray[:, :, 0] = np_gray[:, :, 0] + hue*0.5
+        np_gray[:, :, 0] = np_hue_add(np_gray[:, :, 0], hue)
     
     # desatured the color image
     if sat != 1:
@@ -149,7 +156,9 @@ def adjust_chroma(img_color: Image = None, hue_range: str='none', sat: float = 0
             np_restored = np_weighted_merge(np_restored, np_gray_rgb, weight)
         else:
             np_restored = np_weighted_merge(np_restored, np_color, weight)
-    
+    if weight < 0:
+        np_restored = np_weighted_merge(np_restored, np_color, -weight)
+        
     return Image.fromarray(np_restored,'RGB').convert('RGB') 
 
 def np_image_chroma_tweak(img_color_rgb: np.ndarray, sat: float = 1, bright: float = 0, hue: int = 0, hue_adjust: str='none') -> np.ndarray:
@@ -206,11 +215,14 @@ def np_image_chroma_tweak(img_color_rgb: np.ndarray, sat: float = 1, bright: flo
         
     np_restored = np_image_mask_merge(img_color_rgb, np_gray_rgb, mask_rgb)
     
-    if hue==0:
-        np_restored = np_weighted_merge(np_restored, np_gray_rgb, weight)
-    else:
-        np_restored = np_weighted_merge(np_restored, img_color_rgb, weight)
-            
+    if weight > 0:
+        if hue==0:
+            np_restored = np_weighted_merge(np_restored, np_gray_rgb, weight)
+        else:
+            np_restored = np_weighted_merge(np_restored, img_color_rgb, weight)
+    if weight < 0: 
+        np_restored = np_weighted_merge(np_restored, img_color_rgb, -weight)
+        
     return np_restored
 
 
@@ -253,7 +265,7 @@ def _parse_hue_adjust(hue_adjust: str='none') -> ():
     
     hue_range = p[0]
     
-    if p==1:
+    if num==1:
         return (hue_range, sat, hue, weight)
     
     sw = p[1].split(",") 

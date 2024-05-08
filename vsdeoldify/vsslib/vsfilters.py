@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-05-03
+LastEditTime: 2024-05-08
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -94,10 +94,13 @@ def vs_chroma_stabilizer_ex(clip: vs.VideoNode = None, nframes: int = 5, mode: s
     #vs.core.log_message(2, "algo= " + str(algo)) 
     
     if algo == 0:
-        clip_rgb = _average_clips_ex(clip=clip, weight_list=weight_list, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen, hue_adjust=hue_adjust)
+        clip_rgb = _average_clips_ex(clip=clip, weight_list=weight_list, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen, hue_adjust="none")
     else:
-        clip_rgb = _average_frames_ex(clip=clip, weight_list=weight_list, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen, hue_adjust=hue_adjust)
-         
+        clip_rgb = _average_frames_ex(clip=clip, weight_list=weight_list, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen, hue_adjust="none")
+    
+    #hue adjustment applied only on the final frame 
+    clip_rgb =  vs_adjust_clip_hue(clip=clip_rgb, hue_adjust=hue_adjust)
+    
     return clip_rgb
 
 def _build_avg_arithmetic(nframes: int = 5) -> list:
@@ -283,6 +286,9 @@ wrapper to function restore_color() to restore gray frames.
 """ 
 def vs_adjust_clip_hue(clip: vs.VideoNode = None, hue_adjust: str='none') -> vs.VideoNode:
   
+    if hue_adjust=="" or hue_adjust=="none":
+        return clip
+        
     def color_frame(n, f, hue_adjust: str='none'):        
         f_out = f.copy()        
         if n < 1:
@@ -524,32 +530,32 @@ Description:
 Function to remove noise/grain from clip, strenght control the amount of noise/grain removed, 
 if = 0 the filter is not applied. It is based on function KNLMeansCL() with GPU suppot enabled.
 """
-def vs_degrain(clip: vs.VideoNode = None, strength: int = 3, device_id: int = 0) -> vs.VideoNode:
+def vs_degrain(clip: vs.VideoNode = None, strength: int = 1, device_id: int = 0) -> vs.VideoNode:
     
     if strength == 0:
         return clip
     
     match strength:
         case 1:       
-          dstr = 1.5
+          dstr = 0.5
           dtmp = 1
         case 2:
-          dstr = 2.5
+          dstr = 1.0
           dtmp = 1
         case 3:
-          dstr = 3.5
+          dstr = 1.5
           dtmp = 1
         case 4:
-          dstr = 5.5
-          dtmp = 2
+          dstr = 2.5
+          dtmp = 1
         case 5:
-          dstr = 8.5
-          dtemp = 2
+          dstr = 3.5
+          dtmp = 2
         case _:
             raise vs.Error("ddeoldify: not supported strength value: " + strength)      
     
     clip = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="full")   
-    clip = vs.core.knlm.KNLMeansCL(clip=clip, d=dtemp, a=2, s=4, h=dstr, channels='Y', device_type="gpu", device_id=device_id)
+    clip = vs.core.knlm.KNLMeansCL(clip=clip, d=dtmp, a=2, s=4, h=dstr, channels='Y', device_type="gpu", device_id=device_id)
     clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion") 
     
     return clip

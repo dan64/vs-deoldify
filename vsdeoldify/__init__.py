@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-05-03
+LastEditTime: 2024-05-08
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -33,7 +33,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, message="Arguments oth
 warnings.filterwarnings("ignore", category=UserWarning, message="Arguments other than a weight enum or `None`.*?")
 warnings.filterwarnings("ignore", category=UserWarning, message="torch.nn.utils.weight_norm is deprecated.*?")
 
-__version__ = "3.5.0"
+__version__ = "3.5.1"
 
 package_dir = os.path.dirname(os.path.realpath(__file__))
 model_dir = os.path.join(package_dir, "models")
@@ -92,8 +92,9 @@ def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorFix: str = 'Vi
                                     'Green->Red', 
                                     'Green->Blue', 
                                     'Red->Brown', 
-                                    'Red->Blue'    
-    :param degrain_strength:    strenght of denoise/degrain pre-filter applied on BW clip, if = 0 the pre-filter is disabled, range [0-5], suggested = 3                                
+                                    'Red->Blue'
+                                    'Yellow->Rose'                                     
+    :param degrain_strength:    strenght of denoise/degrain pre-filter applied on BW clip, if = 0 the pre-filter is disabled, range [0-5], default = 0                                
     :param enable_fp16:         Enable/disable FP16 in ddcolor inference, range [True, False]                                    
     """
     # Select presets / tuning
@@ -143,8 +144,8 @@ def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorFix: str = 'Vi
         
     # Select Color Mapping
     ColorMap = ColorMap.lower()    
-    colormap = ['none', 'blue->brown', 'blue->red', 'blue->green', 'green->brown', 'green->red', 'green->blue', 'red->brown', 'red->blue']
-    hue_map = ["none", "180:280|+140,0.1", "180:280|+100,0.1", "180:280|+220,0.1", "80:180|+260,0.1", "80:180|+220,0.1", "80:180|+140,0.1", "300:360,0:20|+40,0.3", "300:360,0:20|+260,0.3"]
+    colormap = ['none', 'blue->brown', 'blue->red', 'blue->green', 'green->brown', 'green->red', 'green->blue', 'red->brown', 'red->blue', 'yellow->rose']
+    hue_map = ["none", "180:280|+140,0.4", "180:280|+100,0.4", "180:280|+220,0.4", "80:180|+260,0.4", "80:180|+220,0.4", "80:180|+140,0.4", "300:360,0:20|+40,0.6", "300:360,0:20|+260,0.6", "30:90|+300,0.8"]
         
     try:
         cl_id = colormap.index(ColorMap)
@@ -265,7 +266,7 @@ def ddeoldify(
                                          for a movie with a lot of dark scenes is suggested alpha > 1, if=0 is not activated, range [>=0]
                                    [7] : gamma_min: minimum value for gamma, range (default=0.5) [>0.1]
                                    [8] : "chroma adjustment" parameter (optional), if="none" is disabled (see the README) 
-    :param degrain_strength:    strenght of denoise/degrain pre-filter applied on BW clip, if = 0 the pre-filter is disabled, range [0-5], suggested = 3 
+    :param degrain_strength:    strenght of denoise/degrain pre-filter applied on BW clip, if = 0 the pre-filter is disabled, range [0-5], default = 0 
     :param cmc_tresh:           chroma_threshold (%), used by: Constrained "Chroma Merge range" [0-1] (0.01=1%)
     :param lmm_p:               parameters for method: "Luma Masked Merge" (see method=4 for a full explanation) 
                                    [0] : luma_mask_limit: luma limit for build the mask used in Luma Masked Merge, range [0-1] (0.01=1%) 
@@ -332,18 +333,10 @@ def ddeoldify(
     if chroma_resize:
         frame_size = min(max(ddcolor_rf, deoldify_rf) * 16, clip.width)     # frame size calculation for inference()  
         clip_orig = clip;
-        clip = clip.resize.Spline64(width=frame_size, height=frame_size) 
-    
-    try:
-        d_clip = vs_degrain(clip, strength=degrain_strength, device_id=device_index)
-    except:
-        vs.core.log_message(2, "ddeoldify: KNLMeansCL is not installed/loaded properly")   
-        d_clip = clip
-    
-    clip = d_clip
+        clip = clip.resize.Spline64(width=frame_size, height=frame_size)        
     
     clipa = vs_deoldify(clip, method=method, model=deoldify_model, render_factor=deoldify_rf, tweaks_enabled=dotweak, tweaks=dotweak_p, package_dir=package_dir) 
-    clipb = vs_ddcolor(clip, method=method, model=ddcolor_model, render_factor=ddcolor_rf, tweaks_enabled=ddtweak, tweaks=ddtweak_p, enable_fp16=ddcolor_enable_fp16, device_index=device_index)             
+    clipb = vs_ddcolor(clip, method=method, model=ddcolor_model, render_factor=ddcolor_rf, tweaks_enabled=ddtweak, tweaks=ddtweak_p, dstrength=degrain_strength, enable_fp16=ddcolor_enable_fp16, device_index=device_index)             
            
     clip_colored = vs_combine_models(clip_a=clipa, clip_b=clipb, method=method, sat=[deoldify_sat, ddcolor_sat], hue=[deoldify_hue, ddcolor_hue], clipb_weight=merge_weight, CMC_p=cmc_tresh, LMM_p=lmm_p, ALM_p = alm_p, invert_clips=cmb_sw)
     
