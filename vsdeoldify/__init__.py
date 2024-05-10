@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-05-08
+LastEditTime: 2024-05-11
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -68,10 +68,11 @@ def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'S
     :param VideoTune:           Preset to control the output video color stability
                                 Allowed values are:
                                     'VeryStable', 
+                                    'MoreStable'
                                     'Stable', 
                                     'Balanced', 
                                     'Vivid', 
-                                    'VeryVivid', 
+                                    'VeryVivid',                                
     :param ColorFix:            This parameter allows to reduce color noise on determinated chroma ranges.
                                 Allowed values are:
                                     'None',  
@@ -121,8 +122,8 @@ def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'S
 
     # Select VideoTune
     VideoTune = VideoTune.lower()
-    video_tune = ['verystable', 'stable', 'balanced', 'vivid', 'veryvivid' ]  
-    ddcolor_weight = [0.3, 0.4, 0.5, 0.6, 0.7]   
+    video_tune = ['verystable', 'morestable', 'stable', 'balanced', 'vivid', 'veryvivid' ]  
+    ddcolor_weight = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7]   
 
     try:
         w_id = video_tune.index(VideoTune)
