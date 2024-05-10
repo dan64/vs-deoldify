@@ -33,7 +33,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, message="Arguments oth
 warnings.filterwarnings("ignore", category=UserWarning, message="Arguments other than a weight enum or `None`.*?")
 warnings.filterwarnings("ignore", category=UserWarning, message="torch.nn.utils.weight_norm is deprecated.*?")
 
-__version__ = "3.5.1"
+__version__ = "3.5.2"
 
 package_dir = os.path.dirname(os.path.realpath(__file__))
 model_dir = os.path.join(package_dir, "models")
@@ -51,11 +51,10 @@ Description:
 ------------------------------------------------------------------------------- 
 wrapper to deoldify() function with "presets" management
 """
-def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorFix: str = 'Violet/Red', ColorTune: str = 'Light', ColorMap: str = 'None', degrain_strength: int = 0, enable_fp16: bool = True) -> vs.VideoNode:
+def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable', ColorFix: str = 'Violet/Red', ColorTune: str = 'Light', ColorMap: str = 'None', degrain_strength: int = 0, enable_fp16: bool = True) -> vs.VideoNode:
     """Main vsdeoldify function supporting the Presets
     
-    :param clip:                clip to process, only RGB24 format is supported.
-                                (please remove any noise/grain from the clip using the provided option "degrain_strength=3", because the noise/grain can create artifacts on colored frames).
+    :param clip:                clip to process, only RGB24 format is supported.                                
     :param Preset:              Preset to control the encoding speed/quality.
                                 Allowed values are:
                                     'Placebo', 
@@ -66,6 +65,13 @@ def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorFix: str = 'Vi
                                     'Fast',  (default)
                                     'Faster', 
                                     'VeryFast'                                    
+    :param VideoTune:           Preset to control the output video color stability
+                                Allowed values are:
+                                    'VeryStable', 
+                                    'Stable', 
+                                    'Balanced', 
+                                    'Vivid', 
+                                    'VeryVivid', 
     :param ColorFix:            This parameter allows to reduce color noise on determinated chroma ranges.
                                 Allowed values are:
                                     'None',  
@@ -113,6 +119,16 @@ def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorFix: str = 'Vi
     
     #vs.core.log_message(2, "Preset index: " + str(pr_id) )
 
+    # Select VideoTune
+    VideoTune = VideoTune.lower()
+    video_tune = ['verystable', 'stable', 'balanced', 'vivid', 'veryvivid' ]  
+    ddcolor_weight = [0.3, 0.4, 0.5, 0.6, 0.7]   
+
+    try:
+        w_id = video_tune.index(VideoTune)
+    except ValueError:
+        raise vs.Error("ddeoldify: VideoTune choice is invalid for '" + VideoTune + "'")    
+    
     # Select ColorTune for ColorFix
     ColorTune = ColorTune.lower()
     color_tune = ['light', 'medium', 'strong']  
@@ -123,8 +139,7 @@ def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorFix: str = 'Vi
         tn_id = color_tune.index(ColorTune)
     except ValueError:
         raise vs.Error("ddeoldify: ColorTune choice is invalid for '" + ColorTune + "'")
-        
-    
+            
     # Select ColorFix for ddcolor/stabilizer
     ColorFix = ColorFix.lower()
     color_fix = ['none', 'magenta', 'magenta/violet', 'violet', 'violet/red', 'blue/magenta', 'yellow', 'yellow/orange', 'yellow/green']  
@@ -154,7 +169,7 @@ def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorFix: str = 'Vi
     
     chroma_adjust = hue_map[cl_id] 
     
-    clip_colored = ddeoldify(clip, method=2, mweight=0.5, deoldify_p=[0, deoldify_rf, 1.0, 0.0], ddcolor_p=[1, ddcolor_rf, 1.0, 0.0, enable_fp16], ddtweak=True, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range], degrain_strength=degrain_strength)              
+    clip_colored = ddeoldify(clip, method=2, mweight=ddcolor_weight[w_id], deoldify_p=[0, deoldify_rf, 1.0, 0.0], ddcolor_p=[1, ddcolor_rf, 1.0, 0.0, enable_fp16], ddtweak=True, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range], degrain_strength=degrain_strength)              
     
     if pr_id > 5 and cl_id > 0:    
         clip_colored = ddeoldify_stabilizer(clip_colored, colormap=chroma_adjust)
@@ -174,11 +189,10 @@ Description:
 wrapper to deoldify() functions with additional filters pre-process and post-process
 """
 def ddeoldify(
-    clip: vs.VideoNode, method: int = 2, mweight: float = 0.5, deoldify_p: list = [0, 24, 1.0, 0.0], ddcolor_p: list = [1, 24, 1.0, 0.0, True], dotweak: bool = False, dotweak_p: list = [0.0, 1.0, 1.0, False, 0.2, 0.5, 1.5, 0.5], ddtweak: bool = False, ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.8,0.1"],  degrain_strength: int = 0, cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0], alm_p: list = [0.8, 1.0, 0.15], cmb_sw: bool = False, device_index: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
+    clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = [0, 24, 1.0, 0.0], ddcolor_p: list = [1, 24, 1.0, 0.0, True], dotweak: bool = False, dotweak_p: list = [0.0, 1.0, 1.0, False, 0.2, 0.5, 1.5, 0.5], ddtweak: bool = False, ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.8,0.1"],  degrain_strength: int = 0, cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0], alm_p: list = [0.8, 1.0, 0.15], cmb_sw: bool = False, device_index: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
     """A Deep Learning based project for colorizing and restoring old images and video using Deoldify and DDColor 
 
-    :param clip:                clip to process, only RGB24 format is supported 
-                                (please remove any noise/grain from the clip using the provided option "degrain_strength=3", because the noise/grain can create artifacts on colored frames).
+    :param clip:                clip to process, only RGB24 format is supported                                 
     :param method:              method used to combine deoldify() with ddcolor() (default = 2): 
                                     0 : deoldify only (no merge)
                                     1 : ddcolor only (no merge)                                 
