@@ -25,107 +25,119 @@ import cv2
 import logging
 
 class ModelImageVisualizer:
-    def __init__(self, filter: IFilter, results_dir: str = None):
+
+    def __init__(self, filter: IFilter):
         self.filter = filter
 
     def _clean_mem(self):
         torch.cuda.empty_cache()
         # gc.collect()
 
-    def _open_image(self, path: Path) -> Image:
-        return PIL.Image.open(path).convert('RGB')
-
-    
-    def get_transformed_image(
-        self,
-        orig_image: Image,
-        figsize: Tuple[int, int] = (20, 20),
-        render_factor: int = None,
-        post_process: bool = True,
-    ) -> Image:
+    def get_transformed_image(self, orig_image: Image, render_factor: int = None, post_process: bool = True) -> Image:
                 
-        result = self.get_transformed_orig_image(
-            orig_image, render_factor, post_process=post_process)
-        
-        return result
-
-    
-    def get_transformed_orig_image(
-        self, orig_image: Image, render_factor: int = None, post_process: bool = True,        
-    ) -> Image:
         self._clean_mem()
-        filtered_image = self.filter.filter(
-            orig_image, orig_image, render_factor=render_factor,post_process=post_process
-        )
+        filtered_image = self.filter.filter(orig_image, orig_image, render_factor=render_factor, post_process=post_process)
 
         return filtered_image
 
+class ModelImageInitializer:
+    _instance = None
+    _initialized = False
+    _artistic_video = None
+    _artistic_image = None
+    _stable_video = None
+    _stable_image = None
+    _render_factor = 0
 
-    def _get_num_rows_columns(self, num_images: int, max_columns: int) -> Tuple[int, int]:
-        columns = min(num_images, max_columns)
-        rows = num_images // columns
-        rows = rows if rows * columns == num_images else rows + 1
-        return rows, columns
+    package_dir='./'
 
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
-def get_artistic_video_colorizer(
-    root_folder: Path = Path('./'),
-    weights_name: str = 'ColorizeArtistic_gen',
-    results_dir='result_images',
-    render_factor: int = 35
-) -> ModelImageVisualizer:
-    learn = gen_inference_deep(root_folder=root_folder, weights_name=weights_name)
-    filtr = MasterFilter([ColorizerFilter(learn=learn)], render_factor=render_factor)
-    vis = ModelImageVisualizer(filtr, results_dir=results_dir)
-    return vis
+    def __init__(self, package_dir: str = None):
 
+        if not self._initialized:
+            self.package_dir = package_dir
+            self._initialized = True
 
-def get_stable_video_colorizer(
-    root_folder: Path = Path('./'),
-    weights_name: str = 'ColorizeVideo_gen',
-    results_dir='result_images',
-    render_factor: int = 21
-) -> ModelImageVisualizer:
-    learn = gen_inference_wide(root_folder=root_folder, weights_name=weights_name)
-    filtr = MasterFilter([ColorizerFilter(learn=learn)], render_factor=render_factor)
-    vis = ModelImageVisualizer(filtr, results_dir=results_dir)
-    return vis
+    def get_image_colorizer(self, render_factor: int = 34, artistic: bool = True, isvideo: bool = False) -> ModelImageVisualizer:
 
+        root_folder = Path(self.package_dir)
 
-def get_image_colorizer(
-    root_folder: Path = Path('./'), render_factor: int = 35, artistic: bool = True, isvideo: bool = False
-) -> ModelImageVisualizer:
-    if artistic:
-        if isvideo:
-            return get_artistic_video_colorizer(root_folder=root_folder, render_factor=render_factor)
+        if artistic:
+            if isvideo:
+                return self._get_artistic_video_colorizer(render_factor=render_factor)
+            else:
+                return self._get_artistic_image_colorizer(render_factor=render_factor)
         else:
-            return get_artistic_image_colorizer(root_folder=root_folder, render_factor=render_factor)
-    else:
-        if isvideo:
-            return get_stable_video_colorizer(root_folder=root_folder, render_factor=render_factor)
-        else:
-            return get_stable_image_colorizer(root_folder=root_folder, render_factor=render_factor)
+            if isvideo:
+                return self._get_stable_video_colorizer(render_factor=render_factor)
+            else:
+                return self._get_stable_image_colorizer(render_factor=render_factor)
+
+    def _get_stable_image_colorizer(self, weights_name: str = 'ColorizeStable_gen',
+        render_factor: int = 34) -> ModelImageVisualizer:
+
+        root_folder = Path(self.package_dir)
+
+        if not (self._stable_image is None) and render_factor==self._render_factor:
+            return self._stable_image
+
+        learn = gen_inference_wide(root_folder=root_folder, weights_name=weights_name)
+        filtr = MasterFilter([ColorizerFilter(learn=learn)], render_factor=render_factor)
+
+        self._stable_image = ModelImageVisualizer(filtr)
+        self._render_factor = render_factor
+
+        return self._stable_image
+
+    def _get_artistic_image_colorizer(self, weights_name: str = 'ColorizeArtistic_gen',
+        render_factor: int = 34) -> ModelImageVisualizer:
+
+        root_folder = Path(self.package_dir)
+
+        if not (self._artistic_image is None) and render_factor==self._render_factor:
+            return self._artistic_image
+
+        learn = gen_inference_deep(root_folder=root_folder, weights_name=weights_name)
+        filtr = MasterFilter([ColorizerFilter(learn=learn)], render_factor=render_factor)
+
+        self._artistic_image = ModelImageVisualizer(filtr)
+        self._render_factor = render_factor
+
+        return self._artistic_image
+
+    def _get_artistic_video_colorizer(self, weights_name: str = 'ColorizeArtistic_gen',
+        render_factor: int = 35) -> ModelImageVisualizer:
+
+        root_folder = Path(self.package_dir)
+
+        if not (self._artistic_video is None) and render_factor==self._render_factor:
+            return self._artistic_video
+
+        learn = gen_inference_deep(root_folder=root_folder, weights_name=weights_name)
+        filtr = MasterFilter([ColorizerFilter(learn=learn)], render_factor=render_factor)
+
+        self._artistic_video = ModelImageVisualizer(filtr)
+        self._render_factor = render_factor
+
+        return self._artistic_video
 
 
-def get_stable_image_colorizer(
-    root_folder: Path = Path('./'),
-    weights_name: str = 'ColorizeStable_gen',
-    results_dir='result_images',
-    render_factor: int = 35
-) -> ModelImageVisualizer:
-    learn = gen_inference_wide(root_folder=root_folder, weights_name=weights_name)
-    filtr = MasterFilter([ColorizerFilter(learn=learn)], render_factor=render_factor)
-    vis = ModelImageVisualizer(filtr, results_dir=results_dir)
-    return vis
+    def _get_stable_video_colorizer(self, weights_name: str = 'ColorizeVideo_gen',
+        render_factor: int = 21) -> ModelImageVisualizer:
 
+        root_folder = Path(self.package_dir)
 
-def get_artistic_image_colorizer(
-    root_folder: Path = Path('./'),
-    weights_name: str = 'ColorizeArtistic_gen',
-    results_dir='result_images',
-    render_factor: int = 35
-) -> ModelImageVisualizer:
-    learn = gen_inference_deep(root_folder=root_folder, weights_name=weights_name)
-    filtr = MasterFilter([ColorizerFilter(learn=learn)], render_factor=render_factor)
-    vis = ModelImageVisualizer(filtr, results_dir=results_dir)
-    return vis
+        if not (self._stable_video is None) and render_factor==self._render_factor:
+            return self._stable_video
+
+        learn = gen_inference_wide(root_folder=root_folder, weights_name=weights_name)
+        filtr = MasterFilter([ColorizerFilter(learn=learn)], render_factor=render_factor)
+
+        self._stable_video = ModelImageVisualizer(filtr)
+        self._render_factor = render_factor
+
+        return self._stable_video

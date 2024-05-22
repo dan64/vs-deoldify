@@ -56,8 +56,18 @@ def vs_deoldify(clip: vs.VideoNode, method: int = 2, model: int = 0, render_fact
             clipa = vs_tweak(clip, bright=bright, cont=cont, gamma=gamma)
     else:
         clipa = clip
-        
-    clipa_rgb =  _deoldify(clipa, model, render_factor, package_dir)    
+
+    m_cfg = ModelImageInitializer(package_dir=package_dir)
+
+    match model:
+        case 0:
+            colorizer = m_cfg.get_image_colorizer(artistic=False, isvideo=True)
+        case 1:
+            colorizer = m_cfg.get_image_colorizer(artistic=False, isvideo=False)
+        case 2:
+            colorizer = m_cfg.get_image_colorizer(artistic=True, isvideo=False)
+
+    clipa_rgb =  _deoldify(clip, colorizer, render_factor)   
     
     if tweaks_enabled and hue_adjust != 'none':
         clipa_rgb = vs_adjust_clip_hue(clipa_rgb, hue_adjust.lower())
@@ -67,19 +77,14 @@ def vs_deoldify(clip: vs.VideoNode, method: int = 2, model: int = 0, render_fact
     else:
         return clipa_rgb    
 
-def _deoldify(clip: vs.VideoNode, model: int = 0, render_factor: int = 24, package_dir: str = "") -> vs.VideoNode: 
-            
-    match model:
-        case 0:
-            colorizer = get_image_colorizer(root_folder=Path(package_dir), artistic=False,isvideo=True) 
-        case 1:
-            colorizer = get_image_colorizer(root_folder=Path(package_dir), artistic=False,isvideo=False) 
-        case 2:
-            colorizer = get_image_colorizer(root_folder=Path(package_dir), artistic=True,isvideo=False) 
-                    
+def _deoldify(clip: vs.VideoNode, colorizer: ModelImageVisualizer = None, render_factor: int = 24) -> vs.VideoNode: 
+                
     def deoldify_colorize(n: int, f: vs.VideoFrame, colorizer: ModelImageVisualizer = None, render_factor: int = 24) -> vs.VideoFrame:
+        
         img_orig = frame_to_image(f)
+        
         img_color = colorizer.get_transformed_image(img_orig, render_factor=render_factor, post_process=True)
+        
         return image_to_frame(img_color, f.copy()) 
     
     return clip.std.ModifyFrame(clips=[clip], selector=partial(deoldify_colorize, colorizer=colorizer, render_factor=render_factor))         
