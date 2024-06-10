@@ -12,8 +12,8 @@ This filter is distributed with the torch package provided with the **Hybrid Win
 
 
 ## Dependencies
-- [PyTorch](https://pytorch.org/get-started) 2.2.0 or later
-- [VapourSynth](http://www.vapoursynth.com/) R65 or later
+- [PyTorch](https://pytorch.org/get-started) 2.1.1 or later
+- [VapourSynth](http://www.vapoursynth.com/) R62 or later
 - [MiscFilters.dll](https://github.com/vapoursynth/vs-miscfilters-obsolete) Vapoursynth's Miscellaneous Filters
 
 
