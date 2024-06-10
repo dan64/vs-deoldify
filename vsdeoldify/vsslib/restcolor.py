@@ -335,7 +335,7 @@ def _parse_hue_range(hue_range: str = None) -> ():
             if (len(p)==2 and p[0].isnumeric() and p[1].isnumeric()):
                 rng = (float(p[0]), float(p[1]))
             else:
-                raise vs.Error("ddeoldify: unknown hue name: " + hue_range)    
+                raise vs.Error("HybridAVC: unknown hue name: " + hue_range)    
     
     return rng
 
@@ -359,6 +359,6 @@ def get_color_tune(hue_name: str = None) -> str:
         case "yellow/green":
             rng = "60:120"
         case _:
-            raise vs.Error("ddeoldify: unknown color tune: " + hue_name)    
+            raise vs.Error("HybridAVC: unknown color tune: " + hue_name)    
     
     return rng    

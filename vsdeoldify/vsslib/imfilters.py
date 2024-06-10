@@ -218,7 +218,8 @@ This function force the average luma of an image to don't be below the value
 defined by the parameter "luma_min". The function allow to modify the gamma
 of image if the average luma is below the parameter "gamma_luma_min"  
 """
-def luma_adjusted_levels(img: Image, luma_min: float = 0, gamma: float = 1.0, gamma_luma_min: float = 0, gamma_alpha: float = 0, gamma_min: float = 0.2, i_min: int = 0, i_max: int = 255) -> Image:
+def luma_adjusted_levels(img: Image, luma_min: float = 0, gamma: float = 1.0, gamma_luma_min: float = 0,
+    gamma_alpha: float = 0, gamma_min: float = 0.2, i_min: int = 0, i_max: int = 255) -> Image:
         
     img_np = np.asarray(img)
     
@@ -265,30 +266,24 @@ Description:
 ------------------------------------------------------------------------------- 
 adjust the contrast of an image, color-space: YUV 
 """
-def image_contrast(img: Image, cont: float = 1.0, perc: float = 5):
+def image_gamma_contrast(img: Image, gamma: float = 1.0, cont: float = 1.0, perc: float = 5):
     
-    if (cont == 1):
+    if cont == 1 and gamma == 1:
         return img
     
     img_np = np.asarray(img)
-    yuv = cv2.cvtColor(img_np, cv2.COLOR_RGB2YUV)
+
+    np_img_rgb = np_image_gamma_contrast(img_np, gamma, cont)
     
-    y = yuv[:, :, 0]
-    
-    y_min = np.percentile(y, perc)
-    y_max = np.percentile(y, 100-perc)
-    y_fix = np.clip(y, y_min, y_max)
-    y_cont = ((y_fix - y_min) * cont / (y_max - y_min))
-    
-    y_cont = array_min_max(y_cont, 0, 1, np.float64)*255
-    
-    yuv_new = np.copy(yuv)
-    
-    yuv_new[:, :, 0] = y_contclip(0,255).astype(int)
-    
-    img_rgb = cv2.cvtColor(yuv_new, cv2.COLOR_YUV2RGB)
-    
-    return Image.fromarray(img_rgb)
+    return Image.fromarray(np_img_rgb)
+
+
+def image_contrast(img: Image, cont: float = 1.0, perc: float = 5):
+
+    if (cont == 1):
+        return img
+
+    return image_gamma_contrast(img, cont, perc)
 
 """
 ------------------------------------------------------------------------------- 
@@ -334,14 +329,14 @@ The ranges that OpenCV manage for HSV format are the following:
 For the 8-bit images, H is converted to H/2 to fit to the [0,255] range. 
 So the range of hue in the HSV color space of OpenCV is [-90,+90]
 """
-def image_tweak(img: Image, sat: float = 1, bright: float = 0, hue: int = 0, hue_range: str='none') -> Image:
+def image_tweak(img: Image, sat: float = 1, cont: float = 1.0, bright: float = 0, hue: int = 0, gamma: float = 1.0, hue_range: str='none') -> Image:
 
-    if (sat == 1 and bright == 0 and hue == 0):
+    if (sat == 1 and bright == 0 and hue == 0 and gamma == 1 and cont == 1):
         return img  # non changes
     
     img_np = np.asarray(img)
         
-    img_rgb = np_image_tweak(img_np, sat, bright, hue, hue_range)
+    img_rgb = np_image_tweak(img_np, sat, cont, bright, hue, gamma, hue_range)
     
     return Image.fromarray(img_rgb,'RGB').convert('RGB') 
 
@@ -356,11 +351,14 @@ def image_chroma_tweak(img: Image, sat: float = 1, bright: float = 0, hue: int =
     
     return Image.fromarray(img_rgb,'RGB').convert('RGB') 
 
-def np_image_tweak(img_np: np.ndarray, sat: float = 1, bright: float = 0, hue: int = 0, hue_range: str='none') -> np.ndarray:
+def np_image_tweak(img_np: np.ndarray, sat: float = 1, cont: float = 1.0, bright: float = 0, hue: int = 0, gamma: float = 1.0, hue_range: str='none') -> np.ndarray:
 
-    if (sat == 1 and bright == 0 and hue == 0 and hue_range == 'none'):
-        return img_np  # non changes
-       
+    if cont != 1 or gamma != 1:
+        img_np = np_image_gamma_contrast(img_np, gamma, cont)
+
+    if (sat == 1 and bright == 0 and hue == 0, hue_range == 'none'):
+        return img_np  # no other changes
+
     hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
         
     hsv[:, :, 0] = np_hue_add(hsv[:, :, 0], hue)

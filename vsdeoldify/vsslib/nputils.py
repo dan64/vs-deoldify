@@ -237,5 +237,37 @@ def np_hue_add(hsv_s: np.ndarray=None, hue: int = 0):
     hsv_s = np.where(hsv_s > 180, hsv_s-180, hsv_s)
     hsv_s = np.where(hsv_s < 0, hsv_s+180, hsv_s)
     
-    return hsv_s 
+    return hsv_s
 
+
+def np_image_gamma_contrast(np_img: np.ndarray=None, gamma: float = 1.0, cont: float = 1.0, perc: float = 5):
+
+    if cont == 1.0 and gamma == 1.0:
+        return np_img
+
+    yuv = cv2.cvtColor(np_img, cv2.COLOR_RGB2YUV)
+
+    y = yuv[:, :, 0]
+    yuv_new = np.copy(yuv)
+
+    if cont != 1:
+        y_min = np.percentile(y, perc)
+        y_max = np.percentile(y, 100 - perc)
+        y_fix = np.clip(y, y_min, y_max)
+        y_cont = ((y_fix - y_min) * cont / (y_max - y_min))
+
+        y_cont = array_min_max(y_cont, 0, 1, np.float64) * 255
+
+        y_new = y_cont.clip(0, 255).astype(int)
+    else:
+        y_new = y
+
+    if gamma != 1:
+        y_new = np.power(y_new / 255, 1 / gamma)
+        y_new = np.multiply(y_new, 255).clip(0, 255).astype(int)
+
+    yuv_new[:, :, 0] = y_new
+
+    np_img_rgb = cv2.cvtColor(yuv_new, cv2.COLOR_YUV2RGB)
+
+    return np_img_rgb

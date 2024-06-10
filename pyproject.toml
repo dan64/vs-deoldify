@@ -11,8 +11,8 @@ exclude = [
 
 [project]
 name = "vsdeoldify"
-version = "3.5.4"
-description = "Deoldify function for VapourSynth"
+version = "4.0.0"
+description = "HAVC functions for VapourSynth"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
@@ -30,7 +30,7 @@ dependencies = [
   "fastai==1.0.60",
   "torch>=2.1.1",
   "pillow>=9.0.0",
-  "VapourSynth>=60",
+  "VapourSynth>=65",
   "vstools>=2.1.0"
 ]
 

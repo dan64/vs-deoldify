@@ -11,12 +11,15 @@ Description:
 Library of Vapoursynth filter functions.
 """
 import vapoursynth as vs
+import os
 import math
 import numpy as np
 import cv2
 from PIL import Image
 from functools import partial
 
+from .imfilters import _chroma_temporal_limiter
+from .imfilters import _color_temporal_stabilizer
 from .vsutils import *
 from .imfilters import *
 from .restcolor import *
@@ -44,7 +47,7 @@ def vs_clip_color_stabilizer(clip: vs.VideoNode = None, nframes: int = 5, mode: 
         case "W" | "weighted" | "left" | "right": # for compatibility with version 2.0.0
             weight_list = _build_avg_weighted(N)
         case _:
-            raise vs.Error("ddeoldify: unknown average method: " + mode)    
+            raise vs.Error("HybridAVC: unknown average method: " + mode)    
     
     #vs.core.log_message(2, "weight_list= " + str(len(weight_list))) 
 
@@ -89,7 +92,7 @@ def vs_chroma_stabilizer_ex(clip: vs.VideoNode = None, nframes: int = 5, mode: s
         case "W" | "weighted" | "left" | "right": # for compatibility with version 2.0.0
             weight_list = _build_avg_weighted(N)
         case _:
-            raise vs.Error("ddeoldify: unknown average method: " + mode)    
+            raise vs.Error("HybridAVC: unknown average method: " + mode)    
     
     #vs.core.log_message(2, "algo= " + str(algo)) 
     
@@ -228,7 +231,7 @@ def vs_get_clip_frame(clip: vs.VideoNode, nframe: int = 0) -> vs.VideoNode:
     n = abs(nframe)
     
     if n > 15:
-        raise vs.Error("ddeoldify: nframe must be between: -15, +15")
+        raise vs.Error("HybridAVC: nframe must be between: -15, +15")
     
     weights_list = list()
     
@@ -284,20 +287,30 @@ Description:
 ------------------------------------------------------------------------------- 
 wrapper to function restore_color() to restore gray frames.
 """ 
-def vs_adjust_clip_hue(clip: vs.VideoNode = None, hue_adjust: str='none') -> vs.VideoNode:
+def vs_sc_adjust_clip_hue(clip: vs.VideoNode = None, hue_adjust: str='none', scenechange: bool = True) -> vs.VideoNode:
   
     if hue_adjust=="" or hue_adjust=="none":
         return clip
         
-    def color_frame(n, f, hue_adjust: str='none'):        
-        f_out = f.copy()        
-        if n < 1:
-            return f_out        
+    def color_frame(n, f, hue_adjust: str='none', scenechange: bool = True):
+
+        if scenechange:
+            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
+            if not is_scenechange:
+                return f.copy()
+
         img_color = frame_to_image(f)
         img_restored = adjust_hue_range(img_color, hue_adjust=hue_adjust)
-        return image_to_frame(img_restored, f_out)    
-    clip = clip.std.ModifyFrame(clips=clip, selector=partial(color_frame, hue_adjust=hue_adjust))
+
+        return image_to_frame(img_restored, f.copy())
+
+    clip = clip.std.ModifyFrame(clips=clip, selector=partial(color_frame, hue_adjust=hue_adjust, scenechange=scenechange))
+
     return clip
+
+
+def vs_adjust_clip_hue(clip: vs.VideoNode = None, hue_adjust: str = 'none') -> vs.VideoNode:
+    return vs_sc_adjust_clip_hue(clip, hue_adjust, False)
 
 """
 ------------------------------------------------------------------------------- 
@@ -350,9 +363,17 @@ Description:
 The the pixels with luma below dark_threshold will be desaturared to level defined
 by the dark_sat parameter.
 """
-def vs_chroma_bright_tweak(clip: vs.VideoNode = None, black_threshold: float = 0.3, white_threshold: float = 0.6, dark_sat: float = 0.8, dark_bright: float = -0.10, chroma_adjust: str='none') -> vs.VideoNode:      
+def vs_sc_chroma_bright_tweak(clip: vs.VideoNode = None, black_threshold: float = 0.3, white_threshold: float = 0.6,
+        dark_sat: float = 0.8, dark_bright: float = -0.10, scenechange: bool = True, chroma_adjust: str='none') -> vs.VideoNode:
     
-    def merge_frame(n, f, black_limit: float = 0.3, white_limit: float = 0.6, dark_bright: float = -0.10, dark_sat: float = 0.8, chroma_adjust: str='none'):                
+    def merge_frame(n, f, black_limit: float = 0.3, white_limit: float = 0.6, dark_bright: float = -0.10,
+            dark_sat: float = 0.8, scenechange: bool = True, chroma_adjust: str='none'):
+
+        if scenechange:
+            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
+            if not is_scenechange:
+                return f.copy()
+
         img1 = frame_to_image(f)
         img2 = image_chroma_tweak(img1, bright=dark_bright, sat=dark_sat, hue_adjust=chroma_adjust) 
         if black_limit == white_limit:
@@ -360,7 +381,17 @@ def vs_chroma_bright_tweak(clip: vs.VideoNode = None, black_threshold: float = 0
         else:
             img_m = w_image_luma_merge(img2, img1, black_limit, white_limit)
         return image_to_frame(img_m, f.copy())                
-    return clip.std.ModifyFrame(clips=clip, selector=partial(merge_frame, black_limit=black_threshold, white_limit=white_threshold, dark_bright=dark_bright, dark_sat=dark_sat, chroma_adjust=chroma_adjust))
+
+    return clip.std.ModifyFrame(clips=clip, selector=partial(merge_frame, black_limit=black_threshold, white_limit=white_threshold,
+                        dark_bright=dark_bright, dark_sat=dark_sat, scenechange=scenechange, chroma_adjust=chroma_adjust))
+
+
+def vs_chroma_bright_tweak(clip: vs.VideoNode = None, black_threshold: float = 0.3, white_threshold: float = 0.6,
+                           dark_sat: float = 0.8, dark_bright: float = -0.10,
+                           chroma_adjust: str = 'none') -> vs.VideoNode:
+
+    return vs_sc_chroma_bright_tweak(clip, black_threshold, white_threshold, dark_sat, dark_bright,
+                                     scenechange=False, chroma_adjust=chroma_adjust)
 
 """
 ------------------------------------------------------------------------------- 
@@ -370,13 +401,31 @@ Description:
 ------------------------------------------------------------------------------- 
 Direct color mapping using the "chroma adjustment".
 """
-def vs_colormap(clip: vs.VideoNode = None, colormap: str='none') -> vs.VideoNode:      
-    
-    def merge_frame(n, f, chroma_adjust: str='none'):                
+def vs_sc_colormap(clip: vs.VideoNode = None, colormap: str='none', scenechange: bool = True) -> vs.VideoNode:
+
+    clip_m =  _vs_sc_colormap(clips=clip, colormap=colormap, scenechange=scenechange)
+
+    return clip_m
+
+def vs_colormap(clip: vs.VideoNode = None, colormap: str='none') -> vs.VideoNode:
+
+    return vs_sc_colormap(clip, colormap, scenechange=False)
+
+def _vs_sc_colormap(clip: vs.VideoNode = None, colormap: str = 'none', scenechange: bool = False) -> vs.VideoNode:
+
+    def merge_frame(n, f, chroma_adjust: str = 'none', scenechange: bool = True):
+
+        if scenechange:
+            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
+            if not is_scenechange:
+                return f.copy()
+
         img = frame_to_image(f)
-        img_m = image_chroma_tweak(img, hue_adjust=chroma_adjust) 
-        return image_to_frame(img_m, f.copy())                
-    return clip.std.ModifyFrame(clips=clip, selector=partial(merge_frame, chroma_adjust=colormap))
+        img_m = image_chroma_tweak(img, hue_adjust=chroma_adjust)
+
+        return image_to_frame(img_m, f.copy())
+
+    return clip.std.ModifyFrame(clips=clip, selector=partial(merge_frame, chroma_adjust=colormap, scenechange=scenechange))
 
 """
 ------------------------------------------------------------------------------- 
@@ -388,22 +437,39 @@ Filter used to dark more the dark scenes. The amount of darkness is controlled
 by the parameter dark_amount, while the selected are is controlled by the parameter
 dark_threshold.
 """
-def vs_dark_tweak(clip: vs.VideoNode = None, dark_threshold: float = 0.3, dark_amount: float = 0.8, dark_hue_adjust: str='none') -> vs.VideoNode:
+
+
+def vs_sc_dark_tweak(clip: vs.VideoNode = None, dark_threshold: float = 0.3, dark_amount: float = 0.8, scenechange: bool = True,
+                  dark_hue_adjust: str = 'none') -> vs.VideoNode:
 
     d_threshold = 0.1
-    d_white_thresh = min(max(dark_threshold, d_threshold), 0.50) 
-    d_sat = min(max(1.1 - dark_amount, 0.10), 0.80)  
+    d_white_thresh = min(max(dark_threshold, d_threshold), 0.50)
+    d_sat = min(max(1.1 - dark_amount, 0.10), 0.80)
     d_bright = -min(max(dark_amount, 0.20), 0.90)
-    
-    def merge_frame(n, f, dark_limit: float = 0.3, white_limit: float = 0.6, dark_bright: float = -0.10, dark_sat: float = 0.8, dark_hue_adjust: str='none'):                
+
+    def merge_frame(n, f, dark_limit: float = 0.3, white_limit: float = 0.6, dark_bright: float = -0.10,
+                    dark_sat: float = 0.8, scenechange: bool = True, dark_hue_adjust: str = 'none'):
+
+        if scenechange:
+            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
+            if not is_scenechange:
+                return f.copy()
+
         img1 = frame_to_image(f)
-        img2 = image_tweak(img1, bright=dark_bright, sat=dark_sat, hue_range=dark_hue_adjust) 
+        img2 = image_tweak(img1, bright=dark_bright, sat=dark_sat, hue_range=dark_hue_adjust)
         if dark_limit == white_limit:
             img_m = image_luma_merge(img2, img1, dark_limit)
         else:
             img_m = w_image_luma_merge(img2, img1, dark_limit, white_limit)
-        return image_to_frame(img_m, f.copy())                
-    return clip.std.ModifyFrame(clips=clip, selector=partial(merge_frame, dark_limit=d_threshold, white_limit=d_white_thresh, dark_bright=d_bright, dark_sat=d_sat, dark_hue_adjust=dark_hue_adjust))
+        return image_to_frame(img_m, f.copy())
+
+    return clip.std.ModifyFrame(clips=clip, selector=partial(merge_frame, dark_limit=d_threshold, white_limit=d_white_thresh,
+                            dark_bright=d_bright, dark_sat=d_sat, scenechange=scenechange, dark_hue_adjust=dark_hue_adjust))
+
+
+def vs_dark_tweak(clip: vs.VideoNode = None, dark_threshold: float = 0.3, dark_amount: float = 0.8, dark_hue_adjust: str='none') -> vs.VideoNode:
+
+    return vs_sc_dark_tweak(clip, dark_threshold, dark_amount, scenechange=False, dark_hue_adjust=dark_hue_adjust)
 
 """
 ------------------------------------------------------------------------------- 
@@ -415,16 +481,63 @@ This function force the average luma of a video clip to don't be below the value
 defined by the parameter "luma_min". The function allow to modify the gamma
 of the clip if the average luma is below the parameter "gamma_luma_min"  
 """
-def constrained_tweak(clip: vs.VideoNode = None, luma_min: float = 0.1, gamma: float = 1, gamma_luma_min: float = 0, gamma_alpha: float = 0, gamma_min: float = 0.5) -> vs.VideoNode:
+def sc_constrained_tweak(clip: vs.VideoNode = None, luma_min: float = 0.1, gamma: float = 1, gamma_luma_min: float = 0,
+                         gamma_alpha: float = 0, gamma_min: float = 0.5, scenechange: bool = True) -> vs.VideoNode:
 
-    def change_frame(n, f, luma_min: float = 0.1, gamma: float = 1, gamma_luma_min: float = 0, gamma_alpha: float = 0, gamma_min: float = 0.5):    
+    def change_frame(n, f, luma_min: float = 0.1, gamma: float = 1, gamma_luma_min: float = 0,
+        gamma_alpha: float = 0, gamma_min: float = 0.5, scenechange: bool = True):
+
+        if scenechange:
+            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
+            if not is_scenechange:
+                return f.copy()
+
         img = frame_to_image(f)       
         img_m = luma_adjusted_levels(img, luma_min, gamma, gamma_luma_min, gamma_alpha, gamma_min)
-        return image_to_frame(img_m, f.copy())                
 
-    clipm = clip.std.ModifyFrame(clips=clip, selector=partial(change_frame, luma_min=luma_min, gamma=gamma, gamma_luma_min=gamma_luma_min, gamma_alpha=gamma_alpha, gamma_min=gamma_min))
+        return image_to_frame(img_m, f.copy())
+
+    clipm = clip.std.ModifyFrame(clips=clip, selector=partial(change_frame, luma_min=luma_min, gamma=gamma,
+                    gamma_luma_min=gamma_luma_min, gamma_alpha=gamma_alpha, gamma_min=gamma_min, scenechange=scenechange))
 
     return clipm
+
+def constrained_tweak(clip: vs.VideoNode = None, luma_min: float = 0.1, gamma: float = 1, gamma_luma_min: float = 0,
+                         gamma_alpha: float = 0, gamma_min: float = 0.5) -> vs.VideoNode:
+    return  sc_constrained_tweak(clip, luma_min, gamma, gamma_luma_min, gamma_alpha, gamma_min, scenechange=False)
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+video clip tweak function, that allowa to change the hue, saturation and brigh, 
+with the support of scene change detection.
+"""
+
+def vs_sc_tweak(clip: vs.VideoNode = None, hue: float = 0, sat: float = 1, cont: float = 1.0, bright: float = 0, gamma: float = 1.0, scenechange: bool = True) -> vs.VideoNode:
+
+    if (hue == 0 and sat == 1 and cont == 1 and bright == 0 and gamma == 1):
+        return clip  # non changes
+
+    if not scenechange:
+        return  vs_tweak(clip, hue, sat, bright, cont, gamma)
+
+    def merge_frame(n, f, hue: float = 0, sat: float = 1, cont: float = 1.0, bright: float = 0, gamma: float = 1.0, scenechange: bool = True):
+
+        if scenechange:
+            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
+            if not is_scenechange:
+                return f.copy()
+
+        img = frame_to_image(f)
+        img_m = image_tweak(img, cont=cont, bright=bright, sat=sat, gamma=gamma, hue=hue)
+
+        return image_to_frame(img_m, f.copy())
+
+    return clip.std.ModifyFrame(clips=clip, selector=partial(merge_frame, hue=hue, sat=sat, cont=cont, bright=bright, gamma=gamma, scenechange=scenechange))
+
 
 """
 ------------------------------------------------------------------------------- 
@@ -512,14 +625,29 @@ Description:
 ------------------------------------------------------------------------------- 
 Function to copy the luma of video Clip "orig" in the video "clip" 
 """
-def vs_recover_clip_luma(orig: vs.VideoNode = None, clip: vs.VideoNode = None) -> vs.VideoNode:
-    def copy_luma_frame(n, f):    
+def vs_sc_recover_clip_luma(orig: vs.VideoNode = None, clip: vs.VideoNode = None, scenechange: bool = False, sc_framedir = None) -> vs.VideoNode:
+
+    def copy_luma_frame(n, f):
+
         img_orig = frame_to_image(f[0])
         img_clip = frame_to_image(f[1])        
         img_m = chroma_post_process(img_clip, img_orig)
-        return image_to_frame(img_m, f[0].copy())                
+
+        if scenechange:
+            is_scenechange = (n == 0) or (f[0].props['_SceneChangePrev'] == 1 and f[0].props['_SceneChangeNext'] == 0)
+
+        if not (sc_framedir is None) and is_scenechange:
+            img_path = os.path.join(sc_framedir, f"ref_{n:06d}.jpg")
+            img_m.save(img_path)
+
+        return image_to_frame(img_m, f[0].copy())
+
     clip = clip.std.ModifyFrame(clips=[orig, clip], selector=copy_luma_frame)
+
     return clip
+
+def vs_recover_clip_luma(orig: vs.VideoNode = None, clip: vs.VideoNode = None) -> vs.VideoNode:
+    return vs_sc_recover_clip_luma(orig, clip, scenechange=False)
 
 """
 ------------------------------------------------------------------------------- 
@@ -552,7 +680,7 @@ def vs_degrain(clip: vs.VideoNode = None, strength: int = 1, device_id: int = 0)
           dstr = 3.5
           dtmp = 2
         case _:
-            raise vs.Error("ddeoldify: not supported strength value: " + strength)      
+            raise vs.Error("HybridAVC: not supported strength value: " + strength)      
     
     clip = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="full")   
     clip = vs.core.knlm.KNLMeansCL(clip=clip, d=dtmp, a=2, s=4, h=dstr, channels='Y', device_type="gpu", device_id=device_id)

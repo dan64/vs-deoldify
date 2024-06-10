@@ -1,23 +1,29 @@
-# DDeoldify
+# Hybrid Automatic Video Colorizer (aka DDeoldify)
 A Deep Learning based Vaoursynth filter for colorizing and restoring old images and video, based on [DeOldify](https://github.com/jantic/DeOldify)
-and  [DDColor](https://github.com/HolyWu/vs-ddcolor) 
+,  [DDColor](https://github.com/HolyWu/vs-ddcolor) and [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization).
 
 The Vapoursynth filter version has the advantage of coloring the images directly in memory, without the need to use the filesystem to store the video frames. 
 
-This filter is able to combine the results provided by DeOldify and DDColor, which are some of the best models available for coloring pictures, providing often a final colorized image that is better than the image obtained from the individual models.  But the main strength of this filter is the addition of specialized filters to improve the quality of videos obtained by using these color models. 
+This filter (_HAVC_ in short) is able to combine the results provided by _DeOldify_ and _DDColor_, which are some of the best models available for coloring pictures, providing often a final colorized image that is better than the image obtained from the individual models.  But the main strength of this filter is the addition of specialized filters to improve the quality of videos obtained by using these color models and the possibility to improve further the stability by using these models as input to _Deep Exemplar based Video Colorization_ model (_DeepEx_ in short). DeepEx presents the first end-to-end network for exemplar-based video colorization and it allows to colorize a Video in sequence based on the colorization history, enforcing its coherency by using a temporal consistency loss. 
 
 ## Quick Start
 
-This filter is distributed with the torch package provided with the **Hybrid Windows Addons**. To use it on Desktop (Windows, Linux) it is necessary install [Hybrid](https://www.selur.de/downloads). **Hybrid** is a Qt-based frontend for other tools (including this filter) which can convert most input formats to common audio & video formats and containers. It represent the  easiest way to colorize images with [DeOldify](https://github.com/jantic/DeOldify) using [VapourSynth](https://www.vapoursynth.com/).      
+This filter is distributed with the torch package provided with the **Hybrid Windows Addons**. To use it on Desktop (Windows) it is necessary install [Hybrid](https://www.selur.de/downloads) and the related [Addons](https://drive.google.com/drive/folders/1vC_pxwxL0o8fjmg8Okn0RA5rsodTcv9G?usp=drive_link). **Hybrid** is a Qt-based frontend for other tools (including this filter) which can convert most input formats to common audio & video formats and containers. It represent the  easiest way to colorize images with the HAVC filter using [VapourSynth](https://www.vapoursynth.com/).      
 
 
 ## Dependencies
-- [PyTorch](https://pytorch.org/get-started) 2.1.1 or later
-- [VapourSynth](http://www.vapoursynth.com/) R62 or later
-
+- [PyTorch](https://pytorch.org/get-started) 2.2.0 or later
+- [VapourSynth](http://www.vapoursynth.com/) R65 or later
+- [MiscFilters.dll](https://github.com/vapoursynth/vs-miscfilters-obsolete) Vapoursynth's Miscellaneous Filters
+- 
 ## Installation
 ```
 pip install vsdeoldify-x.x.x-py3-none-any.whl
+```
+with the version 4.0 of HAVC has been released a modified version of DDColor to manage the Scene Detection properties available in the input clip, this version can be installed with the command:
+
+```
+pip install vsddcolor-1.0.1-py3-none-any.whl.zip
 ```
 
 ## Models Download
@@ -44,45 +50,63 @@ The models used by **DDColor** can be installed with the command
 ```
 python -m vsddcolor
 ```
-
+The models for **Deep-Exemplar based Video Colorization.** can be installed by downloading  the file **colorization_checkpoint.zip** available in: [inference code](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization/releases/tag/v1.0). 
+ 
+The archive  **colorization_checkpoint.zip** have to be unziped in: .\Lib\site-packages\vsdeoldify\deepex
 
 ## Usage
 ```python
-from vsdeoldify import ddeoldify
+# loading plugins
+core.std.LoadPlugin(path="MiscFilters.dll")
+
+# changing range from limited to full range for HAVC
+clip = core.resize.Bicubic(clip, range_in_s="limited", range_s="full")
+# setting color range to PC (full) range.
+clip = core.std.SetFrameProps(clip=clip, _ColorRange=0)
+# adjusting color space from YUV420P16 to RGB24
+clip = core.resize.Bicubic(clip=clip, format=vs.RGB24, matrix_in_s="709", range_s="full")
+
+from vsdeoldify import HAVC_main, HAVC_ddeoldify
 # DeOldify with DDColor, Preset = "fast"
-clip = ddeoldify_main(clip=clip, Preset="fast")
+clip = HAVC_main(clip=clip, Preset="fast")
 # DeOldify only model
-clip = ddeoldify(clip, method=0)
+clip = HAVC_ddeoldify(clip, method=0)
 # DDColor only model
-clip = ddeoldify(clip, method=1)
+clip = HAVC_ddeoldify(clip, method=1)
 
 # To apply video color stabilization filters for ddeoldify
-clip = ddeoldify_stabilizer(clip, dark=True, smooth=True, stab=True)
+clip = HAVC_stabilizer(clip, dark=True, smooth=True, stab=True)
 
 # Simplest way to use Presets
-clip = ddeoldify_main(clip=clip, Preset="fast", ColorFix="violet/red", ColorTune="medium", ColorMap="none")
+clip = HAVC_main(clip=clip, Preset="fast", ColorFix="violet/red", ColorTune="medium", ColorMap="none")
+
+# DeepEx model using HAVC as input for the reference frames
+clip = HAVC_main(clip=clip, EnableDeepEx=True, ScThreshold=0.1)
+
+# changing range from full to limited range for HAVC
+clip = core.resize.Bicubic(clip, range_in_s="full", range_s="limited")
 ```
 
 See `__init__.py` for the description of the parameters.
 
-**NOTE**: In the _DDColor_ version included with **DDeoldify** the parameter _input_size_ has changed name in _render_factor_ because were changed the range of values of this parameter to be equivalent to _render_factor_ in _Deoldify_, the relationship between these 2 parameters is the following:
+**NOTE**: In the _DDColor_ version included with **HAVC** the parameter _input_size_ has changed name in _render_factor_ because were changed the range of values of this parameter to be equivalent to _render_factor_ in _DeOldify_, the relationship between these 2 parameters is the following:
 
 ```
 input_size = render_factor * 16
 ``` 
 
+In the modified version of _DDColor_  1.0.1 was added the boolean parameter _scenechange_, if this parameter is set to _True_, will be colored only the frames tagged as scene change.  
+
 ## Filter Usage
 
-The filter was developed having in mind to use it mainly to colorize movies. Both Deoldify and DDcolor are good models for coloring pictures (see the _Comparison of Models_). But when are used for coloring movies they are introducing artifacts that usually are not  noticeable in the images.  Especially in dark scenes both Deoldify and DDcolor are not able to understand what it is the dark area and what color to give it, they often decide to color these dark areas with blue, then in the next frame this area could become red and then in the next frame return to blue, introducing a flashing psychedelic effect when all the frames are put in a movie.
+The filter was developed having in mind to use it mainly to colorize movies. Both DeOldify and DDcolor are good models for coloring pictures (see the _Comparison of Models_). But when are used for coloring movies they are introducing artifacts that usually are not  noticeable in the images.  Especially in dark scenes both DeOldify and DDcolor are not able to understand what it is the dark area and what color to give it, they often decide to color these dark areas with blue, then in the next frame this area could become red and then in the next frame return to blue, introducing a flashing psychedelic effect when all the frames are put in a movie.
 To try to solve this problem has been developed _pre-_ and _post-_ process filters.  It is possible to see them in the Hybrid screenshot below.
 
 ![Hybrid Coloring page](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_D%2BD_filters.JPG)  
 
 The main filters introduced are:
 
-**Degrain** : Since a BW clip with noise/grain can create artifacts on colored frames (this effect is more evident with DDColor), this filter allows to reduce the noise/grain contained in the frames. This filter is applied only to the frames to be colored by DDColor. At the end of the coloring process the original noise/grain of the clip is restored. The strength of the filter has range [0-5], the suggested value is 1 (if = 0 the filter is not applied).  
-
-**Chroma Smoothing** : This filter allows to reduce the _vibrancy_ of colors assigned by Deoldify/DDcolor by using the parameters _de-saturation_ and _de-vibrancy_ (the effect on _vibrancy_ will be visible only if the option **chroma resize** is enabled, otherwise this parameter has effect on the _luminosity_). The area impacted by the filter is defined by the thresholds dark/white. All the pixels with luma below the dark threshold will be impacted by the filter, while the pixels above the white threshold will be left untouched. All the pixels in the middle will be gradually impacted depending on the luma value.
+**Chroma Smoothing** : This filter allows to reduce the _vibrancy_ of colors assigned by DeOldify/DDcolor by using the parameters _de-saturation_ and _de-vibrancy_ (the effect on _vibrancy_ will be visible only if the option **chroma resize** is enabled, otherwise this parameter has effect on the _luminosity_). The area impacted by the filter is defined by the thresholds dark/white. All the pixels with luma below the dark threshold will be impacted by the filter, while the pixels above the white threshold will be left untouched. All the pixels in the middle will be gradually impacted depending on the luma value.
 
 **Chroma Stabilization**: This filter will try to stabilize the frames' colors. As explained previously since the frames are colored individually, the colors can change significantly from one frame to the next, introducing a disturbing psychedelic flashing effect. This filter try to reduce this by averaging the chroma component of the frames. The average is performed using a number of frames specified in the _Frames_ parameter. 
 Are implemented 2 averaging methods: 
@@ -148,30 +172,30 @@ As explained previously, this filter is able to combine the results provided by 
 
 2. _Simple Merge_: the frames are combined using a _weighted merge_, where the parameter _merge_weight_ represent the weight assigned to the frames provided by the DDcolor model. 
 
-3. _Constrained Chroma Merge_:  given that the colors provided by Deoldify's _Video_ model are more conservative and stable than the colors obtained with DDcolor. The frames are combined by assigning a limit to the amount of difference in chroma values between Deoldify and DDcolor. This limit is defined by the parameter _threshold_. The limit is applied to the frame converted to "YUV". For example when threshold=0.1, the chroma    values "U","V" of DDcolor frame will be constrained to have an absolute percentage difference respect to "U","V" provided by Deoldify not higher than 10%.  If _merge_weight_ is < 1.0, the chroma limited DDColor frames will be will be merged again with the frames of Deoldify using the _Simple Merge_.
+3. _Constrained Chroma Merge_:  given that the colors provided by DeOldify's _Video_ model are more conservative and stable than the colors obtained with DDcolor. The frames are combined by assigning a limit to the amount of difference in chroma values between DeOldify and DDcolor. This limit is defined by the parameter _threshold_. The limit is applied to the frame converted to "YUV". For example when threshold=0.1, the chroma    values "U","V" of DDcolor frame will be constrained to have an absolute percentage difference respect to "U","V" provided by DeOldify not higher than 10%.  If _merge_weight_ is < 1.0, the chroma limited DDColor frames will be will be merged again with the frames of DeOldify using the _Simple Merge_.
 
- 4. _Luma Masked Merge_: the behaviour is similar to the method _Adaptive Luma Merge_. With this method the frames are combined using a _masked merge_. The pixels of DDColor's frame with luma < _luma_limit_  will be filled with the (de-saturated) pixels of Deoldify, while the pixels above the _white_limit_ threshold will be left untouched. All the pixels in the middle will be gradually replaced depending on the luma value. If the parameter  _merge_weight_ is < 1.0, the resulting masked frames will be merged again with the non de-saturated frames of Deoldify using the _Simple Merge_.
+ 4. _Luma Masked Merge_: the behaviour is similar to the method _Adaptive Luma Merge_. With this method the frames are combined using a _masked merge_. The pixels of DDColor's frame with luma < _luma_limit_  will be filled with the (de-saturated) pixels of DeOldify, while the pixels above the _white_limit_ threshold will be left untouched. All the pixels in the middle will be gradually replaced depending on the luma value. If the parameter  _merge_weight_ is < 1.0, the resulting masked frames will be merged again with the non de-saturated frames of DeOldify using the _Simple Merge_.
 
-5. _Adaptive Luma Merge_: given that the DDcolor perfomance is quite bad on dark scenes, with this method the images are combined by decreasing the weight assigned to DDcolor frames when the luma is below the _luma_threshold_. For example with: luma_threshold = 0.6 and alpha = 1, the weight assigned to DDcolor frames will start to decrease linearly when the luma < 60% till _min_weight_. For _alpha_=2, the weight begins to decrease quadratically.      
+5. _Adaptive Luma Merge_: given that the DDcolor performance is quite bad on dark scenes, with this method the images are combined by decreasing the weight assigned to DDcolor frames when the luma is below the _luma_threshold_. For example with: luma_threshold = 0.6 and alpha = 1, the weight assigned to DDcolor frames will start to decrease linearly when the luma < 60% till _min_weight_. For _alpha_=2, the weight begins to decrease quadratically.      
 
-The merging methods 2-5 are levereging on the fact that usually the Deoldify _Video_ model provides frames which are more stable, this feature is exploited to stabilize also DDColor. The methods 3 and 4 are similar to _Simple Merge_, but before the merge with _DeOldify_ the _DDColor_ frame is limited in the chroma changes (method 3) or limited based on the luma (method 4). The method 5 is a _Simple Merge_ where the weight decrease with luma. 
+The merging methods 2-5 are leveraging on the fact that usually the DeOldify _Video_ model provides frames which are more stable, this feature is exploited to stabilize also DDColor. The methods 3 and 4 are similar to _Simple Merge_, but before the merge with _DeOldify_ the _DDColor_ frame is limited in the chroma changes (method 3) or limited based on the luma (method 4). The method 5 is a _Simple Merge_ where the weight decrease with luma. 
 
 ## Comparison of Models
 
-Taking inspiration from the article published on Habr: [Mode on: Comparing the two best colorization AI's](https://habr.com/en/companies/ruvds/articles/568426/). I decided to use it to get the refence images and the images obtained using the [ColTran](https://github.com/google-research/google-research/tree/master/coltran) model, to extend the analysis with the models implemented in the **DDeoldify** filter.
+Taking inspiration from the article published on Habr: [Mode on: Comparing the two best colorization AI's](https://habr.com/en/companies/ruvds/articles/568426/). It was decided to use it to get the refence images and the images obtained using the [ColTran](https://github.com/google-research/google-research/tree/master/coltran) model, to extend the analysis with the models implemented in the **HAVC** filter.
 
 The added models are:
 
-**D+D**: Deoldify (with model _Video_ & render_factor = 23) + DDColor (with model _Artistic_ and render_factor = 24)
+**D+D**: DeOldify (with model _Video_ & render_factor = 23) + DDColor (with model _Artistic_ and render_factor = 24)
 ![Hybrid D+D](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_D%2BD.JPG)  
 
 **DD**:  DDColor (with model _Artistic_ and input_size = 384)
 ![Hybrid_DD](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_DD.JPG)
 
-**DS**: Deoldify (with model _Stable_ & render_factor = 30)
+**DS**: DeOldify (with model _Stable_ & render_factor = 30)
 ![Hybrid D+D](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_DS.JPG)  
 
-**DV**: Deoldify (with model _Video_ & render_factor = 23)
+**DV**: DeOldify (with model _Video_ & render_factor = 23)
 ![Hybrid D+D](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_DV.JPG)  
 
 **T241**:  ColTran + TensorFlow 2.4.1 model as shown in [Habr](https://habr.com/en/companies/ruvds/articles/568426/)
@@ -212,8 +236,8 @@ To compare the models I decided to use a metric being able to consider the _perc
    
 The calculation of **dE** with the  **CIEDE2000** method was obtained by leveraging on the computational code available in [ColorMine](https://github.com/MasterPieceCode/Mozaic/tree/master/ColorMine).
 
-As it is possible to see the model that performed better is the **D+D** model (which I called _DDelodify_ because is using both _Deoldify_ and _DDColor_). This model was the best model in 10 tests out of 23. Also the **DD** model performed well but there were situations where the **DD** model provided quite bad colorized images like in [Test #23](https://github.com/dan64/vs-deoldify/blob/main/test_images/Image_23_test.jpg) and the combination with the Deoldify allowed to significantly improve the final image. In effect the average distance of **DD** was **8.5** while for **DV** was **9.5**, given that the 2 models were weighted at 50%, if the images were positively correlated a value **9.0** would have been expected, instead the average distance measured for **D+D** was **8.3**, this implies that the 2 models were able to compensate each other. 
-Conversely, the **T241** was the model that performed worse with the greatest average difference in colors. Finally, the quality of Deoldify models was similar, being **DS** slightly better than **DV** (as expected).
+As it is possible to see the model that performed better is the **D+D** model (which I called _HAVC ddelodify_ because is using both _DeOldify_ and _DDColor_). This model was the best model in 10 tests out of 23. Also the **DD** model performed well but there were situations where the **DD** model provided quite bad colorized images like in [Test #23](https://github.com/dan64/vs-deoldify/blob/main/test_images/Image_23_test.jpg) and the combination with the DeOldify allowed to significantly improve the final image. In effect the average distance of **DD** was **8.5** while for **DV** was **9.5**, given that the 2 models were weighted at 50%, if the images were positively correlated a value **9.0** would have been expected, instead the average distance measured for **D+D** was **8.3**, this implies that the 2 models were able to compensate each other. 
+Conversely, the **T241** was the model that performed worse with the greatest average difference in colors. Finally, the quality of DeOldify models was similar, being **DS** slightly better than **DV** (as expected).
 
 ###  Tests Set #2
 
@@ -221,15 +245,15 @@ Given the goodness of  **CIEDE2000** method to provide a reliable estimate of _h
 
 The models added are:
 
-**DA**: Deoldify (with model _Artistic_ & render_factor = 30) 
+**DA**: DeOldify (with model _Artistic_ & render_factor = 30) 
 
 **DDs**: DDColor (with model _ModelScope_ and input_size = 384)
 
-**DS+DD**: Deoldify (with model _Stable_ & render_factor = 30) + DDColor (with model _Artistic_ and render_factor  = 24)
+**DS+DD**: DeOldify (with model _Stable_ & render_factor = 30) + DDColor (with model _Artistic_ and render_factor  = 24)
 
-**DA+DDs**: Deoldify (with model _Artistic_ & render_factor = 30) + DDColor (with model _ModelScope_ and render_factor  = 24)
+**DA+DDs**: DeOldify (with model _Artistic_ & render_factor = 30) + DDColor (with model _ModelScope_ and render_factor  = 24)
 
-**DA+DD**: Deoldify (with model _Artistic_ & render_factor = 30) + DDColor (with model _Artistic_ and render_factor  = 24)
+**DA+DD**: DeOldify (with model _Artistic_ & render_factor = 30) + DDColor (with model _Artistic_ and render_factor  = 24)
 
 The results of this additional tests set are shown in the table below (test image can be seen by clicking on the test number)
 
@@ -260,17 +284,54 @@ The results of this additional tests set are shown in the table below (test imag
 |[23](https://github.com/dan64/vs-deoldify/blob/main/test_images_ex/Image_23_test_ex.jpg) | 6.2 | 6.3 | **6.0** | 7.8 | 10.2 |
 |**Avg(dE)** | **8.0** | **8.0** | **8.1** | **8.9** | **9.4** |
 
-First of all, it should be noted that the individual models added (**DA** for _Deoldify_ and **DDs** for _DDColor_)  performed worse than the individual models tested in the previous analysis (**DS** for _Deoldify_ and **DD** for _DDColor_). Conversely all combinations of _Deoldify_ and _DDColor_ performed well.  Confirming the positive impact on the final result, already observed in the previous analysis, obtained by combining the 2 models. 
+First of all, it should be noted that the individual models added (**DA** for _DeOldify_ and **DDs** for _DDColor_)  performed worse than the individual models tested in the previous analysis (**DS** for _DeOldify_ and **DD** for _DDColor_). Conversely all combinations of _DeOldify_ and _DDColor_ performed well.  Confirming the positive impact on the final result, already observed in the previous analysis, obtained by combining the 2 models. 
+
+## DeepEx Model
+
+As stated previously to stabilize further the colorized videos it is possible to use the frames colored by HAVC as reference frames (exemplar) for the [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization) model. 
+
+In Hybrid _DeepEx_ has its own panel, as shown in the following picture: 
+![Hybrid DeepEx](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_DeepEx.JPG)   
+
+The field **Preset** control the render method and speed, allowed values are:
+
+- 'Fast'  (faster but colors are more washed out)
+- 'Medium' (colors are a little washed out)
+- 'Slow' (slower but colors are a little more vivid)
+
+The field **SC thresh** define the sensitivity for the scene detection (suggested value **0.1**, see [Miscellaneous Filters](https://amusementclub.github.io/doc3/plugins/misc.html)), while the field **SC min freq** allows to specify the minimum number of reference frames that have to be generated.
+
+Given that the colors generated by DeepEx inference are a little washed out, by enabling the  flag **Vivid**, the saturation of colored frames will be increased by about 25%.
+
+The field **Method** allows to specify the type of reference frames (RF) provided in input to DeepEx, allowed values are:
+- 0 = HAVC (default)
+- 1 = HAVC + RF same as video
+- 2 = HAVC + RF different from video
+- 3 = external RF same as video
+- 4 = external RF different from video
+
+It is possible to specify the directory containing the external reference frames by using the field **Ref FrameDir**. The frames must be named using the following format: _ref_nnnnnn.[png|jpg]_.
+
+Unfortunately all the Deep-Exemplar methods have the problem that are unable to properly colorize the new "features" (new elements not available in the reference frame) so that often these new elements are colored with implausible colors (see for an example: [New "features" are not properly colored](https://github.com/yyang181/NTIRE23-VIDEO-COLORIZATION/issues/10)). To try to fix this problem has been introduced the possibility to merge the frames propagated by DeepEx with the frames colored with DDColor and/or DeOldify. The merge is controlled by the field **Ref merge**, allowed values are:
+- 0 = no merge
+- 1 = reference frames are merged with low weight
+- 2 = reference frames are merged with medium weight
+- 3 = reference frames are merged with high weight
+
+When the field **Ref merge** is set to a value greater than 0, the field **SC min freq** is set =1, to allows the merge for every frame (for some example see: [New RC3 release](https://forum.selur.net/thread-3595-post-22894.html#pid22894)).   
+
+Finally the flag **Reference frames only** can be used to export the reference frames generated with the method **HAVC** and defined by the parameters  **SC thresh** ,  **SC min freq** fields. 
+
 
 ## Conclusions
 
-In Summary **DDeoldify** is able to provide often a final colorized image that is better than the image obtained from the individual models, and can be considered an improvement respect to the current Models.  The suggested configuration for _video encoding_ is: 
+In Summary **HAVC** is able to provide often a final colorized image that is better than the image obtained from the individual models, and can be considered an improvement respect to the current Models.  The suggested configuration for _video encoding_ is: 
 
-* **D+D**: Deoldify (with model _Video_ & render_factor = 24) + DDColor (with model _Artistic_ and render_factor = 24)
+* **D+D**: DeOldify (with model _Video_ & render_factor = 24) + DDColor (with model _Artistic_ and render_factor = 24)
 
 willing to accept a decrease in encoding speed of about 40% it is possible to improve _a little_ the colorization process by using the configuration:
 
-* **DS+DD**: Deoldify (with model _Video_ & render_factor = 30) + DDColor (with model _Artistic_ and render_factor = 30)
+* **DS+DD**: DeOldify (with model _Video_ & render_factor = 30) + DDColor (with model _Artistic_ and render_factor = 30)
 
 It is also suggested to enable the _DDColor Tweaks_  (to apply the dynamic gamma correction) and the post-process filters: _Chroma Smoothing_ and _Chroma Stabilization_. Unfortunately is not possible provide a _one size fits-all solution_ and the filter parameters need to be adjusted depending on the type of video to be colored.  
 
