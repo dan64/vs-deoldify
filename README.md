@@ -15,7 +15,8 @@ This filter is distributed with the torch package provided with the **Hybrid Win
 - [PyTorch](https://pytorch.org/get-started) 2.2.0 or later
 - [VapourSynth](http://www.vapoursynth.com/) R65 or later
 - [MiscFilters.dll](https://github.com/vapoursynth/vs-miscfilters-obsolete) Vapoursynth's Miscellaneous Filters
-- 
+
+
 ## Installation
 ```
 pip install vsdeoldify-x.x.x-py3-none-any.whl
@@ -50,6 +51,7 @@ The models used by **DDColor** can be installed with the command
 ```
 python -m vsddcolor
 ```
+
 The models for **Deep-Exemplar based Video Colorization.** can be installed by downloading  the file **colorization_checkpoint.zip** available in: [inference code](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization/releases/tag/v1.0). 
  
 The archive  **colorization_checkpoint.zip** have to be unziped in: .\Lib\site-packages\vsdeoldify\deepex
