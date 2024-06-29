@@ -59,6 +59,8 @@ def get_deepex_size(render_speed: str = 'medium', enable_resize: bool = False) -
             d_size = [144 * scale, 256 * scale]
         case 'slow':
             d_size = [288 * scale, 512 * scale]
+        case 'slower':
+            d_size = [360 * scale, 640 * scale]
         case _:
             raise vs.Error("HAVC_deepex: unknown render_speed ->" + render_speed)
     return d_size
