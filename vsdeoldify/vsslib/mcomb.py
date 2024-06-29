@@ -51,12 +51,12 @@ def vs_ext_reference_clip(clip: vs.VideoNode, sc_framedir: str = None) -> vs.Vid
             if os.path.isfile(img_path):
                 try:
                     ref_img = Image.open(img_path).convert('RGB')
-                    if (ref_img.size != f_size):
+                    if ref_img.size != f_size:
                         ref_img = ref_img.resize(f_size, Image.Resampling.LANCZOS)
                         #vs.core.log_message(2, "Resized reference frame: " + img_path + " size= " + str(f_size))
                 except Exception as error:
                     vs.core.log_message(2, "Error reading reference frame: " + img_path + " -> " + str(error))
-                    f.copy()
+                    return f.copy()
         else:
             return f.copy()
 
@@ -66,52 +66,6 @@ def vs_ext_reference_clip(clip: vs.VideoNode, sc_framedir: str = None) -> vs.Vid
 
     return clip_ref
 
-
-def vs_reference_clip(clip: vs.VideoNode, method: int = 1, mweight: float = 0.4, render_factor=0,
-        deoldify_p: list = [0, 24, 1.0, 0.0], ddcolor_p: list = [1, 24, 1.0, 0.0, True], ddtweak: bool = False,
-        ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "none"], scenechange: bool = True,
-        device_index: int = 0, package_dir: str = None) -> vs.VideoNode:
-
-    merge_weight = mweight
-
-    # unpack deoldify_params
-    deoldify_model = deoldify_p[0]
-    if render_factor==0:
-        deoldify_rf = deoldify_p[1]
-    else:
-        deoldify_rf = render_factor
-    deoldify_sat = deoldify_p[2]
-    deoldify_hue = deoldify_p[3]
-
-    # unpack deoldify_params
-    ddcolor_model = ddcolor_p[0]
-    if render_factor==0:
-        ddcolor_rf = ddcolor_p[1]
-    else:
-        ddcolor_rf = render_factor
-    ddcolor_sat = ddcolor_p[2]
-    ddcolor_hue = ddcolor_p[3]
-    ddcolor_enable_fp16 = ddcolor_p[4]
-
-    if ddcolor_rf != 0 and ddcolor_rf not in range(10, 65):
-        raise vs.Error("HybridAVC: ddcolor render_factor must be between: 10-64")
-
-    if ddcolor_rf == 0:
-        ddcolor_rf = min(max(math.trunc(0.4 * clip.width / 16), 16), 48)
-
-    clipb_weight = merge_weight
-
-    clipa = vs_sc_deoldify(clip, method=method, model=deoldify_model, render_factor=deoldify_rf, scenechange=scenechange, package_dir=package_dir)
-
-    clipb = vs_sc_ddcolor(clip, method=method, model=ddcolor_model, render_factor=ddcolor_rf, tweaks_enabled=ddtweak,
-                       tweaks=ddtweak_p, enable_fp16=ddcolor_enable_fp16, scenechange=scenechange, device_index=device_index)
-
-    return clipb
-
-    clip_colored = vs_sc_combine_models(clipa, clipb, method=method, sat=[deoldify_sat, ddcolor_sat], scenechange=scenechange,
-                                     hue=[deoldify_hue, ddcolor_hue], clipb_weight=merge_weight)
-
-    return clip_colored
 
 """
 ------------------------------------------------------------------------------- 

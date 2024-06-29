@@ -58,7 +58,7 @@ def restore_color(img_color: Image = None, img_gray: Image = None, sat: float=1.
         else:
             return img_gray
     
-    mask_rgb = np_gray.copy();
+    mask_rgb = np_gray.copy()
     
     for i in range(3):
         mask_rgb[:,:,i] = hsv_mask
@@ -141,7 +141,7 @@ def adjust_chroma(img_color: Image = None, hue_range: str='none', sat: float = 0
     
     hsv_mask = np.where(cond, 255, 0) # white only gray pixels
        
-    mask_rgb = np_color.copy();
+    mask_rgb = np_color.copy()
     
     for i in range(3):
         mask_rgb[:,:,i] = hsv_mask
@@ -208,7 +208,7 @@ def np_image_chroma_tweak(img_color_rgb: np.ndarray, sat: float = 1, bright: flo
     
     hsv_mask = np.where(cond, 255, 0) # white only gray pixels
        
-    mask_rgb = img_color_rgb.copy();
+    mask_rgb = img_color_rgb.copy()
     
     for i in range(3):
         mask_rgb[:,:,i] = hsv_mask       
@@ -238,7 +238,7 @@ def np_adjust_chroma2(np_color_rgb: np.ndarray, np_gray_rgb: np.ndarray, hue_ran
     
     hsv_mask = np.where(cond, 255, 0) # white only gray pixels
        
-    mask_rgb = np_color_rgb.copy();
+    mask_rgb = np_color_rgb.copy()
     
     for i in range(3):
         mask_rgb[:,:,i] = hsv_mask
@@ -256,8 +256,8 @@ def _parse_hue_adjust(hue_adjust: str='none') -> ():
     
     hue_range = ""
     sat = 1.0
-    hue = 0;
-    weight = 0;
+    hue = 0
+    weight = 0
     
     num = len(p) 
     if num < 1 or num > 2:

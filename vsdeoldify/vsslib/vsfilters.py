@@ -403,7 +403,7 @@ Direct color mapping using the "chroma adjustment".
 """
 def vs_sc_colormap(clip: vs.VideoNode = None, colormap: str='none', scenechange: bool = True) -> vs.VideoNode:
 
-    clip_m =  _vs_sc_colormap(clips=clip, colormap=colormap, scenechange=scenechange)
+    clip_m =  _vs_sc_colormap(clip=clip, colormap=colormap, scenechange=scenechange)
 
     return clip_m
 
@@ -635,9 +635,11 @@ def vs_sc_recover_clip_luma(orig: vs.VideoNode = None, clip: vs.VideoNode = None
 
         if scenechange:
             is_scenechange = (n == 0) or (f[0].props['_SceneChangePrev'] == 1 and f[0].props['_SceneChangeNext'] == 0)
+        else:
+            is_scenechange = False
 
         if not (sc_framedir is None) and is_scenechange:
-            img_path = os.path.join(sc_framedir, f"ref_{n:06d}.jpg")
+            img_path = os.path.join(sc_framedir, f"ref_{n:06d}.png")
             img_m.save(img_path)
 
         return image_to_frame(img_m, f[0].copy())
@@ -680,7 +682,7 @@ def vs_degrain(clip: vs.VideoNode = None, strength: int = 1, device_id: int = 0)
           dstr = 3.5
           dtmp = 2
         case _:
-            raise vs.Error("HybridAVC: not supported strength value: " + strength)      
+            raise vs.Error("HybridAVC: not supported strength value: " + str(strength))
     
     clip = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="full")   
     clip = vs.core.knlm.KNLMeansCL(clip=clip, d=dtmp, a=2, s=4, h=dstr, channels='Y', device_type="gpu", device_id=device_id)

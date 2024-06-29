@@ -329,7 +329,7 @@ The ranges that OpenCV manage for HSV format are the following:
 For the 8-bit images, H is converted to H/2 to fit to the [0,255] range. 
 So the range of hue in the HSV color space of OpenCV is [-90,+90]
 """
-def image_tweak(img: Image, sat: float = 1, cont: float = 1.0, bright: float = 0, hue: int = 0, gamma: float = 1.0, hue_range: str='none') -> Image:
+def image_tweak(img: Image, sat: float = 1, cont: float = 1.0, bright: float = 0, hue: float = 0, gamma: float = 1.0, hue_range: str='none') -> Image:
 
     if (sat == 1 and bright == 0 and hue == 0 and gamma == 1 and cont == 1):
         return img  # non changes
@@ -351,12 +351,12 @@ def image_chroma_tweak(img: Image, sat: float = 1, bright: float = 0, hue: int =
     
     return Image.fromarray(img_rgb,'RGB').convert('RGB') 
 
-def np_image_tweak(img_np: np.ndarray, sat: float = 1, cont: float = 1.0, bright: float = 0, hue: int = 0, gamma: float = 1.0, hue_range: str='none') -> np.ndarray:
+def np_image_tweak(img_np: np.ndarray, sat: float = 1, cont: float = 1.0, bright: float = 0, hue: float = 0, gamma: float = 1.0, hue_range: str='none') -> np.ndarray:
 
     if cont != 1 or gamma != 1:
         img_np = np_image_gamma_contrast(img_np, gamma, cont)
 
-    if (sat == 1 and bright == 0 and hue == 0, hue_range == 'none'):
+    if sat == 1 and bright == 0 and hue == 0 and hue_range == 'none':
         return img_np  # no other changes
 
     hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
