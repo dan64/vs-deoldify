@@ -19,7 +19,7 @@ import cv2
 from PIL import Image
 from functools import partial
 
-IMG_EXTENSIONS = ['.png', '.PNG', 'jpg', 'JPG', '.jpeg', '.JPEG',
+IMG_EXTENSIONS = ['.png', '.PNG', '.jpg', '.JPG', '.jpeg', '.JPEG',
                   '.ppm', '.PPM', '.bmp', '.BMP']
 
 """
@@ -219,18 +219,24 @@ Function to save the reference frames of a clip
 """
 
 
-def vs_sc_export_frames(clip: vs.VideoNode = None, sc_framedir: str = None) -> vs.VideoNode:
-    def save_sc_frame(n, f, sc_framedir: str = None):
+def vs_sc_export_frames(clip: vs.VideoNode = None, sc_framedir: str = None, ref_offset: int = 0,
+                        ref_ext: str = 'png', ref_override: bool = True) -> vs.VideoNode:
+
+    def save_sc_frame(n, f, sc_framedir: str = None, ref_offset: int = 0, ref_ext: str = 'png', ref_override: bool = True):
         is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
 
         if is_scenechange:
+            ref_n = n + ref_offset
             img = frame_to_image(f)
-            img_path = os.path.join(sc_framedir, f"ref_{n:06d}.jpg")
+            img_path = os.path.join(sc_framedir, f"ref_{ref_n:06d}.{ref_ext}")
+            if not ref_override and os.path.exists(img_path):
+                return f.copy()  # do nothing
             img.save(img_path)
 
         return f.copy()
 
-    clip = clip.std.ModifyFrame(clips=[clip], selector=partial(save_sc_frame, sc_framedir=sc_framedir))
+    clip = clip.std.ModifyFrame(clips=[clip], selector=partial(save_sc_frame, sc_framedir=sc_framedir,
+                                ref_offset=ref_offset, ref_ext=ref_ext, ref_override=ref_override))
 
     return clip
 

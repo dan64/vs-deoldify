@@ -44,7 +44,7 @@ from vsdeoldify.vsslib.vsutils import SceneDetect
 
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 
-__version__ = "4.0.0"
+__version__ = "4.0.1"
 
 import warnings
 
@@ -482,7 +482,7 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
     clip_resized = smc.restore_clip_size(clip_colored)
 
     # restore original resolution details, 5% faster than ShufflePlanes()
-    if not (sc_framedir is None) and method == 0:
+    if not (sc_framedir is None) and method == 0 and only_ref_frames:
         # ref frames are saved if sc_framedir is set
         return vs_sc_recover_clip_luma(clip_orig, clip_resized, scenechange=True, sc_framedir=sc_framedir)
     else:
@@ -819,6 +819,42 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = [0.2,
 
 
 """
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description: ONLY FOR TESTING
+------------------------------------------------------------------------------- 
+wrapper to function vs_sc_export_frames() to export the clip's reference frames
+"""
+
+
+def HAVC_extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = 0.1,
+                                  sc_min_freq: int = 0, sc_framedir: str = "./",
+                                  ref_offset: int = 0, ref_ext: str = "png",
+                                  ref_override: bool = True) -> vs.VideoNode:
+    """Utility function to export reference frames
+
+    :param clip:                clip to process, only RGB24 format is supported.
+    :param sc_threshold:        Scene change threshold used to generate the reference frames.
+                                It is a percentage of the luma change between the previous and the current frame.
+                                range [0-1], default 0.1.
+                                reference frames and will colorize all the frames.
+    :param sc_min_freq:         if > 0 will be generated at least a reference frame every "sc_min_freq" frames.
+                                range [0-1500], default: 0.
+    :param sc_framedir:         If set, define the directory where are stored the reference frames.
+                                The reference frames are named as: ref_nnnnnn.[jpg|png].
+    :param ref_offset:          Offset number that will be added to the number of generated frames. default: 0.
+    :param ref_ext:             File extension and format of saved frames, range ["jpg", "png"] . default: "png"
+    :param ref_override:        If True, the reference frames with the same name will be overridden, otherwise will
+                                discarded. default: True
+    """
+    pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
+    clip = SceneDetect(clip, threshold=sc_threshold, frequency=sc_min_freq)
+    clip = vs_sc_export_frames(clip, sc_framedir=sc_framedir, ref_offset=ref_offset, ref_ext=ref_ext, ref_override=ref_override)
+    return clip
+
+
+"""
 ------------------------------------------------------------------------------------------------------------------------ 
                                    DDEOLDIFY LEGACY FUNCTIONS (deprecated)
 ------------------------------------------------------------------------------------------------------------------------ 
@@ -870,14 +906,12 @@ wrapper to function vs_sc_export_frames() to export the clip's reference frames
 """
 
 
-def _extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = 0.0, sc_min_freq: int = 0,
-                              sc_framedir: str = "./") -> vs.VideoNode:
+def _extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = 0.0, sc_min_freq: int = 0, sc_framedir: str = "./",
+                              ref_offset: int = 0, ref_ext: str = "png", ref_override: bool = True) -> vs.VideoNode:
+    vs.core.log_message(2,
+                        "Warning: _extract_reference_frames is deprecated and may be removed in the future, please use 'HAVC_extract_reference_frames' instead.")
 
-    pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
-    clip = SceneDetect(clip, threshold=sc_threshold, frequency=sc_min_freq)
-    clip = vs_sc_export_frames(clip, sc_framedir)
-    return clip
-
+    return HAVC_extract_reference_frames(clip, sc_threshold, sc_min_freq, sc_framedir, ref_offset, ref_ext, ref_override)
 
 """
 ------------------------------------------------------------------------------- 
