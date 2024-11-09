@@ -360,11 +360,11 @@ then enable the _Exemplar Models_ check box and set
 - **SC thresh:** 0.03
 - **SC SSIM thresh:** 0.00
 - **SC min freq:** 3  (**normalize** checked)
-- **Mode:** remote (o local)
+- **Mode:** remote (or local)
 - **Frames:** 0 
  
 
-In the following picture are shown the parameters suggested: 
+In the following picture are shown the suggested parameters: 
 
 ![Hybrid Preset](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_Presets.JPG)   
 
