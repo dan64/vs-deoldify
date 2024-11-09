@@ -347,9 +347,26 @@ Finally the flag **Reference frames only** can be used to export the reference f
 
 ## Coloring using Hybrid
 
-As stated previously the easiest way to colorize images with the HAVC filter it to use [Hybrid](https://www.selur.de/downloads). To simplify the usage has been introduced standard Presets that automatically apply all the filter's settings. An example of suggested Preset is shown in the following picture: 
-![Hybrid Preset](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_Presets.JPG)   
+As stated previously the easiest way to colorize images with the HAVC filter it to use [Hybrid](https://www.selur.de/downloads). To simplify the usage has been introduced standard Presets that automatically apply all the filter's settings. A set of parameters that are able to provide a satisfactory colorization are the following:
 
+- **Preset:** medium (_fast_ will increase the speed with a little decrease in color accuracy)
+- **Color map:** none
+- **ColorFix:**  violet/red
+- **Denoise:** light
+- **Stabilize:** stable
+
+then enable the _Exemplar Models_ check box and set
+- **Method:** HAVC
+- **SC thresh:** 0.03
+- **SC SSIM thresh:** 0.00
+- **SC min freq:** 3  (**normalize** checked)
+- **Mode:** remote (o local)
+- **Frames:** 0 
+ 
+
+In the following picture are shown the parameters suggested: 
+
+![Hybrid Preset](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_Presets.JPG)   
 
 ## Conclusions
 
