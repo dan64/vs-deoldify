@@ -345,6 +345,11 @@ When the field **Ref merge** is set to a value greater than 0, the field **SC mi
 
 Finally the flag **Reference frames only** can be used to export the reference frames generated with the method **HAVC** and defined by the parameters  **SC thresh** ,  **SC min freq** fields. 
 
+## Coloring using Hybrid
+
+As stated previously the easiest way to colorize images with the HAVC filter it to use [Hybrid](https://www.selur.de/downloads). To simplify the usage has been introduced standard Presets that automatically apply all the filter's settings. An example of suggested Preset is shown in the following picture: 
+![Hybrid Preset](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_Presets.JPG)   
+
 
 ## Conclusions
 
