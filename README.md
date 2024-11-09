@@ -353,16 +353,18 @@ As stated previously the easiest way to colorize images with the HAVC filter it 
 - **Color map:** none
 - **ColorFix:**  violet/red
 - **Denoise:** light
-- **Stabilize:** stable
+- **Stabilize:** stable (or morestable)
 
 then enable the _Exemplar Models_ check box and set
 - **Method:** HAVC
 - **SC thresh:** 0.03
 - **SC SSIM thresh:** 0.00
-- **SC min freq:** 3  (**normalize** checked)
-- **Mode:** remote (or local)
+- **SC min freq:** 3  
+- **normalize:** checked
+- **Mode:** local
 - **Frames:** 0 
- 
+- **Preset:** slow (_medium_ will increase the speed with a little decrease in color accuracy)
+- **Vivid:** checked 
 
 In the following picture are shown the suggested parameters: 
 
