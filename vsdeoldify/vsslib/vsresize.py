@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-05-15
 version:
 LastEditors: Dan64
-LastEditTime: 2024-05-15
+LastEditTime: 2024-10-17
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
@@ -109,11 +109,15 @@ class SmartResizeReference:
             # necessary to add vertical borders
             new_width = round(self.clip_h * self.ratio_target, 0)
             self.pad_width = round((new_width - self.clip_w) / 2, 0)
+            # pad_width must a multiple of 2
+            self.pad_width = math.trunc(self.pad_width / 2) * 2
             clip = clip.std.AddBorders(left=self.pad_width, right=self.pad_width, top=0, bottom=0)
         elif self.ratio_clip > self.ratio_target:
             # necessary to add horizontal borders
             new_height = round(self.clip_w / self.ratio_target, 0)
             self.pad_height = round((new_height - self.clip_h) / 2, 0)
+            # pad_height must a multiple of 2
+            self.pad_height = math.trunc(self.pad_height / 2) * 2
             clip = clip.std.AddBorders(left=0, right=0, top=self.pad_height, bottom=self.pad_height)
         # resize
         return clip.resize.Spline64(width=self.target_width, height=self.target_height)

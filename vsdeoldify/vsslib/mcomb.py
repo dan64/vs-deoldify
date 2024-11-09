@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-05-26
+LastEditTime: 2024-10-03
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -32,7 +32,10 @@ Description:
 function to build the refrence image used for the inference by DeepEx
 """
 
+
 def vs_ext_reference_clip(clip: vs.VideoNode, sc_framedir: str = None) -> vs.VideoNode:
+    if not os.path.exists(sc_framedir):
+        HAVC_LogMessage(MessageType.EXCEPTION, "vs_ext_reference_clip(): frames path '", sc_framedir, "' is invalid")
 
     ref_images = get_ref_images(sc_framedir)
     ref_images.sort()
@@ -40,7 +43,7 @@ def vs_ext_reference_clip(clip: vs.VideoNode, sc_framedir: str = None) -> vs.Vid
     def set_clip_frame(n, f, img_list: list = None, f_size: Tuple[int, int] = None):
 
         is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1)
-
+        ref_img = None
         if not is_scenechange:
             return f.copy()
 
@@ -53,16 +56,23 @@ def vs_ext_reference_clip(clip: vs.VideoNode, sc_framedir: str = None) -> vs.Vid
                     ref_img = Image.open(img_path).convert('RGB')
                     if ref_img.size != f_size:
                         ref_img = ref_img.resize(f_size, Image.Resampling.LANCZOS)
-                        #vs.core.log_message(2, "Resized reference frame: " + img_path + " size= " + str(f_size))
+                        # vs.core.log_message(2, "Resized reference frame: " + img_path + " size= " + str(f_size))
                 except Exception as error:
-                    vs.core.log_message(2, "Error reading reference frame: " + img_path + " -> " + str(error))
+                    HAVC_LogMessage(MessageType.WARNING, "Error reading reference frame: ", img_path, " -> ", error)
                     return f.copy()
+            else:
+                HAVC_LogMessage(MessageType.WARNING, "vs_ext_reference_clip(): path '", img_path, "' is invalid")
+                return f.copy()
         else:
+            return f.copy()
+
+        if ref_img is None:
             return f.copy()
 
         return image_to_frame(ref_img, f.copy())
 
-    clip_ref = clip.std.ModifyFrame(clips=[clip], selector=partial(set_clip_frame, img_list=ref_images, f_size=(clip.width, clip.height)))
+    clip_ref = clip.std.ModifyFrame(clips=[clip], selector=partial(set_clip_frame, img_list=ref_images,
+                                                                   f_size=(clip.width, clip.height)))
 
     return clip_ref
 
@@ -75,15 +85,17 @@ Description:
 ------------------------------------------------------------------------------- 
 main function used to combine the colored images with deoldify() and ddcolor()
 """
-def vs_sc_combine_models(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, method: int = 0, sat: list = [1,1], hue: list = [0,0],
-                      clipb_weight: float = 0.6, scenechange: bool = True) -> vs.VideoNode:
 
+
+def vs_sc_combine_models(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, method: int = 0, sat: list = [1, 1],
+                         hue: list = [0, 0],
+                         clipb_weight: float = 0.6, scenechange: bool = True) -> vs.VideoNode:
     #vs.core.log_message(2, "combine_models: method=" + str(method) + ", clipa = " + str(clipa) + ", clipb = " + str(clipb))
 
     if clipa is not None:
         clipa = vs_sc_tweak(clipa, hue=hue[0], sat=sat[0], scenechange=scenechange)
         if clipb is None: return clipa
-    
+
     if clipb is not None:
         clipb = vs_sc_tweak(clipb, hue=hue[1], sat=sat[1], scenechange=scenechange)
         if clipa is None: return clipb
@@ -134,6 +146,7 @@ def vs_combine_models(clip_a: vs.VideoNode = None, clip_b: vs.VideoNode = None, 
     else:
         raise vs.Error("HybridAVC: only dd_method=(0,5) is supported")
 
+
 """
 ------------------------------------------------------------------------------- 
 Author: Dan64
@@ -144,8 +157,9 @@ the images are combined using a weighted merge, where the parameter clipb_weight
 represent the weight assigned to the colors provided by ddcolor() 
 """
 
-def SCSimpleMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clipb_weight: float = 0.5, scenechange: bool = True) -> vs.VideoNode:
 
+def SCSimpleMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clipb_weight: float = 0.5,
+                  scenechange: bool = True) -> vs.VideoNode:
     def merge_frame(n, f, weight: float = 0.5, scenechange: bool = True):
 
         if scenechange:
@@ -154,21 +168,23 @@ def SCSimpleMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clipb_
                 return f[0].copy()
 
         img1 = frame_to_image(f[0])
-        img2 = frame_to_image(f[1]) 
-        img_m = image_weighted_merge(img1, img2, weight)        
-        return image_to_frame(img_m, f[0].copy())                
+        img2 = frame_to_image(f[1])
+        img_m = image_weighted_merge(img1, img2, weight)
+        return image_to_frame(img_m, f[0].copy())
 
-    clipm = clipa.std.ModifyFrame(clips=[clipa, clipb], selector=partial(merge_frame, weight=clipb_weight, scenechange=scenechange))
+    clipm = clipa.std.ModifyFrame(clips=[clipa, clipb],
+                                  selector=partial(merge_frame, weight=clipb_weight, scenechange=scenechange))
 
     return clipm
 
-def SimpleMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clipb_weight: float = 0.5) -> vs.VideoNode:
 
+def SimpleMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clipb_weight: float = 0.5) -> vs.VideoNode:
     def merge_frame(n, f, weight: float = 0.5):
         img1 = frame_to_image(f[0])
         img2 = frame_to_image(f[1])
         img_m = image_weighted_merge(img1, img2, weight)
         return image_to_frame(img_m, f[0].copy())
+
     clipm = clipa.std.ModifyFrame(clips=[clipa, clipb], selector=partial(merge_frame, weight=clipb_weight))
     return clipm
 
@@ -183,6 +199,7 @@ the clips are combined using a mask merge, the pixels of clipb with luma < luma_
 will be filled with the pixels of clipa, if the parameter clipm_weight > 0
 the masked image will be merged with clipa 
 """
+
 
 def LumaMaskedMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, luma_mask_limit: float = 0.4,
                     luma_white_limit: float = 0.7, luma_mask_sat=1.0, clipm_weight: float = 0.5) -> vs.VideoNode:
@@ -227,6 +244,7 @@ ddcolor() will start to decrease linearly when the luma < 60% till "min_weight".
 For alpha=2, begins to decrease quadratically.      
 """
 
+
 def AdaptiveLumaMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, luma_threshold: float = 0.6,
                       alpha: float = 1.0, clipb_weight: float = 0.5, min_weight: float = 0.15) -> vs.VideoNode:
     def merge_frame(n, f, luma_limit: float = 0.6, min_w: float = 0.15, alpha: float = 1.0, weight: float = 0.5):
@@ -247,6 +265,7 @@ def AdaptiveLumaMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, lu
                                                    alpha=alpha, weight=clipb_weight))
     return clipm
 
+
 """
 ------------------------------------------------------------------------------- 
 Author: Dan64
@@ -261,6 +280,7 @@ to the image converted to "YUV". For example when threshold=0.1, the chroma
 values "U","V" of ddcolor() image will be constrained to have an absolute
 percentage difference respect to "U","V" provided by deoldify() not higher than 10%    
 """
+
 
 def ConstrainedChromaMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clipb_weight: float = 0.5,
                            chroma_threshold: float = 0.2) -> vs.VideoNode:

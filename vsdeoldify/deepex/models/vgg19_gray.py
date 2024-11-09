@@ -127,7 +127,7 @@ model = nn.Sequential(  # Sequential,
 
 
 vgg19_gray_path = os.path.join(module_dir, r"..\data\vgg19_gray.pth")
-model.load_state_dict(torch.load(vgg19_gray_path))
+model.load_state_dict(torch.load(vgg19_gray_path, weights_only=False))
 
 vgg19_gray_net = torch.nn.Sequential()
 

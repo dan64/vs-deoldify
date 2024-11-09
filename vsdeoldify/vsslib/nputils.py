@@ -100,6 +100,21 @@ def np_rgb_to_gray(img_np: np.ndarray, threshold: float = 0) -> np.ndarray:
     return gray_np
 
 
+def np_get_luma(img_np: np.ndarray) -> np.ndarray:
+    R = img_np[:, :, 0]
+    G = img_np[:, :, 1]
+    B = img_np[:, :, 2]
+
+    R = R * 0.299
+    G = G * 0.587
+    B = B * 0.114
+
+    luma_np = R + G + B
+    luma_np = luma_np.clip(0, 255)
+
+    return luma_np
+
+
 def w_np_rgb_to_gray(img_np: np.ndarray, dark_luma: float = 0, luma_white: float = 0.90,
                      as_weight: bool = True) -> np.ndarray:
     R = img_np[:, :, 0]

@@ -1,10 +1,10 @@
 # Hybrid Automatic Video Colorizer (aka DDeoldify)
 A Deep Learning based Vaoursynth filter for colorizing and restoring old images and video, based on [DeOldify](https://github.com/jantic/DeOldify)
-,  [DDColor](https://github.com/HolyWu/vs-ddcolor) and [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization).
+,  [DDColor](https://github.com/HolyWu/vs-ddcolor), [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization) and [ColorMNet](https://github.com/yyang181/colormnet).
 
 The Vapoursynth filter version has the advantage of coloring the images directly in memory, without the need to use the filesystem to store the video frames. 
 
-This filter (_HAVC_ in short) is able to combine the results provided by _DeOldify_ and _DDColor_, which are some of the best models available for coloring pictures, providing often a final colorized image that is better than the image obtained from the individual models.  But the main strength of this filter is the addition of specialized filters to improve the quality of videos obtained by using these color models and the possibility to improve further the stability by using these models as input to _Deep Exemplar based Video Colorization_ model (_DeepEx_ in short). DeepEx presents the first end-to-end network for exemplar-based video colorization and it allows to colorize a Video in sequence based on the colorization history, enforcing its coherency by using a temporal consistency loss. 
+This filter (_HAVC_ in short) is able to combine the results provided by _DeOldify_ and _DDColor_, which are some of the best models available for coloring pictures, providing often a final colorized image that is better than the image obtained from the individual models.  But the main strength of this filter is the addition of specialized filters to improve the quality of videos obtained by using these color models and the possibility to improve further the stability by using these models as input to _Deep Exemplar based Video Colorization_ model (_DeepEx_ in short) and ColorMNet. Both DeepEx and ColorMNet are exemplar-based video colorization models and allow to colorize a Video in sequence based on the colorization history, enforcing its coherency by using a temporal consistency loss. ColorMNet is more recent and advanced respect to DeepEx and it is suggested to use it as default exemplar-based model. 
 
 ## Quick Start
 
@@ -27,6 +27,14 @@ with the version 4.0 of HAVC has been released a modified version of DDColor to 
 pip install vsddcolor-1.0.1-py3-none-any.whl.zip
 ```
 
+with the version 4.5 of HAVC has been introduced the support to ColorMNet. All the necessary packages to use ColorMNet are included in Hybrid's torch add-on package.  For a manual installation not using Hybrid, it is necessary to install all the packages reported in the project page of [ColorMNet](https://github.com/yyang181/colormnet). To simplify the installation,  in the release 4.5.0 of this filter is available as asset the spatial_correlation_sampler package compiled against CUDA 12.1 and python 3.12. To install it is necessary to unzip the following archive
+
+```
+spatial_correlation_sampler-0.5.0-py312-cp312-win_amd64.whl.zip 
+```
+
+in the Library packages folder: .\Lib\site-packages\
+
 ## Models Download
 The models are not installed with the package, they must be downloaded from the Deoldify website at: [completed-generator-weights](https://github.com/jantic/DeOldify#completed-generator-weights).
 
@@ -40,7 +48,11 @@ The _model files_ have to be copied in the **models** directory usually located 
 
 .\Lib\site-packages\vsdeoldify\models
 
-At the first usage it is possible that are automatically downloaded by torch the neural networks: resnet101 and resnet34. 
+To use ColorMNet it also necessary to download the file [DINOv2FeatureV6_LocalAtten_s2_154000.pth](https://github.com/yyang181/colormnet/releases/download/v0.1/DINOv2FeatureV6_LocalAtten_s2_154000.pth) and save it in
+
+.\Lib\site-packages\vsdeoldify\colormnet\weights
+
+At the first usage it is possible that are automatically downloaded by torch the neural networks: **resnet101** and **resnet34**, and starting with the release 4.5.0:  **resnet50**, **resnet18**, **dinov2_vits14_pretrain** and the folder **facebookresearch_dinov2_main** 
 
 So don't be worried if at the first usage the filter will be very slow to start, at the initialization are loaded almost all the _Fastai_ and _PyTorch_ modules and the resnet networks.
 
@@ -82,7 +94,7 @@ clip = HAVC_stabilizer(clip, dark=True, smooth=True, stab=True)
 # Simplest way to use Presets
 clip = HAVC_main(clip=clip, Preset="fast", ColorFix="violet/red", ColorTune="medium", ColorMap="none")
 
-# DeepEx model using HAVC as input for the reference frames
+# ColorMNet model using HAVC as input for the reference frames
 clip = HAVC_main(clip=clip, EnableDeepEx=True, ScThreshold=0.1)
 
 # changing range from full to limited range for HAVC
@@ -288,12 +300,17 @@ The results of this additional tests set are shown in the table below (test imag
 
 First of all, it should be noted that the individual models added (**DA** for _DeOldify_ and **DDs** for _DDColor_)  performed worse than the individual models tested in the previous analysis (**DS** for _DeOldify_ and **DD** for _DDColor_). Conversely all combinations of _DeOldify_ and _DDColor_ performed well.  Confirming the positive impact on the final result, already observed in the previous analysis, obtained by combining the 2 models. 
 
-## DeepEx Model
+## Exemplar-based Models
 
-As stated previously to stabilize further the colorized videos it is possible to use the frames colored by HAVC as reference frames (exemplar) for the [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization) model. 
+As stated previously to stabilize further the colorized videos it is possible to use the frames colored by HAVC as reference frames (exemplar) as input to the supported exemplar-based models: [ColorMNet](https://github.com/yyang181/colormnet) and [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization) model. 
 
-In Hybrid _DeepEx_ has its own panel, as shown in the following picture: 
+In Hybrid the _Exemplar Models_ have their own panel, as shown in the following picture: 
 ![Hybrid DeepEx](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_DeepEx.JPG)   
+
+For the ColorMNet models there are 2 implementations defined, by the field **Mode**:
+
+- 'remote'  (has not memory frames limitation but it uses a remote process for the inference)
+- 'local' (the inference is performed inside the vapoursynth local thread but has memory limitation)
 
 The field **Preset** control the render method and speed, allowed values are:
 
@@ -303,14 +320,18 @@ The field **Preset** control the render method and speed, allowed values are:
 
 The field **SC thresh** define the sensitivity for the scene detection (suggested value **0.1**, see [Miscellaneous Filters](https://amusementclub.github.io/doc3/plugins/misc.html)), while the field **SC min freq** allows to specify the minimum number of reference frames that have to be generated.
 
-Given that the colors generated by DeepEx inference are a little washed out, by enabling the  flag **Vivid**, the saturation of colored frames will be increased by about 25%.
+The  flag **Vivid** has 2 different meanings depending on the _Exemplar Model_ used:
 
-The field **Method** allows to specify the type of reference frames (RF) provided in input to DeepEx, allowed values are:
-- 0 = HAVC (default)
+- __ColorMNet__ (the frames memory is reset at every reference frame update)
+- __DeepEx__ (given that the colors generated by the  inference are a little washed out , the saturation of colored frames will be increased by about 25%).
+
+The field **Method** allows to specify the type of reference frames (RF) provided in input to the _Exemplar-based Models_, allowed values are:
+- 0 = HAVC same as video (default)
 - 1 = HAVC + RF same as video
 - 2 = HAVC + RF different from video
 - 3 = external RF same as video
 - 4 = external RF different from video
+- 5 = HAVC different from video
 
 It is possible to specify the directory containing the external reference frames by using the field **Ref FrameDir**. The frames must be named using the following format: _ref_nnnnnn.[png|jpg]_.
 

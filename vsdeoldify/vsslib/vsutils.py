@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-06-10
+LastEditTime: 2024-10-08
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -18,9 +18,36 @@ import numpy as np
 import cv2
 from PIL import Image
 from functools import partial
+from skimage.metrics import structural_similarity
+from enum import IntEnum
 
 IMG_EXTENSIONS = ['.png', '.PNG', '.jpg', '.JPG', '.jpeg', '.JPEG',
                   '.ppm', '.PPM', '.bmp', '.BMP']
+
+
+class MessageType(IntEnum):
+    DEBUG = vs.MESSAGE_TYPE_DEBUG,
+    INFORMATION = vs.MESSAGE_TYPE_INFORMATION,
+    WARNING = vs.MESSAGE_TYPE_WARNING,
+    CRITICAL = vs.MESSAGE_TYPE_CRITICAL,
+    FATAL = vs.MESSAGE_TYPE_FATAL  # also terminates the process, should generally not be used by normal filters
+    EXCEPTION = 10  # raise a fatal exception that terminates the process
+
+
+def HAVC_LogMessage(message_type: MessageType = MessageType.INFORMATION, message_text: str = None):
+    if message_type == MessageType.EXCEPTION:
+        raise vs.Error(message_text)
+    else:
+        vs.core.log_message(int(message_type), message_text)
+
+
+def HAVC_LogMessage(message_type: MessageType = MessageType.INFORMATION, *args):
+    message_text: str = ' '.join(map(str, args))
+    if message_type == MessageType.EXCEPTION:
+        raise vs.Error(message_text)
+    else:
+        vs.core.log_message(int(message_type), message_text)
+
 
 """
 ------------------------------------------------------------------------------- 
@@ -92,138 +119,19 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
-wrapper to function misc.SCDetect()
-requires the dll: Hybrid/64bit/vsfilters/MiscFilter/MiscFilters/MiscFilters.dll
-"""
-
-
-def SceneDetect(clip: vs.VideoNode, threshold: float = 0.1, frequency: int = 0) -> vs.VideoNode:
-
-    clip = clip.std.SetFrameProp(prop="sc_threshold", floatval=threshold)
-    clip = clip.std.SetFrameProp(prop="sc_frequency", intval=frequency)
-
-    if threshold == 0 and frequency == 0:
-        return clip
-
-    def set_scene_change_all(n, f) -> vs.VideoFrame:
-
-        f_out = f.copy()
-
-        f_out.props['_SceneChangePrev'] = 1
-        f_out.props['_SceneChangeNext'] = 0
-
-        return f_out
-
-    if frequency == 1:
-        return clip.std.ModifyFrame(clips=[clip], selector=partial(set_scene_change_all))
-
-    sc = clip.resize.Point(format=vs.GRAY8, matrix_s='709')
-
-    try:
-        sc = sc.misc.SCDetect(threshold=threshold)
-    except Exception as error:
-        raise vs.Error("HAVC_ddeoldify: plugin 'MiscFilters.dll' not properly loaded/installed: -> " + str(error))
-
-    def set_scene_change(n, f, freq: int = 0) -> vs.VideoFrame:
-
-        f_out = f[0].copy()
-
-        is_scenechange = (n == 0) or (f[1].props['_SceneChangePrev'] == 1 and f[1].props['_SceneChangeNext'] == 0)
-
-        if freq > 1:
-            is_scenechange = is_scenechange or (n % freq == 0)
-
-        if is_scenechange:
-            # vs.core.log_message(2, "SceneDetect n= " + str(n))
-            f_out.props['_SceneChangePrev'] = 1
-            f_out.props['_SceneChangeNext'] = 0
-        else:
-            f_out.props['_SceneChangePrev'] = 0
-            f_out.props['_SceneChangeNext'] = 0
-
-        return f_out
-
-    sc = clip.std.ModifyFrame(clips=[clip, sc], selector=partial(set_scene_change, freq=frequency))
-
-    return sc
-
-
-def SceneDetectFromDir(clip: vs.VideoNode, sc_framedir: str = None, merge_ref_frame: bool = False,
-                       ref_frame_ext: bool = True) -> vs.VideoNode:
-    ref_list = get_ref_names(sc_framedir)
-
-    if len(ref_list) == 0:
-        raise vs.Error(
-            f"HAVC_deepex: no reference frames found in '{sc_framedir}', allowed format is: ref_nnnnnn.[png|jpg]")
-
-    ref_num_list = [get_ref_num(f) for f in ref_list]
-    ref_num_list.sort()
-
-    def set_scenechange(n: int, f: vs.VideoFrame, ref_num_list: list = None) -> vs.VideoFrame:
-
-        fout = f.copy()
-
-        if n in ref_num_list:
-            fout.props['_SceneChangePrev'] = 1
-            if ref_frame_ext:
-                fout.props['_SceneChangeNext'] = 1
-            else:
-                fout.props['_SceneChangeNext'] = 0
-        else:
-            if merge_ref_frame:
-                fout.props['_SceneChangePrev'] = f.props['_SceneChangePrev']
-                fout.props['_SceneChangeNext'] = f.props['_SceneChangeNext']
-            else:
-                fout.props['_SceneChangePrev'] = 0
-                fout.props['_SceneChangeNext'] = 0
-        return fout
-
-    sc = clip.std.ModifyFrame(clips=[clip], selector=partial(set_scenechange, ref_num_list=ref_num_list))
-
-    return sc
-
-
-def get_sc_props(clip: vs.VideoNode) -> tuple[float, int]:
-    sc_threshold = 0
-    sc_frequency = 0
-
-    try:
-        frame = clip.get_frame(0)
-        sc_threshold = frame.props['sc_threshold']
-        sc_frequency = frame.props['sc_frequency']
-    except Exception as error:
-        vs.core.log_message(2, "HAVC properties: 'sc_threshold', 'sc_frequency' not found in clip")
-
-    return sc_threshold, sc_frequency
-
-
-def CopySCDetect(clip: vs.VideoNode, sc: vs.VideoNode) -> vs.VideoNode:
-    def copy_property(n, f) -> vs.VideoFrame:
-        fout = f[0].copy()
-        fout.props['_SceneChangePrev'] = f[1].props['_SceneChangePrev']
-        fout.props['_SceneChangeNext'] = f[1].props['_SceneChangeNext']
-        fout.props['sc_threshold'] = f[1].props['sc_threshold']
-        fout.props['sc_frequency'] = f[1].props['sc_frequency']
-        return fout
-
-    return clip.std.ModifyFrame(clips=[clip, sc], selector=copy_property)
-
-
-"""
-------------------------------------------------------------------------------- 
-Author: Dan64
-------------------------------------------------------------------------------- 
-Description:
-------------------------------------------------------------------------------- 
 Function to save the reference frames of a clip 
 """
 
 
 def vs_sc_export_frames(clip: vs.VideoNode = None, sc_framedir: str = None, ref_offset: int = 0,
-                        ref_ext: str = 'png', ref_override: bool = True) -> vs.VideoNode:
+                        ref_ext: str = 'png', ref_jpg_quality: int = 95, ref_override: bool = True,
+                        prop_name: str = "_SceneChangePrev") -> vs.VideoNode:
+    pil_ext = ref_ext.lower()
 
-    def save_sc_frame(n, f, sc_framedir: str = None, ref_offset: int = 0, ref_ext: str = 'png', ref_override: bool = True):
-        is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
+    def save_sc_frame(n, f, sc_framedir: str = None, ref_offset: int = 0,
+                      ref_ext: str = 'png', ref_jpg_quality: int = 95, ref_override: bool = True):
+
+        is_scenechange = (n == 0) or (f.props[prop_name] == 1)
 
         if is_scenechange:
             ref_n = n + ref_offset
@@ -231,12 +139,17 @@ def vs_sc_export_frames(clip: vs.VideoNode = None, sc_framedir: str = None, ref_
             img_path = os.path.join(sc_framedir, f"ref_{ref_n:06d}.{ref_ext}")
             if not ref_override and os.path.exists(img_path):
                 return f.copy()  # do nothing
-            img.save(img_path)
+            if ref_ext == "jpg":
+                img.save(img_path, subsampling=0, quality=ref_jpg_quality)
+            else:
+                img.save(img_path)
 
         return f.copy()
 
     clip = clip.std.ModifyFrame(clips=[clip], selector=partial(save_sc_frame, sc_framedir=sc_framedir,
-                                ref_offset=ref_offset, ref_ext=ref_ext, ref_override=ref_override))
+                                                               ref_offset=ref_offset, ref_ext=pil_ext,
+                                                               ref_jpg_quality=ref_jpg_quality,
+                                                               ref_override=ref_override))
 
     return clip
 
@@ -264,3 +177,38 @@ def is_ref_file(dir="./", fname: str = "") -> bool:
         return False
 
     return fname.startswith("ref_") and any(fname.endswith(extension) for extension in IMG_EXTENSIONS)
+
+
+def frame_normalize(frame_np: np.ndarray, tht_black: float = 0.10, tht_white: float = 0.90) -> np.ndarray:
+    frame_y = frame_np[:, :, 0]
+
+    frame_luma = np.mean(frame_y)/255.0
+
+    if frame_luma <= tht_black or frame_luma >= tht_white:
+        return frame_np
+
+    img_np = frame_np.copy()
+
+    frame_y = np.multiply(255,  (frame_y - np.min(frame_y))/(np.max(frame_y) - np.min(frame_y)))
+
+    img_np[:, :, 0] = frame_y.clip(0, 255).astype('uint8')
+
+    return img_np
+
+
+def mean_pixel_distance(y_left: np.ndarray, y_right: np.ndarray, normalize: bool = True) -> float:
+    """Return the mean average distance in pixel values between `left` and `right`.
+    Both `left and `right` should be 2-dimensional 8-bit images of the same shape.
+    """
+
+    if normalize:
+        luma_left = int(np.mean(y_left))
+        luma_right = int(np.mean(y_right))
+        if luma_right > luma_left:
+            y_left = (y_left + (luma_right - luma_left)).clip(0, 255).astype('uint8')
+        else:
+            y_right = (y_right - (luma_right - luma_left)).clip(0, 255).astype('uint8')
+
+    num_pixels: float = float(y_left.shape[0] * y_left.shape[1])
+    dist = np.sum(np.abs(y_left.astype(np.int32) - y_right.astype(np.int32))) / num_pixels
+    return dist / 255.0

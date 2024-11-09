@@ -21,9 +21,6 @@ __all__ += [*basic_train.__all__, *callback.__all__, 'core', 'torch_core', 'call
            *train.__all__, *datasets.__all__, '__version__']
 """
 
-try: from .gen_doc.nbdoc import doc
-except: pass  # Optional if jupyter is present
-    #__all__.append('doc')
 
 __all__ = [o for o in dir(sys.modules[__name__]) if not o.startswith('_')] + ['__version__']
 

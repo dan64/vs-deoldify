@@ -403,7 +403,7 @@ Direct color mapping using the "chroma adjustment".
 """
 def vs_sc_colormap(clip: vs.VideoNode = None, colormap: str='none', scenechange: bool = True) -> vs.VideoNode:
 
-    clip_m =  _vs_sc_colormap(clip=clip, colormap=colormap, scenechange=scenechange)
+    clip_m = _vs_sc_colormap(clip=clip, colormap=colormap, scenechange=scenechange)
 
     return clip_m
 
@@ -638,8 +638,16 @@ def vs_sc_recover_clip_luma(orig: vs.VideoNode = None, clip: vs.VideoNode = None
         else:
             is_scenechange = False
 
+        # orig_prv = f[0].props['_SceneChangePrev']
+        # orig_next = f[0].props['_SceneChangeNext']
+
+        # col_prv = f[1].props['_SceneChangePrev']
+        # col_next = f[1].props['_SceneChangeNext']
+
         if not (sc_framedir is None) and is_scenechange:
             img_path = os.path.join(sc_framedir, f"ref_{n:06d}.png")
+            # HAVC_LogMessage(MessageType.WARNING, "Frame[", n, "] BW: ", orig_prv, "/", orig_next,
+            #                 " -> COL:", col_prv, "/", col_next)
             img_m.save(img_path)
 
         return image_to_frame(img_m, f[0].copy())

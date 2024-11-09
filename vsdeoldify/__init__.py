@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-06-10
+LastEditTime: 2024-11-08
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -13,6 +13,7 @@ The filter includes some portions of code from the following coloring projects:
 DeOldify: https://github.com/jantic/DeOldify
 DDColor: https://github.com/HolyWu/vs-ddcolor
 Deep-Exemplar: https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization
+ColorMNet: https://github.com/yyang181/colormnet
 """
 from __future__ import annotations
 from functools import partial
@@ -24,13 +25,11 @@ os.environ["CUDA_MODULE_LOADING"] = "LAZY"
 os.environ["NUMEXPR_MAX_THREADS"] = "8"
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["TORCH_LOGS"] = "-all"
 
 import math
 import cv2
 import numpy as np
-import torch
-import torch.backends.cudnn as cudnn
-import torchvision.transforms as transform_lib
 from PIL import Image
 
 from vsdeoldify.deoldify import device
@@ -40,27 +39,34 @@ from vsdeoldify.vsslib.vsfilters import *
 from vsdeoldify.vsslib.mcomb import *
 from vsdeoldify.vsslib.vsmodels import *
 from vsdeoldify.vsslib.vsresize import SmartResizeColorizer, SmartResizeReference
-from vsdeoldify.vsslib.vsutils import SceneDetect
+from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDetect, get_sc_props
 
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 
-__version__ = "4.0.1"
+__version__ = "4.5.0"
 
 import warnings
+import logging
 
 warnings.filterwarnings("ignore", category=UserWarning, message=".*?Your .*? set is empty.*?")
 warnings.filterwarnings("ignore", category=UserWarning,
-                        message="The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.")
-warnings.filterwarnings("ignore", category=FutureWarning, message="Arguments other than a weight enum or `None`.*?")
+                        message="The parameter 'pretrained' is deprecated since 0.13 and may be removed in the "
+                                "future, please use 'weights' instead.")
 warnings.filterwarnings("ignore", category=UserWarning, message="Arguments other than a weight enum or `None`.*?")
 warnings.filterwarnings("ignore", category=UserWarning, message="torch.nn.utils.weight_norm is deprecated.*?")
 warnings.filterwarnings("ignore", category=UserWarning, message="Conversion from CIE-LAB,*?")
 warnings.filterwarnings("ignore", category=UserWarning, message=".*?Torch was not compiled with flash attention.*?")
 
+warnings.filterwarnings("ignore", category=FutureWarning, message=".torch.cuda.amp.custom_fwd.*?")
+warnings.filterwarnings("ignore", category=FutureWarning, message="Arguments other than a weight enum or `None`.*?")
+warnings.filterwarnings("ignore", category=FutureWarning, message=".You are using `torch.load`.*?")
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
 package_dir = os.path.dirname(os.path.realpath(__file__))
 model_dir = os.path.join(package_dir, "models")
 
-#configuring torch
+# configuring torch
 torch.backends.cudnn.benchmark = True
 
 import vapoursynth as vs
@@ -77,8 +83,10 @@ wrapper to HAVC filter with "presets" management
 
 def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable', ColorFix: str = 'Violet/Red',
               ColorTune: str = 'Light', ColorMap: str = 'None', EnableDeepEx: bool = False, DeepExMethod: int = 0,
-              DeepExPreset: str = 'Fast', DeepExRefMerge: int = 0, ScFrameDir: str = None, ScThreshold: float = 0.1, ScMinFreq: int = 0,
-              enable_fp16: bool = True) -> vs.VideoNode:
+              DeepExPreset: str = 'Medium', DeepExRefMerge: int = 0, DeepExOnlyRefFrames: bool = False,
+              ScFrameDir: str = None, ScThreshold: float = 0.03, ScMinFreq: int = 0, ScThtSSIM: float = 0.0,
+              ScNormalize: bool = True, DeepExModel: int = 0, DeepExVivid: bool = True, DeepExEncMode: int = 0,
+              DeepExMaxMemFrames=0, enable_fp16: bool = True) -> vs.VideoNode:
     """Main HAVC function supporting the Presets
 
     :param clip:                clip to process, only RGB24 format is supported.
@@ -94,6 +102,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                                     'VeryFast'
     :param VideoTune:           Preset to control the output video color stability
                                 Allowed values are:
+                                    'DeOldify'
                                     'VeryStable',
                                     'MoreStable'
                                     'Stable',
@@ -101,6 +110,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                                     'Vivid',
                                     ,MoreVivid'
                                     'VeryVivid',
+                                    'DDColor'
     :param ColorFix:            This parameter allows to reduce color noise on determinated chroma ranges.
                                 Allowed values are:
                                     'None',
@@ -129,13 +139,14 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                                     'Red->Brown',
                                     'Red->Blue'
                                     'Yellow->Rose'
-    :param EnableDeepEx:        Enable coloring using "Deep-Exemplar-based Video Colorization"
+    :param EnableDeepEx:        Enable coloring using "Exemplar-based" Video Colorization models
     :param DeepExMethod:        Method to use to generate reference frames.
-                                        0 = HAVC (default)
+                                        0 = HAVC same as video (default)
                                         1 = HAVC + RF same as video
                                         2 = HAVC + RF different from video
                                         3 = external RF same as video
                                         4 = external RF different from video
+                                        5 = HAVC different from video
     :param DeepExPreset:        Preset to control the render method and speed:
                                 Allowed values are:
                                         'Fast'   (colors are more washed out)
@@ -148,16 +159,61 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                                         1 = RF-Merge Low (reference frames are merged with low weight)
                                         2 = RF-Merge Med. (reference frames are merged with medium weight)
                                         3 = RF-Merge High (reference frames are merged with high weight)
+    :param DeepExOnlyRefFrames: If enabled the filter will output in "ScFrameDir" the reference frames. Useful to check
+                                and eventually correct the frames with wrong colors
+                                (can be used only if DeepExMethod in [0,5])
+    :param DeepExModel:         Exemplar Model used by DeepEx to propagate color frames.
+                                        0 : ColorMNet (default)
+                                        1 : Deep-Exemplar
+    :param DeepExVivid:         Depending on selected DeepExModel, if enabled (True):
+                                    0) ColorMNet: the frames memory is reset at every reference frame update
+                                    1) Deep-Exemplar: the saturation will be increased by about 25%.
+                                range [True, False]
+    :param DeepExEncMode:       Parameter used by ColorMNet to define the encode mode strategy.
+                                Available values are:
+                                     0: remote encoding. The frames will be colored by a thread outside Vapoursynth.
+                                                         This option don't have any GPU memory limitation and will allow
+                                                         to fully use the long term frame memory.
+                                                         It is the faster encode method (default)
+                                     1: local encoding.  The frames will be colored inside the Vapoursynth environment.
+                                                         In this case the max_memory will be limited by the size of GPU
+                                                         memory (max 15 frames for 24GB GPU).
+                                                         Useful for coloring clips with a lot of smooth transitions,
+                                                         since in this case is better to use a short frame memory or
+                                                         the Deep-Exemplar model, which is faster.
+    :param DeepExMaxMemFrames:  Parameter used by ColorMNet model, specify the max number of encoded frames to keep in memory.
+                                Its value depend on encode mode and must be defined manually following the suggested values.
+                                encode_mode=0: there is no memory limit (it could be all the frames in the clip).
+                                Suggested values are:
+                                    min=150, max=10000
+                                If = 0 will be filled with the value of 10000 or the clip length if higher.
+                                encode_mode=1: the max memory frames is limited by available GPU memory.
+                                Suggested values are:
+                                    min=1, max=4      : for 8GB GPU
+                                    min=1, max=8      : for 12GB GPU
+                                    min=1, max=15     : for 24GB GPU
+                                If = 0 will be filled with the max value (depending on total GPU RAM available)
     :param ScFrameDir:          if set, define the directory where are stored the reference frames that will be used
-                                by "Deep-Exemplar-based Video Colorization".
+                                by "Exemplar-based" Video Colorization models.
     :param ScThreshold:         Scene change threshold used to generate the reference frames to be used by
-                                "Deep-Exemplar-based Video Colorization". It is a percentage of the luma change between
-                                the previous and the current frame. range [0-1], default 0.10. If =0 are not generate
+                                "Exemplar-based" Video Colorization. It is a percentage of the luma change between
+                                the previous and the current frame. range [0-1], default 0.03. If =0 are not generate
                                 reference frames.
     :param ScMinFreq:           if > 0 will be generated at least a reference frame every "ScMinFreq" frames.
                                 range [0-1500], default: 0.
+    :param ScThtSSIM:           Threshold used by the SSIM (Structural Similarity Index Metric) selection filter.
+                                If > 0, will be activated a filter that will improve the scene-change detection,
+                                by discarding images that are similar.
+                                Suggested values are between 0.35 and 0.65, range [0-1], default 0.0 (deactivated)
+    :param ScNormalize:         If true the B&W frames are normalized before use misc.SCDetect(), the normalization will
+                                increase the sensitivity to smooth scene changes, range [True, False], default: True
     :param enable_fp16:         Enable/disable FP16 in ddcolor inference, range [True, False]
+    :server_port:               Used by ColorMNet using encode mode = 0 (remote), it represents the network port used to
+                                connect to remote frame server.
     """
+    # disable packages warnings
+    disable_warnings()
+
     # Select presets / tuning
     Preset = Preset.lower()
     presets = ['placebo', 'veryslow', 'slower', 'slow', 'medium', 'fast', 'faster', 'veryfast']
@@ -167,7 +223,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     try:
         pr_id = presets.index(Preset)
     except ValueError:
-        raise vs.Error("HAVC_main: Preset choice is invalid for '" + pr_id + "'")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: Preset choice is invalid for '" + str(pr_id) + "'")
 
     deoldify_rf = preset0_rf[pr_id]
     ddcolor_rf = preset1_rf[pr_id]
@@ -176,13 +232,14 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
 
     # Select VideoTune
     VideoTune = VideoTune.lower()
-    video_tune = ['verystable', 'morestable', 'stable', 'balanced', 'vivid', 'morevivid', 'veryvivid']
-    ddcolor_weight = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+    video_tune = ['deoldify', 'verystable', 'morestable', 'stable', 'balanced', 'vivid', 'morevivid', 'veryvivid',
+                  'ddcolor']
+    ddcolor_weight = [0.0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0]
 
     try:
         w_id = video_tune.index(VideoTune)
     except ValueError:
-        raise vs.Error("HAVC_main: VideoTune choice is invalid for '" + VideoTune + "'")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: VideoTune choice is invalid for '" + VideoTune + "'")
 
         # Select ColorTune for ColorFix
     ColorTune = ColorTune.lower()
@@ -193,7 +250,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     try:
         tn_id = color_tune.index(ColorTune)
     except ValueError:
-        raise vs.Error("HAVC_main: ColorTune choice is invalid for '" + ColorTune + "'")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: ColorTune choice is invalid for '" + ColorTune + "'")
 
     # Select ColorFix for ddcolor/stabilizer
     ColorFix = ColorFix.lower()
@@ -204,7 +261,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     try:
         co_id = color_fix.index(ColorFix)
     except ValueError:
-        raise vs.Error("HAVC_main: ColorFix choice is invalid for '" + ColorFix + "'")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: ColorFix choice is invalid for '" + ColorFix + "'")
 
     if co_id == 0:
         hue_range = "none"
@@ -223,26 +280,45 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     try:
         cl_id = colormap.index(ColorMap)
     except ValueError:
-        raise vs.Error("HAVC_main: ColorMap choice is invalid for '" + ColorMap + "'")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: ColorMap choice is invalid for '" + ColorMap + "'")
 
     chroma_adjust = hue_map[cl_id]
 
-    if EnableDeepEx and DeepExMethod in (0, 1, 2):
+    if EnableDeepEx and DeepExMethod in (0, 1, 2, 5):
 
+        if DeepExOnlyRefFrames and (ScFrameDir is None):
+            HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: DeepExOnlyRefFrames is enabled but ScFrameDir is unset")
+
+        if not (ScFrameDir is None) and DeepExMethod not in (0, 5) and DeepExOnlyRefFrames:
+            HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: DeepExOnlyRefFrames is enabled but method not in (0, 5) (HAVC)")
+
+        if DeepExMethod not in (0, 5) and (ScFrameDir is None):
+            HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: DeepExMethod not in (0, 5) but ScFrameDir is unset")
+
+        if DeepExMethod in (0, 1, 2, 5) and ScThreshold == 0 and ScMinFreq == 0:
+            HAVC_LogMessage(MessageType.EXCEPTION,
+                            "HAVC_main: DeepExMethod in (0, 1, 2, 5) but ScThreshold and ScMinFreq are not set")
+
+        ref_tresh = None
         if DeepExRefMerge > 0:
-            clip_ref = HAVC_ddeoldify(clip, method=1, ddcolor_p=[1, ddcolor_rf, 1.0, 0.0, enable_fp16],
+            ScMinFreq = 1
+            if ScThreshold is not None and 0 < ScThreshold < 1:
+                ref_tresh = ScThreshold
+            else:
+                ref_tresh = 0.03
+
+        clip_ref = HAVC_ddeoldify(clip, method=2, mweight=ddcolor_weight[w_id],
+                                  deoldify_p=[0, deoldify_rf, 1.0, 0.0],
+                                  ddcolor_p=[1, ddcolor_rf, 1.0, 0.0, enable_fp16],
                                   ddtweak=True, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range],
-                                  sc_threshold=ScThreshold, sc_min_freq=1)
-        else:
-            clip_ref = HAVC_ddeoldify(clip, method=2, mweight=ddcolor_weight[w_id],
-                                      deoldify_p=[0, deoldify_rf, 1.0, 0.0],
-                                      ddcolor_p=[1, ddcolor_rf, 1.0, 0.0, enable_fp16],
-                                      ddtweak=True, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range],
-                                      sc_threshold=ScThreshold, sc_min_freq=ScMinFreq)
+                                  sc_threshold=ScThreshold, sc_min_freq=ScMinFreq, sc_tht_ssim=ScThtSSIM,
+                                  sc_normalize=ScNormalize)
 
         clip_colored = HAVC_deepex(clip=clip, clip_ref=clip_ref, method=DeepExMethod, render_speed=DeepExPreset,
-                                   render_vivid=True, ref_merge=DeepExRefMerge, sc_framedir=ScFrameDir,
-                                   only_ref_frames=False, dark=True, dark_p=[0.2, 0.8],
+                                   render_vivid=DeepExVivid, ref_merge=DeepExRefMerge, sc_framedir=ScFrameDir,
+                                   only_ref_frames=DeepExOnlyRefFrames, dark=True, dark_p=[0.2, 0.8],
+                                   ref_thresh=ref_tresh, ex_model=DeepExModel, encode_mode=DeepExEncMode,
+                                   max_memory_frames=DeepExMaxMemFrames,
                                    smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"], colormap=chroma_adjust)
 
         if ScMinFreq in range(1, 20):
@@ -253,9 +329,10 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     elif EnableDeepEx and DeepExMethod in (3, 4):
 
         clip_colored = HAVC_deepex(clip=clip, clip_ref=None, method=DeepExMethod, render_speed=DeepExPreset,
-                                   render_vivid=True, sc_framedir=ScFrameDir, only_ref_frames=False, dark=True,
-                                   dark_p=[0.2, 0.8], smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
-                                   colormap=chroma_adjust)
+                                   render_vivid=DeepExVivid, sc_framedir=ScFrameDir, only_ref_frames=DeepExOnlyRefFrames,
+                                   dark=True, dark_p=[0.2, 0.8], smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
+                                   ex_model=DeepExModel, encode_mode=DeepExEncMode,
+                                   max_memory_frames=DeepExMaxMemFrames, colormap=chroma_adjust)
 
     else:
         clip_colored = HAVC_ddeoldify(clip, method=2, mweight=ddcolor_weight[w_id],
@@ -282,7 +359,7 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
-Deep-Exemplar coloring function with additional post-process filters 
+Exemplar-based coloring function with additional post-process filters 
 """
 
 
@@ -290,36 +367,44 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
                 render_vivid: bool = True, ref_merge: int = 0, sc_framedir: str = None,
                 only_ref_frames: bool = False, dark: bool = False, dark_p: list = [0.2, 0.8], smooth: bool = False,
                 smooth_p: list = [0.3, 0.7, 0.9, 0.0, "none"], colormap: str = "none",
-                ref_weight: float = None, ref_thresh: float = None) -> vs.VideoNode:
-    """Towards Video-Realistic Colorization via Deep Exemplar-based framework
+                ref_weight: float = None, ref_thresh: float = None, ex_model: int = 0, encode_mode: int = 0,
+                max_memory_frames: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
+    """Towards Video-Realistic Colorization via Exemplar-based framework
 
     :param clip:                Clip to process. Only RGB24 format is supported
-    :param clip_ref:            Clip containing the reference frames (necessary if method=0,1,2)
+    :param clip_ref:            Clip containing the reference frames (necessary if method=0,1,2,5)
     :param method:              Method to use to generate reference frames (RF).
-                                        0 = HAVC (default)
+                                        0 = HAVC same as video (default)
                                         1 = HAVC + RF same as video
                                         2 = HAVC + RF different from video
                                         3 = external RF same as video
                                         4 = external RF different from video
+                                        5 = HAVC different from video
     :param render_speed:        Preset to control the render method and speed:
                                 Allowed values are:
                                         'Fast'   (colors are more washed out)
                                         'Medium' (colors are a little washed out)
                                         'Slow'   (colors are a little more vivid)
-    :param render_vivid:        Given that the generated colors by the inference are a little washed out, by enabling
-                                this parameter, the saturation will be increased by about 25%. range [True, False]
+    :param render_vivid:        Depending on selected ex_model, if enabled (True):
+                                    0) ColorMNet: the frames memory is reset at every reference frame update
+                                    1) Deep-Exemplar: the saturation will be increased by about 25%.
+                                range [True, False]
     :param ref_merge:           Method used by DeepEx to merge the reference frames with the frames propagated by DeepEx.
-                                It is applicable only with DeepEx method: 0, 1, 2.
+                                It is applicable only with DeepEx method: 0, 1, 2, 5.
                                 The HAVC reference frames must be produced with frequency = 1.
                                 Allowed values are:
                                         0 = No RF merge (reference frames can be produced with any frequency)
                                         1 = RF-Merge Low (reference frames are merged with low weight)
                                         2 = RF-Merge Med. (reference frames are merged with medium weight)
                                         3 = RF-Merge High (reference frames are merged with high weight)
+    :param ref_weight:          If (ref_merge > 0), represent the weight used to merge the reference frames.
+                                If is not set, is assigned automatically a value depending on ref_merge value.
+    :param ref_thresh:          If (ref_merge > 0), represent the threshold used to create the reference frames.
+                                If is not set, is assigned automatically a value of 0.03
     :param sc_framedir:         If set, define the directory where are stored the reference frames. If only_ref_frames=True,
                                 and method=0 this directory will be written with the reference frames used by the filter.
                                 if method!=0 the directory will be read to create the reference frames that will be used
-                                by "Deep-Exemplar-based Video Colorization". The reference frame name must be in the
+                                by "Exemplar-based" Video Colorization. The reference frame name must be in the
                                 format: ref_nnnnnn.[jpg|png], for example the reference frame 897 must be
                                 named: ref_000897.png
     :param only_ref_frames:     If enabled the filter will output in "sc_framedir" the reference frames. Useful to check
@@ -338,34 +423,66 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
                                       [4] : "chroma range" parameter (optional), if="none" is disabled (see the README)
     :param colormap:            Direct hue/color mapping (only on ref-frames), without luma filtering, using the "chroma adjustment"
                                 parameter, if="none" is disabled.
-    :param ref_weight:          If enable_refmerge = True, represent the weight used to merge the reference frames.
-                                If is not set, is assigned automatically a value of 0.5
-    :param ref_thresh:          If enable_refmerge = True, represent the threshold used to create the reference frames.
-                                If is not set, is assigned automatically a value of 0.1
+    :param ex_model:            "Exemplar-based" model to use for the color propagation, available models are:
+                                    0 : ColorMNet (default)
+                                    1 : Deep-Exemplar
+    :param encode_mode:         Parameter used by ColorMNet to define the encode mode strategy.
+                                Available values are:
+                                     0: remote encoding. The frames will be colored by a thread outside Vapoursynth.
+                                                         This option don't have any GPU memory limitation and will allow
+                                                         to fully use the long term frame memory.
+                                                         It is the faster encode method (default)
+                                     1: local encoding.  The frames will be colored inside the Vapoursynth environment.
+                                                         In this case the max_memory will be limited by the size of GPU
+                                                         memory (max 15 frames for 24GB GPU).
+                                                         Useful for coloring clips with a lot of smooth transitions,
+                                                         since in this case is better to use a short frame memory or
+                                                         the Deep-Exemplar model, which is faster.
+    :param max_memory_frames:   Parameter used by ColorMNet model, specify the max number of encoded frames to keep in memory.
+                                Its value depend on encode mode and must be defined manually following the suggested values.
+                                encode_mode=0: there is no memory limit (it could be all the frames in the clip).
+                                Suggested values are:
+                                    min=150, max=10000
+                                If = 0 will be filled with the value of 10000 or the clip length if higher.
+                                encode_mode=1: the max memory frames is limited by available GPU memory.
+                                Suggested values are:
+                                    min=1, max=4    : for 8GB GPU
+                                    min=1, max=8    : for 12GB GPU
+                                    min=1, max=15   : for 24GB GPU
+                                If = 0 will be filled with the max value (depending on total GPU RAM available)
+    :param torch_dir:           torch hub dir location, default is model directory, if set to None will switch
+                                to torch cache dir
     """
+    # disable packages warnings
+    disable_warnings()
+
     if not isinstance(clip, vs.VideoNode):
-        raise vs.Error("HAVC_deepex: this is not a clip")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: this is not a clip")
 
     if not torch.cuda.is_available():
-        raise vs.Error("HAVC_deepex: CUDA is not available")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: CUDA is not available")
 
     if only_ref_frames and (sc_framedir is None):
-        raise vs.Error("HAVC_deepex: only_ref_frames is enabled but sc_framedir is unset")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: only_ref_frames is enabled but sc_framedir is unset")
 
-    if method != 0 and (sc_framedir is None):
-        raise vs.Error("HAVC_deepex: method != 0 but sc_framedir is unset")
+    if not (sc_framedir is None) and method not in (0, 5) and only_ref_frames:
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: only_ref_frames is enabled but method not in (0, 5) (HAVC)")
+
+    if method not in (0, 5) and (sc_framedir is None):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: method not in (0, 5) but sc_framedir is unset")
 
     if method in (3, 4) and not (clip_ref is None):
-        raise vs.Error("HAVC_deepex: method in (3, 4) but clip_ref is set")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: method in (3, 4) but clip_ref is set")
 
-    if method in (0, 1, 2) and (clip_ref is None):
-        raise vs.Error("HAVC_deepex: method in (0, 1, 2) but clip_ref is unset")
+    if method in (0, 1, 2, 5) and (clip_ref is None):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: method in (0, 1, 2, 5) but clip_ref is unset")
 
     # creates the directory "sc_framedir" and does not raise an exception if the directory already exists
     if not (sc_framedir is None):
         pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
 
     if clip.format.id != vs.RGB24:
+        HAVC_LogMessage(MessageType.WARNING, "HAVC_deepex: clip not in RGB24 format, it will be converted")
         # clip not in RGB24 format, it will be converted
         if clip.format.color_family == "YUV":
             clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
@@ -373,19 +490,36 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
         else:
             clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
 
-    if method not in range(5):
-        raise vs.Error("HAVC_deepex: method must be in range [0-4]")
+    if clip_ref is not None and clip_ref.format.id != vs.RGB24:
+        HAVC_LogMessage(MessageType.WARNING, "HAVC_deepex: clip_ref not in RGB24 format, it will be converted")
+        # clip_ref not in RGB24 format, it will be converted
+        if clip_ref.format.color_family == "YUV":
+            clip_ref = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
+                                           dither_type="error_diffusion")
+        else:
+            clip_ref = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
+
+    if method not in range(6):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: method must be in range [0-5]")
 
     if ref_merge not in range(4):
-        raise vs.Error("HAVC_deepex: method must be in range [0-3]")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: method must be in range [0-3]")
 
-    if ref_merge > 0 and method > 2:
-        raise vs.Error("HAVC_deepex: method must be in range [0-2] to be used with ref_merge > 0")
+    if ref_merge > 0 and method not in (0, 1, 2, 5):
+        HAVC_LogMessage(MessageType.EXCEPTION,
+                        "HAVC_deepex: method must be in range [0-2,5] to be used with ref_merge > 0")
 
-    if method in (0, 1, 2):
+    if method in (0, 1, 2, 5):
         sc_threshold, sc_frequency = get_sc_props(clip_ref)
         if sc_threshold == 0 and sc_frequency == 0:
-            raise vs.Error("HAVC_deepex: method in (0, 1, 2) but sc_threshold and sc_frequency are not set")
+            HAVC_LogMessage(MessageType.EXCEPTION,
+                            "HAVC_deepex: method in (0, 1, 2, 5) but sc_threshold and sc_frequency are not set")
+        if ref_merge > 0 and sc_frequency != 1:
+            HAVC_LogMessage(MessageType.EXCEPTION,
+                            "HAVC_deepex: method in (0, 1, 2, 5) and ref_merge > 0 but sc_frequency != 1")
+
+    if torch_dir is not None:
+        torch.hub.set_dir(torch_dir)
 
     # static params
     enable_resize = False
@@ -414,13 +548,13 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
     colormap = colormap.lower()
     colormap_enabled = (colormap != "none" and colormap != "")
 
-    enable_refmerge = (ref_merge > 0)
+    enable_refmerge = (ref_merge > 0 and sc_frequency == 1)
     refmerge_weight = [0.0, 0.4, 0.5, 0.6]
     if enable_refmerge:
         if ref_weight is None:
             ref_weight = refmerge_weight[ref_merge]
         if ref_thresh is None:
-            ref_thresh = 0.1
+            ref_thresh = 0.03
         clip_sc = SceneDetect(clip, threshold=ref_thresh)
         if method in (1, 2):
             clip_sc = SceneDetectFromDir(clip_sc, sc_framedir=sc_framedir, merge_ref_frame=True,
@@ -429,7 +563,7 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
         ref_weight = 1.0
         clip_sc = None
 
-    if method != 0:
+    if method not in (0, 5):
         ref_frame_ext = method in (2, 4)
         merge_ref_frame = method in (1, 2)
         if method in (1, 2):
@@ -444,11 +578,14 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
 
     clip_orig = clip
 
+    #if ex_model == 0 and render_speed.lower() == 'fast':
+    #    render_speed = 'medium'
+
     d_size = get_deepex_size(render_speed=render_speed.lower(), enable_resize=enable_resize)
     smc = SmartResizeColorizer(d_size)
     smr = SmartResizeReference(d_size)
 
-    if method != 0:
+    if method not in (0, 5):
         if method in (1, 2):
             clip_ref = vs_ext_reference_clip(clip_ref, sc_framedir=sc_framedir)
         else:
@@ -469,20 +606,27 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
         clip_ref = vs_sc_chroma_bright_tweak(clip_ref, black_threshold=black_threshold, white_threshold=white_threshold,
                                              dark_sat=dark_sat, dark_bright=dark_bright,
                                              chroma_adjust=chroma_adjust.lower())
-
-    frame_propagate = (method != 2)
-
+    ref_same_as_video = method in (0, 1, 3)
     if only_ref_frames:
         clip_colored = clip_ref
     else:
-        clip_colored = vs_deepex(clip, clip_ref, clip_sc, image_size=d_size, enable_resize=enable_resize,
-                                 wls_filter_on=True, frame_propagate=frame_propagate, render_vivid=render_vivid,
-                                 ref_weight=ref_weight)
+        match ex_model:
+            case 0:  # ColorMNet
+                clip_colored = vs_colormnet(clip, clip_ref, clip_sc, image_size=-1, enable_resize=enable_resize,
+                                            encode_mode=encode_mode, max_memory_frames=max_memory_frames,
+                                            frame_propagate=ref_same_as_video, render_vivid=render_vivid,
+                                            ref_weight=ref_weight)
+            case 1:  # Deep-Exemplar
+                clip_colored = vs_deepex(clip, clip_ref, clip_sc, image_size=d_size, enable_resize=enable_resize,
+                                         propagate=ref_same_as_video, wls_filter_on=True, render_vivid=render_vivid,
+                                         ref_weight=ref_weight)
+            case _:
+                HAVC_LogMessage(MessageType.EXCEPTION, "HybridAVC: unknown exemplar model id: " + str(ex_model))
 
     clip_resized = smc.restore_clip_size(clip_colored)
 
     # restore original resolution details, 5% faster than ShufflePlanes()
-    if not (sc_framedir is None) and method == 0 and only_ref_frames:
+    if not (sc_framedir is None) and method in (0, 5) and only_ref_frames:
         # ref frames are saved if sc_framedir is set
         return vs_sc_recover_clip_luma(clip_orig, clip_resized, scenechange=True, sc_framedir=sc_framedir)
     else:
@@ -504,7 +648,8 @@ def HAVC_ddeoldify(
         ddcolor_p: list = [1, 24, 1.0, 0.0, True], ddtweak: bool = False,
         ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.8,0.1"],
         cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0], alm_p: list = [0.8, 1.0, 0.15], cmb_sw: bool = False,
-        sc_threshold: float = 0.0, sc_min_freq: int = 0, device_index: int = 0,
+        sc_threshold: float = 0.0, sc_min_freq: int = 0, sc_tht_ssim: float = 0.0, sc_normalize: bool = True,
+        sc_tht_white: float = 0.95, sc_tht_black: float = 0.03, device_index: int = 0,
         torch_dir: str = model_dir) -> vs.VideoNode:
     """A Deep Learning based project for colorizing and restoring old images and video using Deoldify and DDColor
 
@@ -590,28 +735,43 @@ def HAVC_ddeoldify(
                                    [2] : min_weight: min merge weight, range [0-1] (0.01=1%)
     :param cmb_sw:              if true switch the clip order in all the combining methods, range [True,False]
     :param sc_threshold:        Scene change threshold used to generate the reference frames to be used by
-                                "Deep-Exemplar-based Video Colorization". It is a percentage of the luma change between
+                                "Exemplar-based" Video Colorization. It is a percentage of the luma change between
                                 the previous and the current frame. range [0-1], default 0.0. If =0 are not generate
-                                reference frames and will colorized all the frames.
+                                reference frames and will be colorized all the frames.
+    :param sc_tht_ssim:         Threshold used by the SSIM (Structural Similarity Index Metric) selection filter.
+                                If > 0, will be activated a filter that will improve the scene-change detection,
+                                by discarding images that are similar.
+                                Suggested values are between 0.35 and 0.65, range [0-1], default 0.0 (deactivated)
+    :param sc_normalize:        If true the B&W frames are normalized before use misc.SCDetect(), the normalization will
+                                increase the sensitivity to smooth scene changes.
     :param sc_min_freq:         if > 0 will be generate at least a reference frame every "sc_min_freq" frames.
                                 range [0-1500], default: 0.
+    :param sc_tht_white:        Threshold to identify white frames, range [0-1], default 0.95.
+    :param sc_tht_black:        Threshold to identify dark frames, range [0-1], default 0.03.
     :param device_index:        device ordinal of the GPU, choices: GPU0...GPU7, CPU=99 (default = 0)
     :param torch_dir:           torch hub dir location, default is model directory, if set to None will switch to torch cache dir.
     """
+    # disable packages warnings
+    disable_warnings()
 
     if (not torch.cuda.is_available() and device_index != 99):
-        raise vs.Error("HAVC_ddeoldify: CUDA is not available")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_ddeoldify: CUDA is not available")
 
     if not isinstance(clip, vs.VideoNode):
-        raise vs.Error("HAVC_ddeoldify: this is not a clip")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_ddeoldify: this is not a clip")
 
     if sc_threshold < 0:
-        raise vs.Error("HAVC_ddeoldify: sc_threshold must be >= 0")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_ddeoldify: sc_threshold must be >= 0")
 
     if sc_min_freq < 0:
-        raise vs.Error("HAVC_ddeoldify: sc_min_freq must be >= 0")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_ddeoldify: sc_min_freq must be >= 0")
 
     merge_weight = mweight
+
+    if mweight == 0.0:
+        method = 0  # deoldify only
+    elif mweight == 1.0:
+        method = 1  # ddcolor only
 
     # unpack deoldify_params
     deoldify_model = deoldify_p[0]
@@ -627,13 +787,13 @@ def HAVC_ddeoldify(
     ddcolor_enable_fp16 = ddcolor_p[4]
 
     if os.path.getsize(os.path.join(model_dir, "ColorizeVideo_gen.pth")) == 0:
-        raise vs.Error("HAVC_ddeoldify: model files have not been downloaded.")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_ddeoldify: model files have not been downloaded.")
 
     if device_index > 7 and device_index != 99:
-        raise vs.Error("HAVC_ddeoldify: wrong device_index, choices are: GPU0...GPU7, CPU=99")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_ddeoldify: wrong device_index, choices are: GPU0...GPU7, CPU=99")
 
     if ddcolor_rf != 0 and ddcolor_rf not in range(10, 65):
-        raise vs.Error("HAVC_ddeoldify: ddcolor render_factor must be between: 10-64")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_ddeoldify: ddcolor render_factor must be between: 10-64")
 
     if clip.format.id != vs.RGB24:
         # clip not in RGB24 format, it will be converted
@@ -643,7 +803,7 @@ def HAVC_ddeoldify(
         else:
             clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
 
-            # choices: GPU0...GPU7, CPU=99
+    # choices: GPU0...GPU7, CPU=99
     device.set(device=DeviceId(device_index))
 
     if torch_dir != None:
@@ -654,7 +814,8 @@ def HAVC_ddeoldify(
 
     scenechange = not (sc_threshold == 0 and sc_min_freq == 0)
 
-    clip = SceneDetect(clip, threshold=sc_threshold, frequency=sc_min_freq)
+    clip = SceneDetect(clip, threshold=sc_threshold, frequency=sc_min_freq, sc_tht_filter=sc_tht_ssim,
+                       frame_norm=sc_normalize, tht_white=sc_tht_white, tht_black=sc_tht_black)
 
     frame_size = min(max(ddcolor_rf, deoldify_rf) * 16, clip.width)  # frame size calculation for inference()
     clip_orig = clip;
@@ -731,7 +892,7 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = [0.2,
     """
 
     if not isinstance(clip, vs.VideoNode):
-        raise vs.Error("HAVC_stabilizer: this is not a clip")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_stabilizer: this is not a clip")
 
     if clip.format.id != vs.RGB24:
         # clip not in RGB24 format, it will be converted
@@ -745,7 +906,7 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = [0.2,
     chroma_resize_enabled = True
 
     if render_factor != 0 and render_factor not in range(16, 65):
-        raise vs.Error("HAVC_stabilizer: render_factor must be between: 16-64")
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_stabilizer: render_factor must be between: 16-64")
 
     if render_factor == 0:
         render_factor = min(max(math.trunc(0.4 * clip.width / 16), 16), 64)
@@ -822,35 +983,91 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = [0.2,
 ------------------------------------------------------------------------------- 
 Author: Dan64
 ------------------------------------------------------------------------------- 
-Description: ONLY FOR TESTING
+Description: 
+------------------------------------------------------------------------------- 
+wrapper to function vSceneDetect() to set the scene-change frames in the clip
+"""
+
+
+def HAVC_SceneDetect(clip: vs.VideoNode, sc_threshold: float = 0.03, sc_tht_ssim: float = 0.0, sc_min_int: int = 1,
+                     sc_min_freq: int = 0, sc_normalize: bool = True, sc_tht_white: float = 0.95,
+                     sc_tht_black: float = 0.03, sc_debug: bool = False) -> vs.VideoNode:
+    """Utility function to set the scene-change frames in the clip
+
+    :param clip:                clip to process, only RGB24 format is supported.
+    :param sc_threshold:        Scene change threshold used to generate the reference frames.
+                                It is a percentage of the luma change between the previous n-frame (n=sc_offset)
+                                and the current frame. range [0-1], default 0.03.
+                                reference frames and will colorize all the frames.
+    :param sc_normalize:        If true the B&W frames are normalized before use misc.SCDetect(), the normalization will
+                                increase the sensitivity to smooth scene changes.
+    :param sc_tht_white:        Threshold to identify white frames, range [0-1], default 0.95.
+    :param sc_tht_black:        Threshold to identify dark frames, range [0-1], default 0.03.
+    :param sc_tht_ssim:         Threshold used by the SSIM (Structural Similarity Index Metric) selection filter.
+                                If > 0, will be activated a filter that will improve the scene-change detection,
+                                by discarding images that are similar.
+                                Suggested values are between 0.35 and 0.65, range [0-1], default 0.0 (deactivated)
+    :param sc_min_int:          Minimum number of frame interval between scene changes.
+    :param sc_min_freq:         if > 0 will be generated at least a reference frame every "sc_min_freq" frames.
+                                range [0-1500], default: 0.
+    :param sc_debug:            Enable SC debug messages. default: False
+
+    """
+    clip = SceneDetect(clip, threshold=sc_threshold, frequency=sc_min_freq, sc_tht_filter=sc_tht_ssim,
+                       min_length=sc_min_int, tht_white=sc_tht_white, tht_black=sc_tht_black, frame_norm=sc_normalize,
+                       sc_debug=sc_debug)
+    return clip
+
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description: 
 ------------------------------------------------------------------------------- 
 wrapper to function vs_sc_export_frames() to export the clip's reference frames
 """
 
 
-def HAVC_extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = 0.1,
-                                  sc_min_freq: int = 0, sc_framedir: str = "./",
-                                  ref_offset: int = 0, ref_ext: str = "png",
-                                  ref_override: bool = True) -> vs.VideoNode:
+def HAVC_extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = 0.03, sc_tht_ssim: float = 0.0, sc_min_int: int = 1,
+                                  sc_min_freq: int = 0, sc_framedir: str = "./", sc_normalize: bool = True,
+                                  sc_tht_white: float = 0.95, sc_tht_black: float = 0.03, ref_offset: int = 0,
+                                  ref_ext: str = "jpg", ref_jpg_quality: int = 95, ref_override: bool = True,
+                                  sc_debug: bool = False) -> vs.VideoNode:
     """Utility function to export reference frames
 
     :param clip:                clip to process, only RGB24 format is supported.
     :param sc_threshold:        Scene change threshold used to generate the reference frames.
-                                It is a percentage of the luma change between the previous and the current frame.
-                                range [0-1], default 0.1.
+                                It is a percentage of the luma change between the previous n-frame (n=sc_offset)
+                                and the current frame. range [0-1], default 0.05.
                                 reference frames and will colorize all the frames.
+    :param sc_normalize:        If true the B&W frames are normalized before use misc.SCDetect(), the normalization will
+                                increase the sensitivity to smooth scene changes.
+    :param sc_tht_white:        Threshold to identify white frames, range [0-1], default 0.95.
+    :param sc_tht_black:        Threshold to identify dark frames, range [0-1], default 0.03.
+    :param sc_tht_ssim:         Threshold used by the SSIM (Structural Similarity Index Metric) selection filter.
+                                If > 0, will be activated a filter that will improve the scene-change detection,
+                                by discarding images that are similar.
+                                Suggested values are between 0.35 and 0.65, range [0-1], default 0.0 (deactivated)
+    :param sc_min_int:          Minimum number of frame interval between scene changes.
     :param sc_min_freq:         if > 0 will be generated at least a reference frame every "sc_min_freq" frames.
                                 range [0-1500], default: 0.
     :param sc_framedir:         If set, define the directory where are stored the reference frames.
                                 The reference frames are named as: ref_nnnnnn.[jpg|png].
     :param ref_offset:          Offset number that will be added to the number of generated frames. default: 0.
-    :param ref_ext:             File extension and format of saved frames, range ["jpg", "png"] . default: "png"
+    :param ref_ext:             File extension and format of saved frames, range ["jpg", "png"] . default: "jpg"
+    :param ref_jpg_quality:     Quality of "jpg" compression, range[0,100]. default: 95
     :param ref_override:        If True, the reference frames with the same name will be overridden, otherwise will
-                                discarded. default: True
+                                be discarded. default: True
+    :param sc_debug:            Enable SC debug messages. default: False
+
     """
     pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
-    clip = SceneDetect(clip, threshold=sc_threshold, frequency=sc_min_freq)
-    clip = vs_sc_export_frames(clip, sc_framedir=sc_framedir, ref_offset=ref_offset, ref_ext=ref_ext, ref_override=ref_override)
+    clip = SceneDetect(clip, threshold=sc_threshold, frequency=sc_min_freq, sc_tht_filter=sc_tht_ssim,
+                       min_length=sc_min_int, tht_white=sc_tht_white, tht_black=sc_tht_black, frame_norm=sc_normalize,
+                       sc_debug=sc_debug)
+    clip = vs_sc_export_frames(clip, sc_framedir=sc_framedir, ref_offset=ref_offset, ref_ext=ref_ext,
+                               ref_jpg_quality=ref_jpg_quality, ref_override=ref_override)
     return clip
 
 
@@ -864,7 +1081,7 @@ def HAVC_extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = 0.1,
 def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable', ColorFix: str = 'Violet/Red',
                    ColorTune: str = 'Light', ColorMap: str = 'None', degrain_strength: int = 0,
                    enable_fp16: bool = True) -> vs.VideoNode:
-    vs.core.log_message(2,
+    vs.core.log_message(vs.MESSAGE_TYPE_WARNING,
                         "Warning: ddeoldify_main is deprecated and may be removed in the future, please use 'HAVC_main' instead.")
 
     return HAVC_main(clip=clip, Preset=Preset, VideoTune=VideoTune, ColorFix=ColorFix, ColorTune=ColorTune,
@@ -878,7 +1095,7 @@ def ddeoldify(clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldif
               degrain_strength: int = 0, cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0],
               alm_p: list = [0.8, 1.0, 0.15], cmb_sw: bool = False, device_index: int = 0,
               torch_dir: str = model_dir) -> vs.VideoNode:
-    vs.core.log_message(2,
+    vs.core.log_message(vs.MESSAGE_TYPE_WARNING,
                         "Warning: ddeoldify is deprecated and may be removed in the future, please use 'HAVC_ddeoldify' instead.")
 
     return HAVC_ddeoldify(clip, method, mweight, deoldify_p, ddcolor_p, ddtweak, ddtweak_p, cmc_tresh, lmm_p, alm_p,
@@ -890,7 +1107,7 @@ def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = 
                          smooth_p: list = [0.3, 0.7, 0.9, 0.0, "none"],
                          stab: bool = False, stab_p: list = [5, 'A', 1, 15, 0.2, 0.15], colormap: str = "none",
                          render_factor: int = 24) -> vs.VideoNode:
-    vs.core.log_message(2,
+    vs.core.log_message(vs.MESSAGE_TYPE_WARNING,
                         "Warning: ddeoldify_stabilizer is deprecated and may be removed in the future, please use 'HAVC_stabilizer' instead.")
 
     return HAVC_stabilizer(clip, dark, dark_p, smooth, smooth_p, stab, stab_p, colormap, render_factor)
@@ -906,12 +1123,13 @@ wrapper to function vs_sc_export_frames() to export the clip's reference frames
 """
 
 
-def _extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = 0.0, sc_min_freq: int = 0, sc_framedir: str = "./",
-                              ref_offset: int = 0, ref_ext: str = "png", ref_override: bool = True) -> vs.VideoNode:
-    vs.core.log_message(2,
-                        "Warning: _extract_reference_frames is deprecated and may be removed in the future, please use 'HAVC_extract_reference_frames' instead.")
+def _extract_reference_frames(clip: vs.VideoNode, sc_framedir: str = "./", ref_offset: int = 0, ref_ext: str = "png",
+                              ref_override: bool = True, prop_name: str = "_SceneChangePrev") -> vs.VideoNode:
+    pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
+    clip = vs_sc_export_frames(clip, sc_framedir=sc_framedir, ref_offset=ref_offset, ref_ext=ref_ext,
+                               ref_override=ref_override, prop_name=prop_name)
+    return clip
 
-    return HAVC_extract_reference_frames(clip, sc_threshold, sc_min_freq, sc_framedir, ref_offset, ref_ext, ref_override)
 
 """
 ------------------------------------------------------------------------------- 
@@ -959,3 +1177,36 @@ def _recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = No
     clip = vs_recover_clip_color(clip=clip, clip_color=clip_color, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen,
                                  hue_adjust=hue_adjust, return_mask=return_mask)
     return clip
+
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description: ONLY FOR TESTING
+------------------------------------------------------------------------------- 
+disable packages warnings.
+"""
+
+
+def disable_warnings():
+    logger_blocklist = [
+        "matplotlib",
+        "PIL",
+        "torch",
+        "numpy",
+        "tensorrt",
+        "torch_tensorrt"
+        "kornia",
+        "dinov2"  # dinov2 is issuing warnings not allowing ColorMNetServer to work properly
+    ]
+
+    for module in logger_blocklist:
+        logging.getLogger(module).setLevel(logging.ERROR)
+
+    warnings.simplefilter(action='ignore', category=FutureWarning)
+    warnings.simplefilter(action='ignore', category=UserWarning)
+    warnings.simplefilter(action='ignore', category=DeprecationWarning)
+    # warnings.simplefilter(action="ignore", category=Warning)
+
+    torch._logging.set_logs(all=logging.ERROR)
