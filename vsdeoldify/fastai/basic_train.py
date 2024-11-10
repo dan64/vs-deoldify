@@ -268,7 +268,7 @@ class Learner():
         if device is None: device = self.data.device
         elif isinstance(device, int): device = torch.device('cuda', device)
         source = self.path/self.model_dir/f'{file}.pth' if is_pathlike(file) else file
-        state = torch.load(source, map_location=device)
+        state = torch.load(source, map_location=device, weights_only=False)
         if set(state.keys()) == {'model', 'opt'}:
             model_state = state['model']
             if remove_module: model_state = remove_module_load(model_state)
@@ -319,7 +319,7 @@ class Learner():
         torch.save(state, open(tmp_file, 'wb'))
         for a in attrs_del: delattr(self, a)
         gc.collect()
-        state = torch.load(tmp_file)
+        state = torch.load(tmp_file, weights_only=False)
         os.remove(tmp_file)
 
         for a in attrs_pkl: setattr(self, a, state[a])
