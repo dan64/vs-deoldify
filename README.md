@@ -27,10 +27,10 @@ with the version 4.0 of HAVC has been released a modified version of DDColor to 
 pip install vsddcolor-1.0.1-py3-none-any.whl.zip
 ```
 
-with the version 4.5 of HAVC has been introduced the support to ColorMNet. All the necessary packages to use ColorMNet are included in Hybrid's torch add-on package.  For a manual installation not using Hybrid, it is necessary to install all the packages reported in the project page of [ColorMNet](https://github.com/yyang181/colormnet). To simplify the installation,  in the release 4.5.0 of this filter is available as asset the spatial_correlation_sampler package compiled against CUDA 12.1 and python 3.12. To install it is necessary to unzip the following archive
+with the version 4.5 of HAVC has been introduced the support to ColorMNet. All the necessary packages to use ColorMNet are included in Hybrid's torch add-on package.  For a manual installation not using Hybrid, it is necessary to install all the packages reported in the project page of [ColorMNet](https://github.com/yyang181/colormnet). To simplify the installation,  in the release 4.5.0 of this filter is available as asset the spatial_correlation_sampler package compiled against CUDA 12.1 and python 3.12. To install it is necessary to unzip the following archive (using the nearest torch version available in the host system):
 
 ```
-spatial_correlation_sampler-0.5.0-py312-cp312-win_amd64.whl.zip 
+spatial_correlation_sampler-0.5.0-py312-cp312-win_amd64_torch-x.x.x.whl.zip 
 ```
 
 in the Library packages folder: .\Lib\site-packages\
@@ -347,7 +347,7 @@ Finally the flag **Reference frames only** can be used to export the reference f
 
 ## Coloring using Hybrid
 
-As stated previously the easiest way to colorize images with the HAVC filter it to use [Hybrid](https://www.selur.de/downloads). To simplify the usage has been introduced standard Presets that automatically apply all the filter's settings. A set of parameters that are able to provide a satisfactory colorization are the following:
+As stated previously the simplest way to colorize images with the HAVC filter it to use [Hybrid](https://www.selur.de/downloads). To simplify the usage has been introduced standard Presets that automatically apply all the filter's settings. A set of parameters that are able to provide a satisfactory colorization are the following:
 
 - **Preset:** medium (_fast_ will increase the speed with a little decrease in color accuracy)
 - **Color map:** none
@@ -357,13 +357,13 @@ As stated previously the easiest way to colorize images with the HAVC filter it 
 
 then enable the _Exemplar Models_ check box and set
 - **Method:** HAVC
-- **SC thresh:** 0.03
+- **SC thresh:** 0.10
 - **SC SSIM thresh:** 0.00
-- **SC min freq:** 3  
+- **SC min freq:** 10 (5 if is used the _local_ mode)  
 - **normalize:** checked
-- **Mode:** local
+- **Mode:** remote
 - **Frames:** 0 
-- **Preset:** slow (_medium_ will increase the speed with a little decrease in color accuracy)
+- **Preset:** medium (_slow_ will increase the color accuracy but the speed will decrease of 40%)
 - **Vivid:** checked 
 
 In the following picture are shown the suggested parameters: 
@@ -372,7 +372,7 @@ In the following picture are shown the suggested parameters:
 
 ## Conclusions
 
-In Summary **HAVC** is able to provide often a final colorized image that is better than the image obtained from the individual models, and can be considered an improvement respect to the current Models.  The suggested configuration for _video encoding_ is: 
+In Summary **HAVC** is able to provide often a final colorized image that is better than the image obtained from the individual models, and can be considered an improvement respect to the current Models.  It is suggested to use the settings described in the previous section, willing to use a custom configuration, the suggested setup for _video encoding_ is: 
 
 * **D+D**: DeOldify (with model _Video_ & render_factor = 24) + DDColor (with model _Artistic_ and render_factor = 24)
 
