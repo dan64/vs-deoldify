@@ -27,7 +27,7 @@ with the version 4.0 of HAVC has been released a modified version of DDColor to 
 pip install vsddcolor-1.0.1-py3-none-any.whl.zip
 ```
 
-with the version 4.5 of HAVC has been introduced the support to ColorMNet. All the necessary packages to use ColorMNet are included in Hybrid's torch add-on package.  For a manual installation not using Hybrid, it is necessary to install all the packages reported in the project page of [ColorMNet](https://github.com/yyang181/colormnet). To simplify the installation,  in the release 4.5.0 of this filter is available as asset the spatial_correlation_sampler package compiled against CUDA 12.1 and python 3.12. To install it is necessary to unzip the following archive (using the nearest torch version available in the host system):
+with the version 4.5 of HAVC has been introduced the support to ColorMNet. All the necessary packages to use ColorMNet are included in Hybrid's torch add-on package.  For a manual installation not using Hybrid, it is necessary to install all the packages reported in the project page of [ColorMNet](https://github.com/yyang181/colormnet). To simplify the installation,  in the release 4.5.0 of this filter is available as asset the **spatial_correlation_sampler** package compiled against CUDA 12.4, python 3.12 and torch. To install it is necessary to unzip the following archive (using the nearest torch version available in the host system):
 
 ```
 spatial_correlation_sampler-0.5.0-py312-cp312-win_amd64_torch-x.x.x.whl.zip 
