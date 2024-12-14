@@ -4,7 +4,7 @@ A Deep Learning based Vaoursynth filter for colorizing and restoring old images 
 
 The Vapoursynth filter version has the advantage of coloring the images directly in memory, without the need to use the filesystem to store the video frames. 
 
-This filter (_HAVC_ in short) is able to combine the results provided by _DeOldify_ and _DDColor_, which are some of the best models available for coloring pictures, providing often a final colorized image that is better than the image obtained from the individual models.  But the main strength of this filter is the addition of specialized filters to improve the quality of videos obtained by using these color models and the possibility to improve further the stability by using these models as input to _Deep Exemplar based Video Colorization_ model (_DeepEx_ in short) and ColorMNet. Both DeepEx and ColorMNet are exemplar-based video colorization models and allow to colorize a Video in sequence based on the colorization history, enforcing its coherency by using a temporal consistency loss. ColorMNet is more recent and advanced respect to DeepEx and it is suggested to use it as default exemplar-based model. 
+This filter (_HAVC_ in short) is able to combine the results provided by _DeOldify_ and _DDColor_, which are some of the best models available for coloring pictures, providing often a final colorized image that is better than the image obtained from the individual models.  But the main strength of this filter is the addition of specialized filters to improve the quality of videos obtained by using these color models and the possibility to improve further the stability by using these models as input to [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization) model (_DeepEx_ in short) and  [ColorMNet](https://github.com/yyang181/colormnet). Both _DeepEx_ and _ColorMNet_ are exemplar-based video colorization models and allow to colorize a Video in sequence based on the colorization history, enforcing its coherency by using a temporal consistency loss. ColorMNet is more recent and advanced respect to DeepEx and it is suggested to use it as default exemplar-based model. 
 
 ## Quick Start
 
@@ -21,13 +21,13 @@ This filter is distributed with the torch package provided with the **Hybrid Win
 ```
 pip install vsdeoldify-x.x.x-py3-none-any.whl
 ```
-with the version 4.0 of HAVC has been released a modified version of DDColor to manage the Scene Detection properties available in the input clip, this version can be installed with the command:
+with the version [4.0.0](https://github.com/dan64/vs-deoldify/releases/tag/v4.0.0) of HAVC has been released a modified version of DDColor to manage the Scene Detection properties available in the input clip, this version can be installed with the command:
 
 ```
 pip install vsddcolor-1.0.1-py3-none-any.whl.zip
 ```
 
-with the version 4.5 of HAVC has been introduced the support to ColorMNet. All the necessary packages to use ColorMNet are included in Hybrid's torch add-on package.  For a manual installation not using Hybrid, it is necessary to install all the packages reported in the project page of [ColorMNet](https://github.com/yyang181/colormnet). To simplify the installation,  in the release 4.5.0 of this filter is available as asset the **spatial_correlation_sampler** package compiled against CUDA 12.4, python 3.12 and torch. To install it is necessary to unzip the following archive (using the nearest torch version available in the host system):
+with the version 4.5.0 of HAVC has been introduced the support to ColorMNet. All the necessary packages to use ColorMNet are included in Hybrid's torch add-on package.  For a manual installation not using Hybrid, it is necessary to install all the packages reported in the project page of [ColorMNet](https://github.com/yyang181/colormnet). To simplify the installation,  in the release [4.5.0](https://github.com/dan64/vs-deoldify/releases/tag/v4.5.0) of this filter is available as asset the **spatial_correlation_sampler** package compiled against CUDA 12.4, python 3.12 and torch. To install it is necessary to unzip the following archive (using the nearest torch version available in the host system):
 
 ```
 spatial_correlation_sampler-0.5.0-py312-cp312-win_amd64_torch-x.x.x.whl.zip 

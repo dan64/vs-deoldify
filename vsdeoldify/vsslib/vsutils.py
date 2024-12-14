@@ -20,6 +20,7 @@ from PIL import Image
 from functools import partial
 from skimage.metrics import structural_similarity
 from enum import IntEnum
+from functools import partial
 
 IMG_EXTENSIONS = ['.png', '.PNG', '.jpg', '.JPG', '.jpeg', '.JPEG',
                   '.ppm', '.PPM', '.bmp', '.BMP']
@@ -182,14 +183,14 @@ def is_ref_file(dir="./", fname: str = "") -> bool:
 def frame_normalize(frame_np: np.ndarray, tht_black: float = 0.10, tht_white: float = 0.90) -> np.ndarray:
     frame_y = frame_np[:, :, 0]
 
-    frame_luma = np.mean(frame_y)/255.0
+    frame_luma = np.mean(frame_y) / 255.0
 
     if frame_luma <= tht_black or frame_luma >= tht_white:
         return frame_np
 
     img_np = frame_np.copy()
 
-    frame_y = np.multiply(255,  (frame_y - np.min(frame_y))/(np.max(frame_y) - np.min(frame_y)))
+    frame_y = np.multiply(255, (frame_y - np.min(frame_y)) / (np.max(frame_y) - np.min(frame_y)))
 
     img_np[:, :, 0] = frame_y.clip(0, 255).astype('uint8')
 
@@ -212,3 +213,28 @@ def mean_pixel_distance(y_left: np.ndarray, y_right: np.ndarray, normalize: bool
     num_pixels: float = float(y_left.shape[0] * y_left.shape[1])
     dist = np.sum(np.abs(y_left.astype(np.int32) - y_right.astype(np.int32))) / num_pixels
     return dist / 255.0
+
+
+def debug_ModifyFrame(f_start: int = 0, f_end: int = 1, clip: vs.VideoNode = None,
+                      clips: list[vs.VideoNode] = None, selector: partial = None) -> vs.VideoNode:
+
+    if len(clips) == 1:
+        if f_start > 0:
+            frame = clips[0].get_frame(0)
+            selector(0, frame)
+        for n in range(f_start, f_end):
+            frame = clips[0].get_frame(n)
+            selector(n, frame)
+    else:
+        if f_start > 0:
+            frame = []
+            for j in range(0, len(clips)):
+                frame.append(clips[j].get_frame(0))
+            selector(0, frame)
+        for n in range(f_start, f_end):
+            frame = []
+            for j in range(0, len(clips)):
+                frame.append(clips[j].get_frame(n))
+            selector(n, frame)
+
+    return clip

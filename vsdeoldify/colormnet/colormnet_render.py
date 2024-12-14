@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-09-14
 version:
 LastEditors: Dan64
-LastEditTime: 2024-09-29
+LastEditTime: 2024-11-18
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
@@ -82,8 +82,6 @@ class ColorMNetRender:
                 self.encode_mode = encode_mode
             if max_memory_frames is None or max_memory_frames == 0:
                 self.max_memory_frames = max(10000, vid_length)
-            elif self.encode_mode == 2:
-                self.max_memory_frames = max(150, max_memory_frames)
             else:
                 self.max_memory_frames = max_memory_frames
             self.total_colored_frames = 0
@@ -190,16 +188,18 @@ class ColorMNetRender:
         gpu_mem_free, gpu_mem_total = torch.cuda.mem_get_info()
         gpu_mem_k = round(gpu_mem_free / 1024 / 1024, 1)
         # vs.core.log_message(vs.MESSAGE_TYPE_WARNING, "CUDA free memory: " + str(gpu_mem_k) + " MB")
-        reset_cond_1 = (gpu_mem_k < 10) or (self.frame_count >= self.max_memory_frames)
+        reset_cond_1 = (gpu_mem_k < 100) or (self.frame_count >= self.max_memory_frames)
         reset_cond_2 = (self.reset_on_ref_update and (self.ref_img is not None)
                         and (self.ref_count - self.ref_count_prv >= 1))
         # if self.frame_count >= self.vid_length or self.frame_count >= self.max_memory_frames:
         if reset_cond_1 or reset_cond_2:
-            # if gpu_mem_k < 10:
-            #    if self.encode_mode == 0:
-            #        warnings.warn(f"Free memory at: {self.total_colored_frames}/{self.vid_length} -> {self.frame_count}/{self.max_memory_frames}")
-            #    else:
-            #        vs.core.log_message(vs.MESSAGE_TYPE_WARNING, f"Free memory at: {self.total_colored_frames}/{self.vid_length} -> {self.frame_count}/{self.max_memory_frames}")
+            """
+            if gpu_mem_k < 10:
+               if self.encode_mode == 0:
+                   warnings.warn(f"Free memory at: {self.total_colored_frames}/{self.vid_length} -> {self.frame_count}/{self.max_memory_frames}")
+               else:
+                   vs.core.log_message(vs.MESSAGE_TYPE_WARNING, f"Free memory at: {self.total_colored_frames}/{self.vid_length} -> {self.frame_count}/{self.max_memory_frames}")
+            """
             self.frame_count = 0
             del self.processor
             gc.collect()
@@ -218,7 +218,7 @@ class ColorMNetRender:
             msk = msk[:, 1:3, :, :] if msk is not None else None
 
         info = data['info']
-        frame = '{:0>5}'.format(info['frame'])
+        # frame = '{:0>5}'.format(info['frame'])
         shape = info['shape']
         need_resize = info['need_resize']
 
@@ -247,11 +247,6 @@ class ColorMNetRender:
                 prob = self.processor.step_AnyExemplar(rgb, None,None, labels, end=is_last_frame)
             else:
                 prob = self.processor.step_AnyExemplar(rgb, msk[:1, :, :].repeat(3, 1, 1), msk[1:3, :, :], labels, end=is_last_frame)
-            """
-            prob = self.processor.step_AnyExemplar(rgb, msk[:1, :, :].repeat(3, 1, 1) if msk is not None else None,
-                                                   msk[1:3, :, :] if msk is not None else None, labels,
-                                                   end=is_last_frame)
-            """
         else:
             prob = self.processor.step(rgb, msk, labels, end=is_last_frame)
 

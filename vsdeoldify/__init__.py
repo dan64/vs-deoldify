@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-11-08
+LastEditTime: 2024-11-20
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -34,7 +34,7 @@ from PIL import Image
 
 from vsdeoldify.deoldify import device
 from vsdeoldify.deoldify.device_id import DeviceId
-
+from vsdeoldify.vsslib.constants import *
 from vsdeoldify.vsslib.vsfilters import *
 from vsdeoldify.vsslib.mcomb import *
 from vsdeoldify.vsslib.vsmodels import *
@@ -43,7 +43,7 @@ from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDe
 
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 
-__version__ = "4.5.0"
+__version__ = "4.5.1"
 
 import warnings
 import logging
@@ -84,9 +84,10 @@ wrapper to HAVC filter with "presets" management
 def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable', ColorFix: str = 'Violet/Red',
               ColorTune: str = 'Light', ColorMap: str = 'None', EnableDeepEx: bool = False, DeepExMethod: int = 0,
               DeepExPreset: str = 'Medium', DeepExRefMerge: int = 0, DeepExOnlyRefFrames: bool = False,
-              ScFrameDir: str = None, ScThreshold: float = 0.03, ScMinFreq: int = 0, ScThtSSIM: float = 0.0,
-              ScNormalize: bool = True, DeepExModel: int = 0, DeepExVivid: bool = True, DeepExEncMode: int = 0,
-              DeepExMaxMemFrames=0, enable_fp16: bool = True) -> vs.VideoNode:
+              ScFrameDir: str = None, ScThreshold: float = DEF_THRESHOLD, ScThtOffset: int = 1, ScMinFreq: int = 0,
+              ScMinInt: int = 1, ScThtSSIM: float = 0.0, ScNormalize: bool = True, DeepExModel: int = 0,
+              DeepExVivid: bool = True, DeepExEncMode: int = 0, DeepExMaxMemFrames=0,
+              enable_fp16: bool = True, sc_debug: bool = False) -> vs.VideoNode:
     """Main HAVC function supporting the Presets
 
     :param clip:                clip to process, only RGB24 format is supported.
@@ -199,6 +200,10 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                                 "Exemplar-based" Video Colorization. It is a percentage of the luma change between
                                 the previous and the current frame. range [0-1], default 0.03. If =0 are not generate
                                 reference frames.
+    :param ScThtOffset:         Offset index used for the Scene change detection. The comparison will be performed,
+                                between frame[n] and frame[n-offset]. An offset > 1 is useful to detect blended scene
+                                change, range[1, 25]. Default = 1.
+    :param ScMinInt:            Minimum number of frame interval between scene changes, range[1, 25]. Default = 1.
     :param ScMinFreq:           if > 0 will be generated at least a reference frame every "ScMinFreq" frames.
                                 range [0-1500], default: 0.
     :param ScThtSSIM:           Threshold used by the SSIM (Structural Similarity Index Metric) selection filter.
@@ -208,8 +213,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     :param ScNormalize:         If true the B&W frames are normalized before use misc.SCDetect(), the normalization will
                                 increase the sensitivity to smooth scene changes, range [True, False], default: True
     :param enable_fp16:         Enable/disable FP16 in ddcolor inference, range [True, False]
-    :server_port:               Used by ColorMNet using encode mode = 0 (remote), it represents the network port used to
-                                connect to remote frame server.
+    :param sc_debug:            Print debug messages regarding the scene change detection process.
     """
     # disable packages warnings
     disable_warnings()
@@ -220,6 +224,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     preset0_rf = [34, 32, 30, 28, 26, 24, 20, 16]
     preset1_rf = [48, 44, 36, 32, 28, 24, 20, 16]
 
+    pr_id = 5
     try:
         pr_id = presets.index(Preset)
     except ValueError:
@@ -236,6 +241,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                   'ddcolor']
     ddcolor_weight = [0.0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0]
 
+    w_id = 3
     try:
         w_id = video_tune.index(VideoTune)
     except ValueError:
@@ -247,6 +253,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     hue_tune = ["0.8,0.1", "0.5,0.1", "0.2,0.1"]
     hue_tune2 = ["0.9,0", "0.7,0", "0.5,0"]
 
+    tn_id = 0
     try:
         tn_id = color_tune.index(ColorTune)
     except ValueError:
@@ -258,6 +265,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                  'yellow/green']
     hue_fix = ["none", "270:300", "270:330", "300:330", "300:360", "220:280", "60:90", "30:90", "60:120"]
 
+    co_id = 4
     try:
         co_id = color_fix.index(ColorFix)
     except ValueError:
@@ -277,6 +285,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     hue_map = ["none", "180:280|+140,0.4", "180:280|+100,0.4", "180:280|+220,0.4", "80:180|+260,0.4", "80:180|+220,0.4",
                "80:180|+140,0.4", "300:360,0:20|+40,0.6", "300:360,0:20|+260,0.6", "30:90|+300,0.8"]
 
+    cl_id = 0
     try:
         cl_id = colormap.index(ColorMap)
     except ValueError:
@@ -311,8 +320,9 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                                   deoldify_p=[0, deoldify_rf, 1.0, 0.0],
                                   ddcolor_p=[1, ddcolor_rf, 1.0, 0.0, enable_fp16],
                                   ddtweak=True, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range],
-                                  sc_threshold=ScThreshold, sc_min_freq=ScMinFreq, sc_tht_ssim=ScThtSSIM,
-                                  sc_normalize=ScNormalize)
+                                  sc_threshold=ScThreshold, sc_tht_offset=ScThtOffset, sc_min_freq=ScMinFreq,
+                                  sc_min_int=ScMinInt, sc_tht_ssim=ScThtSSIM, sc_normalize=ScNormalize,
+                                  sc_debug=sc_debug)
 
         clip_colored = HAVC_deepex(clip=clip, clip_ref=clip_ref, method=DeepExMethod, render_speed=DeepExPreset,
                                    render_vivid=DeepExVivid, ref_merge=DeepExRefMerge, sc_framedir=ScFrameDir,
@@ -350,6 +360,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
             clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8],
                                            smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, chroma_adjust],
                                            stab=True, stab_p=[5, 'A', 1, 15, 0.2, 0.15, hue_range2])
+
     return clip_colored
 
 
@@ -365,8 +376,8 @@ Exemplar-based coloring function with additional post-process filters
 
 def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method: int = 0, render_speed: str = 'medium',
                 render_vivid: bool = True, ref_merge: int = 0, sc_framedir: str = None,
-                only_ref_frames: bool = False, dark: bool = False, dark_p: list = [0.2, 0.8], smooth: bool = False,
-                smooth_p: list = [0.3, 0.7, 0.9, 0.0, "none"], colormap: str = "none",
+                only_ref_frames: bool = False, dark: bool = False, dark_p: list = (0.2, 0.8), smooth: bool = False,
+                smooth_p: list = (0.3, 0.7, 0.9, 0.0, "none"), colormap: str = "none",
                 ref_weight: float = None, ref_thresh: float = None, ex_model: int = 0, encode_mode: int = 0,
                 max_memory_frames: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
     """Towards Video-Realistic Colorization via Exemplar-based framework
@@ -644,13 +655,14 @@ coloring function with additional pre-process and post-process filters
 
 
 def HAVC_ddeoldify(
-        clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = [0, 24, 1.0, 0.0],
-        ddcolor_p: list = [1, 24, 1.0, 0.0, True], ddtweak: bool = False,
-        ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.8,0.1"],
-        cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0], alm_p: list = [0.8, 1.0, 0.15], cmb_sw: bool = False,
-        sc_threshold: float = 0.0, sc_min_freq: int = 0, sc_tht_ssim: float = 0.0, sc_normalize: bool = True,
-        sc_tht_white: float = 0.95, sc_tht_black: float = 0.03, device_index: int = 0,
-        torch_dir: str = model_dir) -> vs.VideoNode:
+        clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = (0, 24, 1.0, 0.0),
+        ddcolor_p: list = (1, 24, 1.0, 0.0, True), ddtweak: bool = False,
+        ddtweak_p: list = (0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.8,0.1"),
+        cmc_tresh: float = 0.2, lmm_p: list = (0.2, 0.8, 1.0), alm_p: list = (0.8, 1.0, 0.15), cmb_sw: bool = False,
+        sc_threshold: float = 0.0, sc_tht_offset: int = 1, sc_min_freq: int = 0, sc_tht_ssim: float = 0.0,
+        sc_normalize: bool = True, sc_min_int: int = 1, sc_tht_white: float = DEF_THT_WHITE,
+        sc_tht_black: float = DEF_THT_BLACK, device_index: int = 0, torch_dir: str = model_dir,
+        sc_debug: bool = False) -> vs.VideoNode:
     """A Deep Learning based project for colorizing and restoring old images and video using Deoldify and DDColor
 
     :param clip:                clip to process, only RGB24 format is supported
@@ -738,18 +750,23 @@ def HAVC_ddeoldify(
                                 "Exemplar-based" Video Colorization. It is a percentage of the luma change between
                                 the previous and the current frame. range [0-1], default 0.0. If =0 are not generate
                                 reference frames and will be colorized all the frames.
+    :param sc_tht_offset:       Offset index used for the Scene change detection. The comparison will be performed,
+                                between frame[n] and frame[n-offset]. An offset > 1 is useful to detect blended scene
+                                change, range[1, 25]. Default = 1.
     :param sc_tht_ssim:         Threshold used by the SSIM (Structural Similarity Index Metric) selection filter.
                                 If > 0, will be activated a filter that will improve the scene-change detection,
                                 by discarding images that are similar.
-                                Suggested values are between 0.35 and 0.65, range [0-1], default 0.0 (deactivated)
+                                Suggested values are between 0.35 and 0.85, range [0-1], default 0.0 (deactivated)
     :param sc_normalize:        If true the B&W frames are normalized before use misc.SCDetect(), the normalization will
                                 increase the sensitivity to smooth scene changes.
+    :param sc_min_int:          Minimum number of frame interval between scene changes, range[1, 25]. Default = 1.
     :param sc_min_freq:         if > 0 will be generate at least a reference frame every "sc_min_freq" frames.
                                 range [0-1500], default: 0.
-    :param sc_tht_white:        Threshold to identify white frames, range [0-1], default 0.95.
-    :param sc_tht_black:        Threshold to identify dark frames, range [0-1], default 0.03.
+    :param sc_tht_white:        Threshold to identify white frames, range [0-1], default 0.85.
+    :param sc_tht_black:        Threshold to identify dark frames, range [0-1], default 0.15.
     :param device_index:        device ordinal of the GPU, choices: GPU0...GPU7, CPU=99 (default = 0)
     :param torch_dir:           torch hub dir location, default is model directory, if set to None will switch to torch cache dir.
+    :param sc_debug:            Print debug messages regarding the scene change detection process.
     """
     # disable packages warnings
     disable_warnings()
@@ -797,7 +814,7 @@ def HAVC_ddeoldify(
 
     if clip.format.id != vs.RGB24:
         # clip not in RGB24 format, it will be converted
-        if (clip.format.color_family == "YUV"):
+        if clip.format.color_family == "YUV":
             clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
                                        dither_type="error_diffusion")
         else:
@@ -806,7 +823,7 @@ def HAVC_ddeoldify(
     # choices: GPU0...GPU7, CPU=99
     device.set(device=DeviceId(device_index))
 
-    if torch_dir != None:
+    if torch_dir is not None:
         torch.hub.set_dir(torch_dir)
 
     if ddcolor_rf == 0:
@@ -815,10 +832,11 @@ def HAVC_ddeoldify(
     scenechange = not (sc_threshold == 0 and sc_min_freq == 0)
 
     clip = SceneDetect(clip, threshold=sc_threshold, frequency=sc_min_freq, sc_tht_filter=sc_tht_ssim,
-                       frame_norm=sc_normalize, tht_white=sc_tht_white, tht_black=sc_tht_black)
+                       tht_offset=sc_tht_offset, min_length=sc_min_int, frame_norm=sc_normalize,
+                       tht_white=sc_tht_white, tht_black=sc_tht_black, sc_debug=sc_debug)
 
     frame_size = min(max(ddcolor_rf, deoldify_rf) * 16, clip.width)  # frame size calculation for inference()
-    clip_orig = clip;
+    clip_orig = clip
     clip = clip.resize.Spline64(width=frame_size, height=frame_size)
 
     clipa = vs_sc_deoldify(clip, method=method, model=deoldify_model, render_factor=deoldify_rf,
@@ -836,8 +854,8 @@ def HAVC_ddeoldify(
                                          hue=[deoldify_hue, ddcolor_hue], clipb_weight=merge_weight, CMC_p=cmc_tresh,
                                          LMM_p=lmm_p, ALM_p=alm_p, invert_clips=cmb_sw)
 
-    return _clip_chroma_resize(clip_orig, clip_colored)
-
+    clip_resized = _clip_chroma_resize(clip_orig, clip_colored)
+    return clip_resized
 
 """
 ------------------------------------------------------------------------------- 
@@ -849,9 +867,9 @@ Video color stabilization filter.
 """
 
 
-def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = [0.2, 0.8], smooth: bool = False,
-                    smooth_p: list = [0.3, 0.7, 0.9, 0.0, "none"], stab: bool = False,
-                    stab_p: list = [5, 'A', 1, 15, 0.2, 0.15], colormap: str = "none",
+def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2, 0.8), smooth: bool = False,
+                    smooth_p: list = (0.3, 0.7, 0.9, 0.0, "none"), stab: bool = False,
+                    stab_p: list = (5, 'A', 1, 15, 0.2, 0.15), colormap: str = "none",
                     render_factor: int = 24) -> vs.VideoNode:
     """Video color stabilization filter, which can be applied to stabilize the chroma components in colored clips.
         :param clip:                clip to process, only RGB24 format is supported.
@@ -913,7 +931,7 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = [0.2,
 
     if chroma_resize_enabled:
         frame_size = min(render_factor * 16, clip.width)  # frame size calculation for filters
-        clip_orig = clip;
+        clip_orig = clip
         clip = clip.resize.Spline64(width=frame_size, height=frame_size)
 
     # unpack dark
@@ -989,9 +1007,10 @@ wrapper to function vSceneDetect() to set the scene-change frames in the clip
 """
 
 
-def HAVC_SceneDetect(clip: vs.VideoNode, sc_threshold: float = 0.03, sc_tht_ssim: float = 0.0, sc_min_int: int = 1,
-                     sc_min_freq: int = 0, sc_normalize: bool = True, sc_tht_white: float = 0.95,
-                     sc_tht_black: float = 0.03, sc_debug: bool = False) -> vs.VideoNode:
+def HAVC_SceneDetect(clip: vs.VideoNode, sc_threshold: float = DEF_THRESHOLD, sc_tht_offset: int = 1,
+                     sc_tht_ssim: float = 0.0, sc_min_int: int = 1, sc_min_freq: int = 0, sc_normalize: bool = True,
+                     sc_tht_white: float = DEF_THT_WHITE, sc_tht_black: float = DEF_THT_BLACK,
+                     sc_debug: bool = False) -> vs.VideoNode:
     """Utility function to set the scene-change frames in the clip
 
     :param clip:                clip to process, only RGB24 format is supported.
@@ -999,23 +1018,26 @@ def HAVC_SceneDetect(clip: vs.VideoNode, sc_threshold: float = 0.03, sc_tht_ssim
                                 It is a percentage of the luma change between the previous n-frame (n=sc_offset)
                                 and the current frame. range [0-1], default 0.03.
                                 reference frames and will colorize all the frames.
+    :param sc_tht_offset:       Offset index used for the Scene change detection. The comparison will be performed,
+                                between frame[n] and frame[n-offset]. An offset > 1 is useful to detect blended scene
+                                change, range[1, 25]. Default = 1.
     :param sc_normalize:        If true the B&W frames are normalized before use misc.SCDetect(), the normalization will
                                 increase the sensitivity to smooth scene changes.
-    :param sc_tht_white:        Threshold to identify white frames, range [0-1], default 0.95.
-    :param sc_tht_black:        Threshold to identify dark frames, range [0-1], default 0.03.
+    :param sc_tht_white:        Threshold to identify white frames, range [0-1], default 0.85.
+    :param sc_tht_black:        Threshold to identify dark frames, range [0-1], default 0.15.
     :param sc_tht_ssim:         Threshold used by the SSIM (Structural Similarity Index Metric) selection filter.
                                 If > 0, will be activated a filter that will improve the scene-change detection,
                                 by discarding images that are similar.
-                                Suggested values are between 0.35 and 0.65, range [0-1], default 0.0 (deactivated)
-    :param sc_min_int:          Minimum number of frame interval between scene changes.
+                                Suggested values are between 0.35 and 0.85, range [0-1], default 0.0 (deactivated)
+    :param sc_min_int:          Minimum number of frame interval between scene changes, range[1, 25]. Default = 1.
     :param sc_min_freq:         if > 0 will be generated at least a reference frame every "sc_min_freq" frames.
                                 range [0-1500], default: 0.
     :param sc_debug:            Enable SC debug messages. default: False
 
     """
-    clip = SceneDetect(clip, threshold=sc_threshold, frequency=sc_min_freq, sc_tht_filter=sc_tht_ssim,
-                       min_length=sc_min_int, tht_white=sc_tht_white, tht_black=sc_tht_black, frame_norm=sc_normalize,
-                       sc_debug=sc_debug)
+    clip = SceneDetect(clip, threshold=sc_threshold, tht_offset=sc_tht_offset, frequency=sc_min_freq,
+                       sc_tht_filter=sc_tht_ssim,  min_length=sc_min_int, tht_white=sc_tht_white,
+                       tht_black=sc_tht_black, frame_norm=sc_normalize, sc_debug=sc_debug)
     return clip
 
 
@@ -1029,11 +1051,13 @@ wrapper to function vs_sc_export_frames() to export the clip's reference frames
 """
 
 
-def HAVC_extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = 0.03, sc_tht_ssim: float = 0.0, sc_min_int: int = 1,
-                                  sc_min_freq: int = 0, sc_framedir: str = "./", sc_normalize: bool = True,
-                                  sc_tht_white: float = 0.95, sc_tht_black: float = 0.03, ref_offset: int = 0,
-                                  ref_ext: str = "jpg", ref_jpg_quality: int = 95, ref_override: bool = True,
-                                  sc_debug: bool = False) -> vs.VideoNode:
+def HAVC_extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = DEF_THRESHOLD, sc_tht_offset: int = 1,
+                                  sc_tht_ssim: float = 0.0, sc_min_int: int = 1, sc_min_freq: int = 0,
+                                  sc_framedir: str = "./", sc_normalize: bool = True, ref_offset: int = 0,
+                                  sc_tht_white: float = DEF_THT_WHITE, sc_tht_black: float = DEF_THT_BLACK,
+                                  ref_ext: str = "jpg", ref_jpg_quality: int = DEF_JPG_QUALITY,
+                                  ref_override: bool = True, sc_debug: bool = False
+                                  ) -> vs.VideoNode:
     """Utility function to export reference frames
 
     :param clip:                clip to process, only RGB24 format is supported.
@@ -1041,15 +1065,18 @@ def HAVC_extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = 0.03
                                 It is a percentage of the luma change between the previous n-frame (n=sc_offset)
                                 and the current frame. range [0-1], default 0.05.
                                 reference frames and will colorize all the frames.
+    :param sc_tht_offset:       Offset index used for the Scene change detection. The comparison will be performed,
+                                between frame[n] and frame[n-offset]. An offset > 1 is useful to detect blended scene
+                                change, range[1, 25]. Default = 1.
     :param sc_normalize:        If true the B&W frames are normalized before use misc.SCDetect(), the normalization will
                                 increase the sensitivity to smooth scene changes.
-    :param sc_tht_white:        Threshold to identify white frames, range [0-1], default 0.95.
-    :param sc_tht_black:        Threshold to identify dark frames, range [0-1], default 0.03.
+    :param sc_tht_white:        Threshold to identify white frames, range [0-1], default 0.85.
+    :param sc_tht_black:        Threshold to identify dark frames, range [0-1], default 0.15.
     :param sc_tht_ssim:         Threshold used by the SSIM (Structural Similarity Index Metric) selection filter.
                                 If > 0, will be activated a filter that will improve the scene-change detection,
                                 by discarding images that are similar.
-                                Suggested values are between 0.35 and 0.65, range [0-1], default 0.0 (deactivated)
-    :param sc_min_int:          Minimum number of frame interval between scene changes.
+                                Suggested values are between 0.35 and 0.85, range [0-1], default 0.0 (deactivated)
+    :param sc_min_int:          Minimum number of frame interval between scene changes, range[1, 25]. Default = 1.
     :param sc_min_freq:         if > 0 will be generated at least a reference frame every "sc_min_freq" frames.
                                 range [0-1500], default: 0.
     :param sc_framedir:         If set, define the directory where are stored the reference frames.
@@ -1063,9 +1090,9 @@ def HAVC_extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = 0.03
 
     """
     pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
-    clip = SceneDetect(clip, threshold=sc_threshold, frequency=sc_min_freq, sc_tht_filter=sc_tht_ssim,
-                       min_length=sc_min_int, tht_white=sc_tht_white, tht_black=sc_tht_black, frame_norm=sc_normalize,
-                       sc_debug=sc_debug)
+    clip = SceneDetect(clip, threshold=sc_threshold, tht_offset=sc_tht_offset, frequency=sc_min_freq,
+                       sc_tht_filter=sc_tht_ssim, min_length=sc_min_int, tht_white=sc_tht_white,
+                       tht_black=sc_tht_black, frame_norm=sc_normalize, sc_debug=sc_debug)
     clip = vs_sc_export_frames(clip, sc_framedir=sc_framedir, ref_offset=ref_offset, ref_ext=ref_ext,
                                ref_jpg_quality=ref_jpg_quality, ref_override=ref_override)
     return clip
@@ -1088,12 +1115,12 @@ def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'S
                      ColorMap=ColorMap, enable_fp16=enable_fp16)
 
 
-def ddeoldify(clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = [0, 24, 1.0, 0.0],
-              ddcolor_p: list = [1, 24, 1.0, 0.0, True],
-              dotweak: bool = False, dotweak_p: list = [0.0, 1.0, 1.0, False, 0.2, 0.5, 1.5, 0.5],
-              ddtweak: bool = False, ddtweak_p: list = [0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.8,0.1"],
-              degrain_strength: int = 0, cmc_tresh: float = 0.2, lmm_p: list = [0.2, 0.8, 1.0],
-              alm_p: list = [0.8, 1.0, 0.15], cmb_sw: bool = False, device_index: int = 0,
+def ddeoldify(clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = (0, 24, 1.0, 0.0),
+              ddcolor_p: list = (1, 24, 1.0, 0.0, True),
+              dotweak: bool = False, dotweak_p: list = (0.0, 1.0, 1.0, False, 0.2, 0.5, 1.5, 0.5),
+              ddtweak: bool = False, ddtweak_p: list = (0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.8,0.1"),
+              degrain_strength: int = 0, cmc_tresh: float = 0.2, lmm_p: list = (0.2, 0.8, 1.0),
+              alm_p: list = (0.8, 1.0, 0.15), cmb_sw: bool = False, device_index: int = 0,
               torch_dir: str = model_dir) -> vs.VideoNode:
     vs.core.log_message(vs.MESSAGE_TYPE_WARNING,
                         "Warning: ddeoldify is deprecated and may be removed in the future, please use 'HAVC_ddeoldify' instead.")
@@ -1103,9 +1130,9 @@ def ddeoldify(clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldif
                           sc_threshold=0, sc_min_freq=0, device_index=device_index, torch_dir=torch_dir)
 
 
-def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = [0.2, 0.8], smooth: bool = False,
-                         smooth_p: list = [0.3, 0.7, 0.9, 0.0, "none"],
-                         stab: bool = False, stab_p: list = [5, 'A', 1, 15, 0.2, 0.15], colormap: str = "none",
+def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2, 0.8), smooth: bool = False,
+                         smooth_p: list = (0.3, 0.7, 0.9, 0.0, "none"),
+                         stab: bool = False, stab_p: list = (5, 'A', 1, 15, 0.2, 0.15), colormap: str = "none",
                          render_factor: int = 24) -> vs.VideoNode:
     vs.core.log_message(vs.MESSAGE_TYPE_WARNING,
                         "Warning: ddeoldify_stabilizer is deprecated and may be removed in the future, please use 'HAVC_stabilizer' instead.")
