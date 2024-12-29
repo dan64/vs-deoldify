@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-11-20
+LastEditTime: 2024-12-29
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -43,7 +43,7 @@ from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDe
 
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 
-__version__ = "4.5.1"
+__version__ = "4.5.2"
 
 import warnings
 import logging
@@ -112,7 +112,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                                     ,MoreVivid'
                                     'VeryVivid',
                                     'DDColor'
-    :param ColorFix:            This parameter allows to reduce color noise on determinated chroma ranges.
+    :param ColorFix:            This parameter allows to reduce color noise on specific chroma ranges.
                                 Allowed values are:
                                     'None',
                                     'Magenta',
@@ -184,11 +184,11 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                                                          the Deep-Exemplar model, which is faster.
     :param DeepExMaxMemFrames:  Parameter used by ColorMNet model, specify the max number of encoded frames to keep in memory.
                                 Its value depend on encode mode and must be defined manually following the suggested values.
-                                encode_mode=0: there is no memory limit (it could be all the frames in the clip).
+                                DeepExEncMode=0: there is no memory limit (it could be all the frames in the clip).
                                 Suggested values are:
                                     min=150, max=10000
                                 If = 0 will be filled with the value of 10000 or the clip length if higher.
-                                encode_mode=1: the max memory frames is limited by available GPU memory.
+                                DeepExEncMode=1: the max memory frames is limited by available GPU memory.
                                 Suggested values are:
                                     min=1, max=4      : for 8GB GPU
                                     min=1, max=8      : for 12GB GPU
@@ -299,7 +299,8 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
             HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: DeepExOnlyRefFrames is enabled but ScFrameDir is unset")
 
         if not (ScFrameDir is None) and DeepExMethod not in (0, 5) and DeepExOnlyRefFrames:
-            HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: DeepExOnlyRefFrames is enabled but method not in (0, 5) (HAVC)")
+            HAVC_LogMessage(MessageType.EXCEPTION,
+                            "HAVC_main: DeepExOnlyRefFrames is enabled but method not in (0, 5) (HAVC)")
 
         if DeepExMethod not in (0, 5) and (ScFrameDir is None):
             HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: DeepExMethod not in (0, 5) but ScFrameDir is unset")
@@ -339,7 +340,8 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     elif EnableDeepEx and DeepExMethod in (3, 4):
 
         clip_colored = HAVC_deepex(clip=clip, clip_ref=None, method=DeepExMethod, render_speed=DeepExPreset,
-                                   render_vivid=DeepExVivid, sc_framedir=ScFrameDir, only_ref_frames=DeepExOnlyRefFrames,
+                                   render_vivid=DeepExVivid, sc_framedir=ScFrameDir,
+                                   only_ref_frames=DeepExOnlyRefFrames,
                                    dark=True, dark_p=[0.2, 0.8], smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
                                    ex_model=DeepExModel, encode_mode=DeepExEncMode,
                                    max_memory_frames=DeepExMaxMemFrames, colormap=chroma_adjust)
@@ -477,7 +479,8 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: only_ref_frames is enabled but sc_framedir is unset")
 
     if not (sc_framedir is None) and method not in (0, 5) and only_ref_frames:
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: only_ref_frames is enabled but method not in (0, 5) (HAVC)")
+        HAVC_LogMessage(MessageType.EXCEPTION,
+                        "HAVC_deepex: only_ref_frames is enabled but method not in (0, 5) (HAVC)")
 
     if method not in (0, 5) and (sc_framedir is None):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: method not in (0, 5) but sc_framedir is unset")
@@ -716,13 +719,13 @@ def HAVC_ddeoldify(
                                        1 = ddcolor_artistic
                                    [1] render factor for the model, if=0 will be auto selected
                                        (default = 24), range: [0, 10-64]
-                                   [2] saturation parameter to apply to deoldify color model (default = 1)
-                                   [3] hue parameter to apply to deoldify color model (default = 0)
+                                   [2] saturation parameter to apply to ddcolor color model (default = 1)
+                                   [3] hue parameter to apply to ddcolor color model (default = 0)
                                    [4] enable/disable FP16 in ddcolor inference
     :param ddtweak:             enabled/disable tweak parameters for ddcolor(), range [True,False]
     :param ddtweak_p:           tweak parameters for ddcolor():
                                    [0] : ddcolor tweak's bright (default = 0)
-                                   [1] : ddcolor tweak's constrast (default = 1), if < 1 ddcolor provides de-saturated frames
+                                   [1] : ddcolor tweak's contrast (default = 1), if < 1 ddcolor provides de-saturated frames
                                    [2] : ddcolor tweak's gamma (default = 1)
                                    [3] : luma constrained gamma -> luma constrained gamma correction enabled (default = False), range: [True, False]
                                             When enabled the average luma of a video clip will be forced to don't be below the value
@@ -736,10 +739,10 @@ def HAVC_ddeoldify(
                                          for a movie with a lot of dark scenes is suggested alpha > 1, if=0 is not activated, range [>=0]
                                    [7] : gamma_min: minimum value for gamma, range (default=0.5) [>0.1]
                                    [8] : "chroma adjustment" parameter (optional), if="none" is disabled (see the README)
-    :param cmc_tresh:           chroma_threshold (%), used by: Constrained "Chroma Merge range" [0-1] (0.01=1%)
+    :param cmc_tresh:           chroma_threshold (%), used by: "Constrained Chroma Merge", range [0-1] (0.01=1%)
     :param lmm_p:               parameters for method: "Luma Masked Merge" (see method=4 for a full explanation)
                                    [0] : luma_mask_limit: luma limit for build the mask used in Luma Masked Merge, range [0-1] (0.01=1%)
-                                   [1] : luma_white_limit: the mask will appliey a gradient till luma_white_limit, range [0-1] (0.01=1%)
+                                   [1] : luma_white_limit: the mask will apply a gradient till luma_white_limit, range [0-1] (0.01=1%)
                                    [2] : luma_mask_sat: if < 1 the ddcolor dark pixels will substitute with the desaturated deoldify pixels, range [0-1] (0.01=1%)
     :param alm_p:               parameters for method: "Adaptive Luma Merge" (see method=5 for a full explanation)
                                    [0] : luma_threshold: threshold for the gradient merge, range [0-1] (0.01=1%)
@@ -857,6 +860,7 @@ def HAVC_ddeoldify(
     clip_resized = _clip_chroma_resize(clip_orig, clip_colored)
     return clip_resized
 
+
 """
 ------------------------------------------------------------------------------- 
 Author: Dan64
@@ -889,11 +893,11 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
         :param stab_p:              parameters for the temporal color stabilizer
                                       [0] : nframes, number of frames to be used in the stabilizer, range[3-15]
                                       [1] : mode, type of average used by the stabilizer: range['A'='arithmetic', 'W'='weighted']
-                                      [2] : sat: saturation applied to the restored gray prixels [0,1]
+                                      [2] : sat: saturation applied to the restored gray pixels [0,1]
                                       [3] : tht, threshold to detect gray pixels, range [0,255], if=0 is not applied the restore,
                                             its value depends on merge method used, suggested values are:
                                                 method 0: tht = 5
-                                                method 1: tht = 60 (ddcolor provides very saturared frames)
+                                                method 1: tht = 60 (ddcolor provides very saturated frames)
                                                 method 2: tht = 15
                                                 method 3: tht = 20
                                                 method 4: tht = 5
@@ -906,7 +910,7 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
                                     but the final resolution will be the one of the original clip. If = 0 will be auto selected.
                                     This approach takes advantage of the fact that human eyes are much less sensitive to
                                     imperfections in chrominance compared to luminance. This means that it is possible to speed-up
-                                    the chroma filters and get a great high-resolution result in the end, range: [0, 10-64]
+                                    the chroma filters and and ultimately get a great high-resolution result, range: [0, 10-64]
     """
 
     if not isinstance(clip, vs.VideoNode):
@@ -1015,9 +1019,8 @@ def HAVC_SceneDetect(clip: vs.VideoNode, sc_threshold: float = DEF_THRESHOLD, sc
 
     :param clip:                clip to process, only RGB24 format is supported.
     :param sc_threshold:        Scene change threshold used to generate the reference frames.
-                                It is a percentage of the luma change between the previous n-frame (n=sc_offset)
-                                and the current frame. range [0-1], default 0.03.
-                                reference frames and will colorize all the frames.
+                                It is a percentage of the luma change between the previous n-frame (n=sc_tht_offset)
+                                and the current frame. range [0-1], default 0.05.
     :param sc_tht_offset:       Offset index used for the Scene change detection. The comparison will be performed,
                                 between frame[n] and frame[n-offset]. An offset > 1 is useful to detect blended scene
                                 change, range[1, 25]. Default = 1.
@@ -1036,7 +1039,7 @@ def HAVC_SceneDetect(clip: vs.VideoNode, sc_threshold: float = DEF_THRESHOLD, sc
 
     """
     clip = SceneDetect(clip, threshold=sc_threshold, tht_offset=sc_tht_offset, frequency=sc_min_freq,
-                       sc_tht_filter=sc_tht_ssim,  min_length=sc_min_int, tht_white=sc_tht_white,
+                       sc_tht_filter=sc_tht_ssim, min_length=sc_min_int, tht_white=sc_tht_white,
                        tht_black=sc_tht_black, frame_norm=sc_normalize, sc_debug=sc_debug)
     return clip
 
@@ -1047,7 +1050,8 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description: 
 ------------------------------------------------------------------------------- 
-wrapper to function vs_sc_export_frames() to export the clip's reference frames
+wrapper to function SceneDetect and vs_sc_export_frames() to export the clip's 
+reference frames
 """
 
 
@@ -1064,7 +1068,6 @@ def HAVC_extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = DEF_
     :param sc_threshold:        Scene change threshold used to generate the reference frames.
                                 It is a percentage of the luma change between the previous n-frame (n=sc_offset)
                                 and the current frame. range [0-1], default 0.05.
-                                reference frames and will colorize all the frames.
     :param sc_tht_offset:       Offset index used for the Scene change detection. The comparison will be performed,
                                 between frame[n] and frame[n-offset]. An offset > 1 is useful to detect blended scene
                                 change, range[1, 25]. Default = 1.
@@ -1093,6 +1096,36 @@ def HAVC_extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = DEF_
     clip = SceneDetect(clip, threshold=sc_threshold, tht_offset=sc_tht_offset, frequency=sc_min_freq,
                        sc_tht_filter=sc_tht_ssim, min_length=sc_min_int, tht_white=sc_tht_white,
                        tht_black=sc_tht_black, frame_norm=sc_normalize, sc_debug=sc_debug)
+    clip = vs_sc_export_frames(clip, sc_framedir=sc_framedir, ref_offset=ref_offset, ref_ext=ref_ext,
+                               ref_jpg_quality=ref_jpg_quality, ref_override=ref_override)
+    return clip
+
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description: 
+------------------------------------------------------------------------------- 
+wrapper to function vs_sc_export_frames() to export the clip's reference frames
+"""
+
+
+def HAVC_export_reference_frames(clip: vs.VideoNode, sc_framedir: str = "./", ref_offset: int = 0,
+                                 ref_ext: str = "jpg", ref_jpg_quality: int = DEF_JPG_QUALITY,
+                                 ref_override: bool = True) -> vs.VideoNode:
+    """Utility function to export reference frames
+
+    :param clip:                clip to process, only RGB24 format is supported.
+    :param sc_framedir:         If set, define the directory where are stored the reference frames.
+                                The reference frames are named as: ref_nnnnnn.[jpg|png].
+    :param ref_offset:          Offset number that will be added to the number of generated frames. default: 0.
+    :param ref_ext:             File extension and format of saved frames, range ["jpg", "png"] . default: "jpg"
+    :param ref_jpg_quality:     Quality of "jpg" compression, range[0,100]. default: 95
+    :param ref_override:        If True, the reference frames with the same name will be overridden, otherwise will
+                                be discarded. default: True
+    """
+    pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
     clip = vs_sc_export_frames(clip, sc_framedir=sc_framedir, ref_offset=ref_offset, ref_ext=ref_ext,
                                ref_jpg_quality=ref_jpg_quality, ref_override=ref_override)
     return clip
