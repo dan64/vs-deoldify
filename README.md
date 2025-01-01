@@ -8,7 +8,7 @@ This filter (_HAVC_ in short) is able to combine the results provided by _DeOldi
 
 ## Quick Start
 
-This filter is distributed with the torch package provided with the **Hybrid Windows Addons**. To use it on Desktop (Windows) it is necessary install [Hybrid](https://www.selur.de/downloads) and the related [Addons](https://drive.google.com/drive/folders/1vC_pxwxL0o8fjmg8Okn0RA5rsodTcv9G?usp=drive_link). **Hybrid** is a Qt-based frontend for other tools (including this filter) which can convert most input formats to common audio & video formats and containers. It represent the  easiest way to colorize images with the HAVC filter using [VapourSynth](https://www.vapoursynth.com/).      
+This filter is distributed with the torch package provided with the **Hybrid Windows Addons**. To use it on Desktop (Windows) it is necessary install [Hybrid](https://www.selur.de/downloads) and the related [Addons](https://drive.google.com/drive/folders/1vC_pxwxL0o8fjmg8Okn0RA5rsodTcv9G?usp=drive_link). **Hybrid** is a Qt-based frontend for other tools (including this filter) which can convert most input formats to common audio & video formats and containers. It represent the  easiest way to colorize images with the HAVC filter using [VapourSynth](https://www.vapoursynth.com/).  In the folder _documentation_ is available a [User Guide](https://github.com/dan64/vs-deoldify/blob/main/documentation/HAVC%20User%20Guide.pdf) that provides detailed information on how to install Hybrid and use it to colorize videos. The Guide also provides tips on how to improve the final quality of colored movies.     
 
 
 ## Dependencies
@@ -173,7 +173,7 @@ To simplify the usage of this filter has been added the Preset _ColorFix_ which 
 
 Using an approach similar to _Chroma Adjustment_ has been introduced the possibility to remap a given gange of colors in another chroma range. This remapping is controlled by the Preset _ColorMap_. For example the preset "blue->brown" allows to remap all the chroma combinations of _blue_ in the color _brown_. It is not expected that this filter can be applied on a full movie, but it could be useful to remap the color on some portion of a movie.
 
-In the post [ColorMapping Guide for vsDeOldify](https://forum.selur.net/thread-3697-post-22507.html) are provided useful tips on how to use both the _Chroma Adjustment_ and _Color Mapping_ features provided by this filter. 
+In the [HAVC User Guide](https://github.com/dan64/vs-deoldify/blob/main/documentation/HAVC%20User%20Guide.pdf)  are provided useful tips on how to use both the _Chroma Adjustment_ and _Color Mapping_ features provided by this filter. 
   
 
 ### Merging the models
@@ -310,7 +310,7 @@ In Hybrid the _Exemplar Models_ have their own panel, as shown in the following 
 For the ColorMNet models there are 2 implementations defined, by the field **Mode**:
 
 - 'remote'  (has not memory frames limitation but it uses a remote process for the inference)
-- 'local' (the inference is performed inside the vapoursynth local thread but has memory limitation)
+- 'local' (the inference is performed inside the Vapoursynth local thread but has memory limitation)
 
 The field **Preset** control the render method and speed, allowed values are:
 
@@ -341,7 +341,7 @@ Unfortunately all the Deep-Exemplar methods have the problem that are unable to 
 - 2 = reference frames are merged with medium weight
 - 3 = reference frames are merged with high weight
 
-When the field **Ref merge** is set to a value greater than 0, the field **SC min freq** is set =1, to allows the merge for every frame (for some example see: [New RC3 release](https://forum.selur.net/thread-3595-post-22894.html#pid22894)).   
+When the field **Ref merge** is set to a value greater than 0, the field **SC min freq** is set =1, to allows the merge for every frame (more details are provided in [HAVC User Guide](https://github.com/dan64/vs-deoldify/blob/main/documentation/HAVC%20User%20Guide.pdf)).   
 
 Finally the flag **Reference frames only** can be used to export the reference frames generated with the method **HAVC** and defined by the parameters  **SC thresh** ,  **SC min freq** fields. 
 
@@ -358,8 +358,8 @@ As stated previously the simplest way to colorize images with the HAVC filter it
 then enable the _Exemplar Models_ check box and set
 - **Method:** HAVC
 - **SC thresh:** 0.10
-- **SC SSIM thresh:** 0.00
-- **SC min freq:** 10 (5 if is used the _local_ mode)  
+- **SC SSIM thresh:** 0.65
+- **SC min freq:** 15 (5 if is used the _local_ mode)  
 - **normalize:** checked
 - **Mode:** remote
 - **Frames:** 0 
@@ -372,15 +372,7 @@ In the following picture are shown the suggested parameters:
 
 ## Conclusions
 
-In Summary **HAVC** is able to provide often a final colorized image that is better than the image obtained from the individual models, and can be considered an improvement respect to the current Models.  It is suggested to use the settings described in the previous section, willing to use a custom configuration, the suggested setup for _video encoding_ is: 
-
-* **D+D**: DeOldify (with model _Video_ & render_factor = 24) + DDColor (with model _Artistic_ and render_factor = 24)
-
-willing to accept a decrease in encoding speed of about 40% it is possible to improve _a little_ the colorization process by using the configuration:
-
-* **DS+DD**: DeOldify (with model _Video_ & render_factor = 30) + DDColor (with model _Artistic_ and render_factor = 30)
-
-It is also suggested to enable the _DDColor Tweaks_  (to apply the dynamic gamma correction) and the post-process filters: _Chroma Smoothing_ and _Chroma Stabilization_. Unfortunately is not possible provide a _one size fits-all solution_ and the filter parameters need to be adjusted depending on the type of video to be colored.  
+In Summary **HAVC** is able to provide often a final colorized image that is better than the image obtained from the individual models, and can be considered an improvement respect to the current Models.  It is suggested to read the [HAVC User Guide](https://github.com/dan64/vs-deoldify/blob/main/documentation/HAVC%20User%20Guide.pdf) which provides useful tips on how to improve the colored movies.   
 
 As a final consideration I would like to point out that the test results showed that the images coloring technology is mature enough to be used concretely both for coloring images and, thanks to **Hybrid**, videos.
 
