@@ -1,10 +1,10 @@
 """
 ------------------------------------------------------------------------------- 
 Author: Dan64
-Date: 2024-02-29
+Date: 2025-01-03
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-12-29
+LastEditTime: 2025-01-03
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -12,6 +12,7 @@ main Vapoursynth wrapper to pytorch-based coloring filter HybridAVC (HAVC).
 The filter includes some portions of code from the following coloring projects:
 DeOldify: https://github.com/jantic/DeOldify
 DDColor: https://github.com/HolyWu/vs-ddcolor
+Colorization: https://github.com/richzhang/colorization
 Deep-Exemplar: https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization
 ColorMNet: https://github.com/yyang181/colormnet
 """
@@ -43,7 +44,7 @@ from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDe
 
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 
-__version__ = "4.5.2"
+__version__ = "4.6.0"
 
 import warnings
 import logging
@@ -717,6 +718,8 @@ def HAVC_ddeoldify(
                                    [0] ddcolor model (default = 1):
                                        0 = ddcolor_modelscope,
                                        1 = ddcolor_artistic
+                                       2 = colorization_siggraph17
+                                       3 = colorization_eccv16
                                    [1] render factor for the model, if=0 will be auto selected
                                        (default = 24), range: [0, 10-64]
                                    [2] saturation parameter to apply to ddcolor color model (default = 1)
@@ -774,7 +777,7 @@ def HAVC_ddeoldify(
     # disable packages warnings
     disable_warnings()
 
-    if (not torch.cuda.is_available() and device_index != 99):
+    if not torch.cuda.is_available() and device_index != 99:
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_ddeoldify: CUDA is not available")
 
     if not isinstance(clip, vs.VideoNode):

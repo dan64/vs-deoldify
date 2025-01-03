@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-10-08
+LastEditTime: 2025-01-03
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -23,12 +23,12 @@ from vsdeoldify.vsslib.vsutils import *
 from vsdeoldify.vsslib.vsfilters import *
 from vsdeoldify.colormnet import vs_colormnet_remote, vs_colormnet_local
 from vsdeoldify.deepex import deepex_colorizer, ModelColorizer
+from vsdeoldify.colorization import ModelColorization
 
 
 def vs_colormnet(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode, image_size: int = -1,
                  enable_resize: bool = False, frame_propagate: bool = True, render_vivid: bool = True,
                  max_memory_frames: int = 0, encode_mode: int = 0, ref_weight: float = 1.0) -> vs.VideoNode:
-
     if encode_mode == 1:
         if max_memory_frames is None or max_memory_frames == 0:
             gpu_mem_free, gpu_mem_total = torch.cuda.mem_get_info()
@@ -52,7 +52,8 @@ def vs_colormnet(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNo
 
 
 def vs_deepex(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode, image_size: list = [432, 768],
-              enable_resize: bool = False, wls_filter_on: bool = True, render_vivid: bool = True, propagate: bool = True,
+              enable_resize: bool = False, wls_filter_on: bool = True, render_vivid: bool = True,
+              propagate: bool = True,
               ref_weight: float = 1.0) -> vs.VideoNode:
     colorizer = deepex_colorizer(image_size=image_size, enable_resize=enable_resize)
 
@@ -111,7 +112,8 @@ def vs_deepex(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode,
                                                              propagate=propagate, weight=ref_weight))
     else:
         clip_colored = clip.std.ModifyFrame(clips=[clip, clip_ref],
-                                            selector=partial(deepex_clip_color, colorizer=colorizer, propagate=propagate,
+                                            selector=partial(deepex_clip_color, colorizer=colorizer,
+                                                             propagate=propagate,
                                                              wls_on=wls_filter_on, render_vivid=render_vivid))
     return clip_colored
 
@@ -178,6 +180,37 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
+wrapper to Colorization. 
+"""
+
+
+def vs_sc_colorization(clip: vs.VideoNode, colorizer_model: str = 'siggraph17',
+                       scenechange: bool = True) -> vs.VideoNode:
+    m_colorizer = ModelColorization(model=colorizer_model, use_gpu=True)
+
+    def colorization(n: int, f: vs.VideoFrame, colorizer: ModelColorization = None,
+                     scflag: bool = True) -> vs.VideoFrame:
+
+        if scflag:
+            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
+            if not is_scenechange:
+                return f.copy()
+
+        np_frame_orig = frame_to_np_array(f)
+
+        np_frame_colored = colorizer.colorize_frame(np_frame_orig)
+
+        return np_array_to_frame(np_frame_colored, f.copy())
+
+    return clip.std.ModifyFrame(clips=[clip], selector=partial(colorization, colorizer=m_colorizer, scflag=scenechange))
+
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
 wrapper to function ddcolor() with tweak pre-process.
 """
 
@@ -226,18 +259,24 @@ def vs_sc_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 1, render_fa
     else:
         clipb = clip
 
-    # adjusting clip's color space to RGBH for vsDDColor
-    if enable_fp16:
-        clipb = vsddcolor.ddcolor(clipb.resize.Bicubic(format=vs.RGBH, range_s="full"), model=model,
-                                  input_size=input_size, scenechange=scenechange, device_index=device_index,
-                                  num_streams=num_streams)
+    if model > 1:
+        if model == 2:
+            clipb_rgb = vs_sc_colorization(clipb, colorizer_model='siggraph17', scenechange=scenechange)
+        else:
+            clipb_rgb = vs_sc_colorization(clipb, colorizer_model='eccv16', scenechange=scenechange)
     else:
-        clipb = vsddcolor.ddcolor(clipb.resize.Bicubic(format=vs.RGBS, range_s="full"), model=model,
-                                  input_size=input_size, scenechange=scenechange, device_index=device_index,
-                                  num_streams=num_streams)
+        # adjusting clip's color space to RGBH for vsDDColor
+        if enable_fp16:
+            clipb = vsddcolor.ddcolor(clipb.resize.Bicubic(format=vs.RGBH, range_s="full"), model=model,
+                                      input_size=input_size, scenechange=scenechange, device_index=device_index,
+                                      num_streams=num_streams)
+        else:
+            clipb = vsddcolor.ddcolor(clipb.resize.Bicubic(format=vs.RGBS, range_s="full"), model=model,
+                                      input_size=input_size, scenechange=scenechange, device_index=device_index,
+                                      num_streams=num_streams)
 
-    # adjusting color space to RGB24 for deoldify
-    clipb_rgb = clipb.resize.Bicubic(format=vs.RGB24, range_s="full")
+        # adjusting color space to RGB24 for deoldify
+        clipb_rgb = clipb.resize.Bicubic(format=vs.RGB24, range_s="full")
 
     if tweaks_enabled and hue_adjust != 'none':
         clipb_rgb = vs_sc_adjust_clip_hue(clipb_rgb, hue_adjust, scenechange=scenechange)
