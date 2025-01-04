@@ -200,16 +200,16 @@ Taking inspiration from the article published on Habr: [Mode on: Comparing the t
 
 The added models are:
 
-**D+D**: DeOldify (with model _Video_ & render_factor = 23) + DDColor (with model _Artistic_ and render_factor = 24)
+**D+D**: DeOldify (with model _Video_ & render_factor = 24) + DDColor (with model _Artistic_ and render_factor = 24)
 ![Hybrid D+D](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_D%2BD.JPG)  
 
-**DD**:  DDColor (with model _Artistic_ and input_size = 384)
+**DD**:  DDColor (with model _Artistic_ and and render_factor = 24 equivalent to input_size = 384)
 ![Hybrid_DD](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_DD.JPG)
 
-**DS**: DeOldify (with model _Stable_ & render_factor = 30)
+**DS**: DeOldify (with model _Stable_ & render_factor =24)
 ![Hybrid D+D](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_DS.JPG)  
 
-**DV**: DeOldify (with model _Video_ & render_factor = 23)
+**DV**: DeOldify (with model _Video_ & render_factor = 24)
 ![Hybrid D+D](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_DV.JPG)  
 
 **T241**:  ColTran + TensorFlow 2.4.1 model as shown in [Habr](https://habr.com/en/companies/ruvds/articles/568426/)
@@ -358,7 +358,7 @@ As stated previously the simplest way to colorize images with the HAVC filter it
 then enable the _Exemplar Models_ check box and set
 - **Method:** HAVC
 - **SC thresh:** 0.10
-- **SC SSIM thresh:** 0.65
+- **SC SSIM thresh:** 0.0
 - **SC min freq:** 15 (5 if is used the _local_ mode)  
 - **normalize:** checked
 - **Mode:** remote
