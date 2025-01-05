@@ -79,8 +79,8 @@ def vs_deepex(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode,
         # this should stabilize further the colors generated with HAVC.
         if not is_scenechange:
             img_color_m = image_weighted_merge(img_color, img_ref, weight)
-        else:
-            img_color_m = img_color
+        else:  # the frame obtained from a reference should be already good is merged with low weight
+            img_color_m = image_weighted_merge(img_color, img_ref, 0.20)
 
         return image_to_frame(img_color_m, f[0].copy())
 
@@ -243,7 +243,7 @@ def vs_sc_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 1, render_fa
     gamma_luma_min = tweaks[5]
     gamma_alpha = tweaks[6]
     gamma_min = tweaks[7]
-    if (len(tweaks) > 8):
+    if len(tweaks) > 8:
         hue_adjust = tweaks[8].lower()
     else:
         hue_adjust = 'none'

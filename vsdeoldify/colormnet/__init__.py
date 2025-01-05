@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-09-14
 version:
 LastEditors: Dan64
-LastEditTime: 2024-10-08
+LastEditTime: 2025-01-05
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
@@ -84,8 +84,8 @@ def _colormnet_async(colorizer: ColorMNetRender, clip: vs.VideoNode, clip_ref: v
         # this should stabilize further the colors generated with HAVC.
         if not is_scenechange:
             img_color_m = image_weighted_merge(img_color, img_ref, weight)
-        else:
-            img_color_m = img_color
+        else:   # the frame obtained from a reference should be already good is merged with low weight
+            img_color_m = image_weighted_merge(img_color, img_ref, 0.20)
 
         return img_to_frm(img_color_m, f[0].copy())
 
@@ -166,8 +166,8 @@ def _colormnet_client(colorizer: ColorMNetClient, clip: vs.VideoNode, clip_ref: 
         # this should stabilize further the colors generated with HAVC.
         if not is_scenechange:
             img_color_m = image_weighted_merge(img_color, img_ref, weight)
-        else:
-            img_color_m = img_color
+        else:   # the frame obtained from a reference should be already good is merged with low weight
+            img_color_m = image_weighted_merge(img_color, img_ref, 0.20)
 
         return img_to_frm(img_color_m, f[0].copy())
 

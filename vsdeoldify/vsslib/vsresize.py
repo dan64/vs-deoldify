@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-05-15
 version:
 LastEditors: Dan64
-LastEditTime: 2024-10-17
+LastEditTime: 2025-01-05
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
@@ -16,7 +16,6 @@ import math
 import numpy as np
 import cv2
 from PIL import Image
-
 
 """
 ------------------------------------------------------------------------------- 
@@ -74,13 +73,15 @@ class SmartResizeColorizer:
             clip = clip.std.Crop(left=0, right=0, top=self.pad_height, bottom=self.pad_height)
         return clip
 
-
     def clip_chroma_resize(self, clip_highres: vs.VideoNode, clip_lowres: vs.VideoNode) -> vs.VideoNode:
         clip_resized = self.restore_clip_size(clip_lowres)
         clip_bw = clip_highres.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
         clip_color = clip_resized.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
-        clip_yuv = vs.core.std.ShufflePlanes(clips=[clip_bw, clip_color, clip_color], planes=[0, 1, 2], colorfamily=vs.YUV)
-        return clip_yuv.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion")
+        clip_yuv = vs.core.std.ShufflePlanes(clips=[clip_bw, clip_color, clip_color], planes=[0, 1, 2],
+                                             colorfamily=vs.YUV)
+        return clip_yuv.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
+                                       dither_type="error_diffusion")
+
 
 class SmartResizeReference:
     _instance = None
@@ -132,10 +133,11 @@ class SmartResizeReference:
             clip = clip.std.Crop(left=0, right=0, top=self.pad_height, bottom=self.pad_height)
         return clip
 
-
     def clip_chroma_resize(self, clip_highres: vs.VideoNode, clip_lowres: vs.VideoNode) -> vs.VideoNode:
         clip_resized = self.restore_clip_size(clip_lowres)
         clip_bw = clip_highres.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
         clip_color = clip_resized.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
-        clip_yuv = vs.core.std.ShufflePlanes(clips=[clip_bw, clip_color, clip_color], planes=[0, 1, 2], colorfamily=vs.YUV)
-        return clip_yuv.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion")
+        clip_yuv = vs.core.std.ShufflePlanes(clips=[clip_bw, clip_color, clip_color], planes=[0, 1, 2],
+                                             colorfamily=vs.YUV)
+        return clip_yuv.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
+                                       dither_type="error_diffusion")

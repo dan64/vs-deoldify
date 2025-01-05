@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2025-01-03
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-03
+LastEditTime: 2025-01-05
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -44,7 +44,7 @@ from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDe
 
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 
-__version__ = "4.6.0"
+__version__ = "4.6.1"
 
 import warnings
 import logging
@@ -225,7 +225,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     preset0_rf = [34, 32, 30, 28, 26, 24, 20, 16]
     preset1_rf = [48, 44, 36, 32, 28, 24, 20, 16]
 
-    pr_id = 5
+    pr_id = 5   # default 'fast'
     try:
         pr_id = presets.index(Preset)
     except ValueError:
@@ -316,7 +316,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
             if ScThreshold is not None and 0 < ScThreshold < 1:
                 ref_tresh = ScThreshold
             else:
-                ref_tresh = 0.03
+                ref_tresh = 0.10
 
         clip_ref = HAVC_ddeoldify(clip, method=2, mweight=ddcolor_weight[w_id],
                                   deoldify_p=[0, deoldify_rf, 1.0, 0.0],
@@ -347,19 +347,19 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                                    ex_model=DeepExModel, encode_mode=DeepExEncMode,
                                    max_memory_frames=DeepExMaxMemFrames, colormap=chroma_adjust)
 
-    else:
+    else:  # No DeepEx -> HAVC classic
         clip_colored = HAVC_ddeoldify(clip, method=2, mweight=ddcolor_weight[w_id],
                                       deoldify_p=[0, deoldify_rf, 1.0, 0.0],
                                       ddcolor_p=[1, ddcolor_rf, 1.0, 0.0, enable_fp16],
                                       ddtweak=True, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range])
 
-        if pr_id > 5 and cl_id > 0:
+        if pr_id > 5:    # 'faster', 'veryfast'
             clip_colored = HAVC_stabilizer(clip_colored, colormap=chroma_adjust)
-        elif pr_id > 3:
+        elif pr_id > 3:  # 'medium', 'fast' + 'faster', 'veryfast'
             clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8],
                                            smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, chroma_adjust],
                                            stab=True, stab_p=[5, 'A', 1, 15, 0.2, 0.15])
-        else:
+        else:   # 'placebo', 'veryslow', 'slower', 'slow'
             clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8],
                                            smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, chroma_adjust],
                                            stab=True, stab_p=[5, 'A', 1, 15, 0.2, 0.15, hue_range2])
@@ -414,7 +414,7 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
     :param ref_weight:          If (ref_merge > 0), represent the weight used to merge the reference frames.
                                 If is not set, is assigned automatically a value depending on ref_merge value.
     :param ref_thresh:          If (ref_merge > 0), represent the threshold used to create the reference frames.
-                                If is not set, is assigned automatically a value of 0.03
+                                If is not set, is assigned automatically a value of 0.10
     :param sc_framedir:         If set, define the directory where are stored the reference frames. If only_ref_frames=True,
                                 and method=0 this directory will be written with the reference frames used by the filter.
                                 if method!=0 the directory will be read to create the reference frames that will be used
@@ -563,13 +563,13 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
     colormap = colormap.lower()
     colormap_enabled = (colormap != "none" and colormap != "")
 
-    enable_refmerge = (ref_merge > 0 and sc_frequency == 1)
-    refmerge_weight = [0.0, 0.4, 0.5, 0.6]
+    enable_refmerge: bool = (ref_merge > 0 and sc_frequency == 1)
+    refmerge_weight: list[float] = [0.0, 0.4, 0.5, 0.6]
     if enable_refmerge:
         if ref_weight is None:
             ref_weight = refmerge_weight[ref_merge]
         if ref_thresh is None:
-            ref_thresh = 0.03
+            ref_thresh = 0.10
         clip_sc = SceneDetect(clip, threshold=ref_thresh)
         if method in (1, 2):
             clip_sc = SceneDetectFromDir(clip_sc, sc_framedir=sc_framedir, merge_ref_frame=True,
@@ -593,7 +593,7 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
 
     clip_orig = clip
 
-    #if ex_model == 0 and render_speed.lower() == 'fast':
+    # if ex_model == 0 and render_speed.lower() == 'fast':
     #    render_speed = 'medium'
 
     d_size = get_deepex_size(render_speed=render_speed.lower(), enable_resize=enable_resize)
@@ -908,7 +908,7 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
                                       [4] : weight, weight to blend the restored imaage (default=0.2), range [0-1], if=0 is not applied the blending
                                       [5] : tht_scen, threshold for scene change detection (default = 0.15), if=0 is not activated, range [0.01-0.50]
                                       [6] : "chroma adjustment" parameter (optional), if="none" is disabled (see the README)
-        :param colormap:             direct hue/color mapping, without luma filtering, using the "chroma adjustment" parameter, if="none" is disabled
+        :param colormap:            direct hue/color mapping, without luma filtering, using the "chroma adjustment" parameter, if="none" is disabled
         :param render_factor:       render_factor to apply to the filters, the frame size will be reduced to speed-up the filters,
                                     but the final resolution will be the one of the original clip. If = 0 will be auto selected.
                                     This approach takes advantage of the fact that human eyes are much less sensitive to
@@ -921,7 +921,7 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
 
     if clip.format.id != vs.RGB24:
         # clip not in RGB24 format, it will be converted
-        if (clip.format.color_family == "YUV"):
+        if clip.format.color_family == "YUV":
             clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
                                        dither_type="error_diffusion")
         else:
@@ -956,7 +956,7 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
     white_threshold = smooth_p[1]
     dark_sat = smooth_p[2]
     dark_bright = -smooth_p[3]  # change the sign to reduce the bright
-    if (len(smooth_p) > 4):
+    if len(smooth_p) > 4:
         chroma_adjust = smooth_p[4]
     else:
         chroma_adjust = 'none'

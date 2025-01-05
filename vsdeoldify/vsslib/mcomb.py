@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-10-03
+LastEditTime: 2025-01-05
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -90,7 +90,7 @@ main function used to combine the colored images with deoldify() and ddcolor()
 def vs_sc_combine_models(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, method: int = 0, sat: list = [1, 1],
                          hue: list = [0, 0],
                          clipb_weight: float = 0.6, scenechange: bool = True) -> vs.VideoNode:
-    #vs.core.log_message(2, "combine_models: method=" + str(method) + ", clipa = " + str(clipa) + ", clipb = " + str(clipb))
+    # vs.core.log_message(2, "combine_models: method=" + str(method) + ", clipa = " + str(clipa) + ", clipb = " + str(clipb))
 
     if clipa is not None:
         clipa = vs_sc_tweak(clipa, hue=hue[0], sat=sat[0], scenechange=scenechange)
