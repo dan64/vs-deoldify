@@ -27,3 +27,4 @@ DEF_HIST_SCORE_HIGH: float = 0.90
 DEF_JPG_QUALITY: int = 95
 DEF_THRESHOLD: float = 0.05
 DEF_THRESHOLD_MIN: float = 0.033
+DEF_MAX_MEMORY_FRAMES: int = 15000   # theoretically MAX_MEMORY must be < 95000

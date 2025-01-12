@@ -1,10 +1,10 @@
 """
 ------------------------------------------------------------------------------- 
 Author: Dan64
-Date: 2025-01-03
+Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-05
+LastEditTime: 2025-01-10
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -44,7 +44,7 @@ from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDe
 
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 
-__version__ = "4.6.1"
+__version__ = "4.6.5"
 
 import warnings
 import logging
@@ -82,9 +82,11 @@ wrapper to HAVC filter with "presets" management
 """
 
 
-def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable', ColorFix: str = 'Violet/Red',
-              ColorTune: str = 'Light', ColorMap: str = 'None', EnableDeepEx: bool = False, DeepExMethod: int = 0,
-              DeepExPreset: str = 'Medium', DeepExRefMerge: int = 0, DeepExOnlyRefFrames: bool = False,
+def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video+Artistic', VideoTune: str = 'Stable',
+              ColorFix: str = 'Violet/Red', ColorTune: str = 'Light', ColorMap: str = 'None',
+              EnableDeepEx: bool = False,
+              DeepExMethod: int = 0, DeepExPreset: str = 'Medium', DeepExRefMerge: int = 0,
+              DeepExOnlyRefFrames: bool = False,
               ScFrameDir: str = None, ScThreshold: float = DEF_THRESHOLD, ScThtOffset: int = 1, ScMinFreq: int = 0,
               ScMinInt: int = 1, ScThtSSIM: float = 0.0, ScNormalize: bool = True, DeepExModel: int = 0,
               DeepExVivid: bool = True, DeepExEncMode: int = 0, DeepExMaxMemFrames=0,
@@ -102,9 +104,19 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                                     'Fast',  (default)
                                     'Faster',
                                     'VeryFast'
+    :param ColorModel:          Preset to control the Color Models to be used for the color inference
+                                Allowed values are:
+                                    'Video+Artistic'  (default)
+                                    'Video+ModelScope'
+                                    'Video+Siggraph17'
+                                    'Video+ECCV16'
+                                    'DeOldify(Video)'
+                                    'DDColor(Artistic)'
+                                    'DDColor(ModelScope)'
+                                    'Zhang(Siggraph17)'
+                                    'Zhang(ECCV16)'
     :param VideoTune:           Preset to control the output video color stability
                                 Allowed values are:
-                                    'DeOldify'
                                     'VeryStable',
                                     'MoreStable'
                                     'Stable',
@@ -112,7 +124,6 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                                     'Vivid',
                                     ,MoreVivid'
                                     'VeryVivid',
-                                    'DDColor'
     :param ColorFix:            This parameter allows to reduce color noise on specific chroma ranges.
                                 Allowed values are:
                                     'None',
@@ -187,8 +198,8 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                                 Its value depend on encode mode and must be defined manually following the suggested values.
                                 DeepExEncMode=0: there is no memory limit (it could be all the frames in the clip).
                                 Suggested values are:
-                                    min=150, max=10000
-                                If = 0 will be filled with the value of 10000 or the clip length if higher.
+                                    min=150, max=15000
+                                If = 0 will be filled with the value of 15000 or the clip length if lower.
                                 DeepExEncMode=1: the max memory frames is limited by available GPU memory.
                                 Suggested values are:
                                     min=1, max=4      : for 8GB GPU
@@ -225,7 +236,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     preset0_rf = [34, 32, 30, 28, 26, 24, 20, 16]
     preset1_rf = [48, 44, 36, 32, 28, 24, 20, 16]
 
-    pr_id = 5   # default 'fast'
+    pr_id = 5  # default 'fast'
     try:
         pr_id = presets.index(Preset)
     except ValueError:
@@ -238,9 +249,8 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
 
     # Select VideoTune
     VideoTune = VideoTune.lower()
-    video_tune = ['deoldify', 'verystable', 'morestable', 'stable', 'balanced', 'vivid', 'morevivid', 'veryvivid',
-                  'ddcolor']
-    ddcolor_weight = [0.0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0]
+    video_tune = ['verystable', 'morestable', 'stable', 'balanced', 'vivid', 'morevivid', 'veryvivid']
+    ddcolor_weight = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
 
     w_id = 3
     try:
@@ -248,10 +258,36 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     except ValueError:
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: VideoTune choice is invalid for '" + VideoTune + "'")
 
-        # Select ColorTune for ColorFix
+    ColorModel = ColorModel.lower()
+    if 'siggraph17' in ColorModel:
+        dd_model = 2
+    elif 'eccv16' in ColorModel:
+        dd_model = 3
+    elif 'modelscope' in ColorModel:
+        dd_model = 0
+    else:
+        dd_model = 1
+
+    if 'deoldify' in ColorModel:
+        dd_method = 0
+    elif 'ddcolor' in ColorModel:
+        dd_method = 1
+    elif 'zhang' in ColorModel:
+        dd_method = 1
+    else:
+        dd_method = 2
+
+    # Select ColorTune for ColorFix
     ColorTune = ColorTune.lower()
     color_tune = ['light', 'medium', 'strong']
-    hue_tune = ["0.8,0.1", "0.5,0.1", "0.2,0.1"]
+    if dd_model == 0:
+        hue_tune = ["0.7,0.2", "0.5,0.2", "0.2,0.2"]
+    elif dd_model == 2:
+        hue_tune = ["0.6,0.2", "0.4,0.2", "0.2,0.2"]
+    elif dd_model == 3:
+        hue_tune = ["0.7,0.1", "0.6,0.1", "0.3,0.2"]
+    else:
+        hue_tune = ["0.8,0.1", "0.5,0.2", "0.2,0.2"]
     hue_tune2 = ["0.9,0", "0.7,0", "0.5,0"]
 
     tn_id = 0
@@ -266,7 +302,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                  'yellow/green']
     hue_fix = ["none", "270:300", "270:330", "300:330", "300:360", "220:280", "60:90", "30:90", "60:120"]
 
-    co_id = 4
+    co_id = 5
     try:
         co_id = color_fix.index(ColorFix)
     except ValueError:
@@ -275,9 +311,11 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
     if co_id == 0:
         hue_range = "none"
         hue_range2 = "none"
+        dd_tweak = False  # in this case the Tweaks for DDcolor are disabled
     else:
         hue_range = hue_fix[co_id] + "|" + hue_tune[tn_id]
         hue_range2 = hue_fix[co_id] + "|" + hue_tune2[tn_id]
+        dd_tweak = True  # in this case the Tweaks for DDcolor are enabled
 
     # Select Color Mapping
     ColorMap = ColorMap.lower()
@@ -318,10 +356,10 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
             else:
                 ref_tresh = 0.10
 
-        clip_ref = HAVC_ddeoldify(clip, method=2, mweight=ddcolor_weight[w_id],
+        clip_ref = HAVC_ddeoldify(clip, method=dd_method, mweight=ddcolor_weight[w_id],
                                   deoldify_p=[0, deoldify_rf, 1.0, 0.0],
-                                  ddcolor_p=[1, ddcolor_rf, 1.0, 0.0, enable_fp16],
-                                  ddtweak=True, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range],
+                                  ddcolor_p=[dd_model, ddcolor_rf, 1.0, 0.0, enable_fp16],
+                                  ddtweak=dd_tweak, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range],
                                   sc_threshold=ScThreshold, sc_tht_offset=ScThtOffset, sc_min_freq=ScMinFreq,
                                   sc_min_int=ScMinInt, sc_tht_ssim=ScThtSSIM, sc_normalize=ScNormalize,
                                   sc_debug=sc_debug)
@@ -348,18 +386,18 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable
                                    max_memory_frames=DeepExMaxMemFrames, colormap=chroma_adjust)
 
     else:  # No DeepEx -> HAVC classic
-        clip_colored = HAVC_ddeoldify(clip, method=2, mweight=ddcolor_weight[w_id],
+        clip_colored = HAVC_ddeoldify(clip, method=dd_method, mweight=ddcolor_weight[w_id],
                                       deoldify_p=[0, deoldify_rf, 1.0, 0.0],
-                                      ddcolor_p=[1, ddcolor_rf, 1.0, 0.0, enable_fp16],
-                                      ddtweak=True, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range])
+                                      ddcolor_p=[dd_model, ddcolor_rf, 1.0, 0.0, enable_fp16],
+                                      ddtweak=dd_tweak, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range])
 
-        if pr_id > 5:    # 'faster', 'veryfast'
+        if pr_id > 5:  # 'faster', 'veryfast'
             clip_colored = HAVC_stabilizer(clip_colored, colormap=chroma_adjust)
         elif pr_id > 3:  # 'medium', 'fast' + 'faster', 'veryfast'
             clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8],
                                            smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, chroma_adjust],
                                            stab=True, stab_p=[5, 'A', 1, 15, 0.2, 0.15])
-        else:   # 'placebo', 'veryslow', 'slower', 'slow'
+        else:  # 'placebo', 'veryslow', 'slower', 'slow'
             clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8],
                                            smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, chroma_adjust],
                                            stab=True, stab_p=[5, 'A', 1, 15, 0.2, 0.15, hue_range2])
@@ -456,8 +494,8 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
                                 Its value depend on encode mode and must be defined manually following the suggested values.
                                 encode_mode=0: there is no memory limit (it could be all the frames in the clip).
                                 Suggested values are:
-                                    min=150, max=10000
-                                If = 0 will be filled with the value of 10000 or the clip length if higher.
+                                    min=150, max=15000
+                                If = 0 will be filled with the value of 15000 or the clip length if lower.
                                 encode_mode=1: the max memory frames is limited by available GPU memory.
                                 Suggested values are:
                                     min=1, max=4    : for 8GB GPU
@@ -578,10 +616,10 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
         ref_weight = 1.0
         clip_sc = None
 
-    if method not in (0, 5):
-        ref_frame_ext = method in (2, 4)
-        merge_ref_frame = method in (1, 2)
-        if method in (1, 2):
+    if method != 0 and not (sc_framedir is None):
+        ref_frame_ext = method in (2, 4, 5)
+        merge_ref_frame = method in (1, 2, 5)
+        if method in (1, 2, 5):
             clip = SceneDetectFromDir(clip_ref, sc_framedir=sc_framedir, merge_ref_frame=merge_ref_frame,
                                       ref_frame_ext=ref_frame_ext)
             clip_ref = CopySCDetect(clip_ref, clip)
@@ -600,8 +638,8 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
     smc = SmartResizeColorizer(d_size)
     smr = SmartResizeReference(d_size)
 
-    if method not in (0, 5):
-        if method in (1, 2):
+    if method != 0 and not (sc_framedir is None):
+        if method in (1, 2, 5):
             clip_ref = vs_ext_reference_clip(clip_ref, sc_framedir=sc_framedir)
         else:
             clip_ref = vs_ext_reference_clip(clip, sc_framedir=sc_framedir)
@@ -789,11 +827,16 @@ def HAVC_ddeoldify(
     if sc_min_freq < 0:
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_ddeoldify: sc_min_freq must be >= 0")
 
-    merge_weight = mweight
+    if method == 0:
+        merge_weight = 0.0
+    elif method == 1:
+        merge_weight = 1.0
+    else:
+        merge_weight = mweight
 
-    if mweight == 0.0:
+    if merge_weight == 0.0:
         method = 0  # deoldify only
-    elif mweight == 1.0:
+    elif merge_weight == 1.0:
         method = 1  # ddcolor only
 
     # unpack deoldify_params
@@ -945,7 +988,7 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
     dark_enabled = dark
     dark_threshold = dark_p[0]
     dark_amount = dark_p[1]
-    if (len(dark_p) > 2):
+    if len(dark_p) > 2:
         dark_hue_adjust = dark_p[2]
     else:
         dark_hue_adjust = 'none'

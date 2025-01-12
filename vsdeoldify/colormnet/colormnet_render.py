@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-09-14
 version:
 LastEditors: Dan64
-LastEditTime: 2024-11-18
+LastEditTime: 2025-01-10
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
@@ -29,6 +29,7 @@ from vsdeoldify.colormnet.dataset.range_transform import im_normalization, im_rg
 
 from vsdeoldify.colormnet.model.network import ColorMNet
 from vsdeoldify.colormnet.inference.inference_core import InferenceCore
+from vsdeoldify.vsslib.constants import *
 
 import warnings
 
@@ -81,9 +82,9 @@ class ColorMNetRender:
             else:
                 self.encode_mode = encode_mode
             if max_memory_frames is None or max_memory_frames == 0:
-                self.max_memory_frames = max(10000, vid_length)
+                self.max_memory_frames = min(DEF_MAX_MEMORY_FRAMES, vid_length)
             else:
-                self.max_memory_frames = max_memory_frames
+                self.max_memory_frames = min(DEF_MAX_MEMORY_FRAMES, max_memory_frames)
             self.total_colored_frames = 0
             self._colorize_init(image_size, vid_length, propagate)
             self._initialized = True

@@ -349,11 +349,11 @@ Finally the flag **Reference frames only** can be used to export the reference f
 
 As stated previously the simplest way to colorize images with the HAVC filter it to use [Hybrid](https://www.selur.de/downloads). To simplify the usage has been introduced standard Presets that automatically apply all the filter's settings. A set of parameters that are able to provide a satisfactory colorization are the following:
 
-- **Preset:** medium (_fast_ will increase the speed with a little decrease in color accuracy)
+- **Speed:** medium or fast (_fast_ will increase the speed with a little decrease in color accuracy)
 - **Color map:** none
-- **ColorFix:**  violet/red
+- **Color tweaks:**  violet/red
 - **Denoise:** light
-- **Stabilize:** stable (or morestable)
+- **Stabilize:** stable or morestable
 
 then enable the _Exemplar Models_ check box and set
 - **Method:** HAVC
