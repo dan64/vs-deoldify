@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-05
+LastEditTime: 2025-01-14
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -114,9 +114,11 @@ def image_weighted_merge(img1: Image, img2: Image, weight: float = 0.5) -> Image
 
     img_new = np.copy(img1_np)
 
-    img_m = np.multiply(img1_np, 1 - weight).clip(0, 255).astype(int) + np.multiply(img2_np, weight).clip(0,
-                                                                                                          255).astype(
-        int)
+    img_m = np.multiply(img1_np, 1 - weight) + np.multiply(img2_np, weight)
+
+    img_m = np.uint8(np.clip(img_m, 0, 255))
+    # img_m = img_m.clip(0, 255).astype(int)
+
     img_new[:, :, 0] = img_m[:, :, 0]
     img_new[:, :, 1] = img_m[:, :, 1]
     img_new[:, :, 2] = img_m[:, :, 2]
