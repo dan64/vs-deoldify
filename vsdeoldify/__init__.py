@@ -572,8 +572,8 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
     if method not in range(6):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: method must be in range [0-5]")
 
-    if ref_merge not in range(4):
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: method must be in range [0-3]")
+    if ref_merge not in range(6):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: ref_merge must be in range [0-5]")
 
     if ref_merge > 0 and method not in (0, 1):
         HAVC_LogMessage(MessageType.EXCEPTION,
