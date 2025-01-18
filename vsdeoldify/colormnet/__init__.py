@@ -31,7 +31,8 @@ from vsdeoldify.colormnet.colormnet_utils import *
 from vsdeoldify.colormnet.colormnet_server import ColorMNetServer
 from vsdeoldify.colormnet.colormnet_client import ColorMNetClient
 from vsdeoldify.vsslib.imfilters import image_weighted_merge
-from vsdeoldify.vsslib.vsutils import MessageType, HAVC_LogMessage
+from vsdeoldify.vsslib.constants import *
+from vsdeoldify.vsslib.vsutils import MessageType, HAVC_LogMessage, debug_ModifyFrame
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -66,7 +67,7 @@ def _colormnet_async(colorizer: ColorMNetRender, clip: vs.VideoNode, clip_ref: v
         is_scenechange = f[2].props['_SceneChangePrev'] == 1
         is_scenechange_ext = is_scenechange and f[2].props['_SceneChangeNext'] == 1
         img_orig = frm_to_img(f[0])
-        img_ref = frm_to_img(f[1])
+        img_ref = frm_to_img(f[1])  # must always be same as video to be merged, even if frame_as_video = False
 
         if n == 0:
             # vs.core.log_message(2, "Reference Frame: " + str(n))
@@ -85,7 +86,7 @@ def _colormnet_async(colorizer: ColorMNetRender, clip: vs.VideoNode, clip_ref: v
         if not is_scenechange:
             img_color_m = image_weighted_merge(img_color, img_ref, weight)
         else:   # the frame obtained from a reference should be already good is merged with low weight
-            img_color_m = image_weighted_merge(img_color, img_ref, 0.20)
+            img_color_m = image_weighted_merge(img_color, img_ref, DEF_MERGE_LOW_WEIGHT)
 
         return img_to_frm(img_color_m, f[0].copy())
 
@@ -115,6 +116,10 @@ def _colormnet_async(colorizer: ColorMNetRender, clip: vs.VideoNode, clip_ref: v
         clip_colored = clip.std.ModifyFrame(clips=[clip, clip_ref, clip_sc],
                                             selector=partial(colormnet_clip_color_merge, colorizer=colorizer,
                                                              propagate=frame_propagate, weight=ref_weight))
+
+        # clip_colored = debug_ModifyFrame(80, 140, clip, clips=[clip, clip_ref, clip_sc],
+        #                                selector=partial(colormnet_clip_color_merge, colorizer=colorizer,
+        #                                                 propagate=frame_propagate, weight=ref_weight))
     else:
         clip_colored = clip.std.ModifyFrame(clips=[clip, clip_ref],
                                         selector=partial(colormnet_clip_color, colorizer=colorizer,
@@ -148,7 +153,7 @@ def _colormnet_client(colorizer: ColorMNetClient, clip: vs.VideoNode, clip_ref: 
         is_scenechange = f[2].props['_SceneChangePrev'] == 1
         is_scenechange_ext = is_scenechange and f[2].props['_SceneChangeNext'] == 1
         img_orig = frm_to_img(f[0])
-        img_ref = frm_to_img(f[1])
+        img_ref = frm_to_img(f[1])  # must always be same as video to be merged, even if frame_as_video = False
 
         if n == 0:
             # vs.core.log_message(2, "Reference Frame: " + str(n))
@@ -167,7 +172,7 @@ def _colormnet_client(colorizer: ColorMNetClient, clip: vs.VideoNode, clip_ref: 
         if not is_scenechange:
             img_color_m = image_weighted_merge(img_color, img_ref, weight)
         else:   # the frame obtained from a reference should be already good is merged with low weight
-            img_color_m = image_weighted_merge(img_color, img_ref, 0.20)
+            img_color_m = image_weighted_merge(img_color, img_ref, DEF_MERGE_LOW_WEIGHT)
 
         return img_to_frm(img_color_m, f[0].copy())
 

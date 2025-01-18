@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-10
+LastEditTime: 2025-01-17
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -44,7 +44,7 @@ from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDe
 
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 
-__version__ = "4.6.5"
+__version__ = "4.6.7"
 
 import warnings
 import logging
@@ -169,9 +169,11 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
                                 It is applicable only with DeepEx method: 0, 1, 2.
                                 Allowed values are:
                                         0 = No RF merge (reference frames can be produced with any frequency)
-                                        1 = RF-Merge Low (reference frames are merged with low weight)
-                                        2 = RF-Merge Med. (reference frames are merged with medium weight)
-                                        3 = RF-Merge High (reference frames are merged with high weight)
+                                        1 = RF-Merge VeryLow (reference frames are merged with weight=0.3)
+                                        2 = RF-Merge Low (reference frames are merged with weight=0.4)
+                                        3 = RF-Merge Med (reference frames are merged with weight=0.5)
+                                        4 = RF-Merge High (reference frames are merged with weight=0.6)
+                                        5 = RF-Merge VeryHigh (reference frames are merged with weight=0.7)
     :param DeepExOnlyRefFrames: If enabled the filter will output in "ScFrameDir" the reference frames. Useful to check
                                 and eventually correct the frames with wrong colors
                                 (can be used only if DeepExMethod in [0,5])
@@ -233,8 +235,8 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
     # Select presets / tuning
     Preset = Preset.lower()
     presets = ['placebo', 'veryslow', 'slower', 'slow', 'medium', 'fast', 'faster', 'veryfast']
-    preset0_rf = [34, 32, 30, 28, 26, 24, 20, 16]
-    preset1_rf = [48, 44, 36, 32, 28, 24, 20, 16]
+    preset0_rf = [32, 30, 28, 26, 24, 22, 20, 16]
+    preset1_rf = [44, 36, 32, 28, 24, 22, 20, 16]
 
     pr_id = 5  # default 'fast'
     try:
@@ -281,13 +283,13 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
     ColorTune = ColorTune.lower()
     color_tune = ['light', 'medium', 'strong']
     if dd_model == 0:
-        hue_tune = ["0.7,0.2", "0.5,0.2", "0.2,0.2"]
+        hue_tune = ["0.7,0.1", "0.5,0.1", "0.2,0.1"]
     elif dd_model == 2:
-        hue_tune = ["0.6,0.2", "0.4,0.2", "0.2,0.2"]
+        hue_tune = ["0.6,0.1", "0.4,0.2", "0.2,0.1"]
     elif dd_model == 3:
-        hue_tune = ["0.7,0.1", "0.6,0.1", "0.3,0.2"]
+        hue_tune = ["0.7,0.1", "0.6,0.1", "0.3,0.1"]
     else:
-        hue_tune = ["0.8,0.1", "0.5,0.2", "0.2,0.2"]
+        hue_tune = ["0.8,0.1", "0.5,0.1", "0.2,0.1"]
     hue_tune2 = ["0.9,0", "0.7,0", "0.5,0"]
 
     tn_id = 0
@@ -319,10 +321,11 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
 
     # Select Color Mapping
     ColorMap = ColorMap.lower()
+    hue_w = ["0.90", "0.85", "0.80"]
     colormap = ['none', 'blue->brown', 'blue->red', 'blue->green', 'green->brown', 'green->red', 'green->blue',
-                'red->brown', 'red->blue', 'yellow->rose']
-    hue_map = ["none", "180:280|+140,0.4", "180:280|+100,0.4", "180:280|+220,0.4", "80:180|+260,0.4", "80:180|+220,0.4",
-               "80:180|+140,0.4", "300:360,0:20|+40,0.6", "300:360,0:20|+260,0.6", "30:90|+300,0.8"]
+                'redrose->brown', 'redrose->blue', "red->brown", 'yellow->rose']
+    hue_map = ["none", "180:280|+140", "180:280|+100", "180:280|+220", "80:180|+260", "80:180|+220",
+               "80:180|+140", "300:360,0:20|+40", "300:360,0:20|+260", "320:360,0:15|+50", "30:90|+300"]
 
     cl_id = 0
     try:
@@ -330,7 +333,15 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
     except ValueError:
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: ColorMap choice is invalid for '" + ColorMap + "'")
 
-    chroma_adjust = hue_map[cl_id]
+    if cl_id == 0:
+        chroma_adjust = "none"
+        chroma_adjust2 = "none"
+    else:
+        chroma_adjust = hue_map[cl_id] + "," + hue_w[tn_id]
+        if tn_id == 0:
+            chroma_adjust2 = "none"
+        else:
+            chroma_adjust2 = chroma_adjust
 
     if EnableDeepEx and DeepExMethod in (0, 1, 2, 5):
 
@@ -347,6 +358,10 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
         if DeepExMethod in (0, 1, 2, 5) and ScThreshold == 0 and ScMinFreq == 0:
             HAVC_LogMessage(MessageType.EXCEPTION,
                             "HAVC_main: DeepExMethod in (0, 1, 2, 5) but ScThreshold and ScMinFreq are not set")
+
+        if DeepExMethod in (2, 5) and DeepExRefMerge > 0:
+            HAVC_LogMessage(MessageType.EXCEPTION,
+                            "HAVC_main: RefMerge cannot be used with DeepExMethod in (2, 5)")
 
         ref_tresh = None
         if DeepExRefMerge > 0:
@@ -372,9 +387,9 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
                                    smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"], colormap=chroma_adjust)
 
         if ScMinFreq in range(1, 20):
-            clip_colored = HAVC_stabilizer(clip_colored, stab_p=[5, 'A', 1, 15, 0.2, 0.15])
+            clip_colored = HAVC_stabilizer(clip_colored, stab_p=[5, 'A', 1, 15, 0.2, 0.15], colormap=chroma_adjust2)
         else:
-            clip_colored = HAVC_stabilizer(clip_colored, stab_p=[3, 'A', 1, 0, 0, 0])
+            clip_colored = HAVC_stabilizer(clip_colored, stab_p=[3, 'A', 1, 0, 0, 0], colormap=chroma_adjust2)
 
     elif EnableDeepEx and DeepExMethod in (3, 4):
 
@@ -394,12 +409,12 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
         if pr_id > 5:  # 'faster', 'veryfast'
             clip_colored = HAVC_stabilizer(clip_colored, colormap=chroma_adjust)
         elif pr_id > 3:  # 'medium', 'fast' + 'faster', 'veryfast'
-            clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8],
-                                           smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, chroma_adjust],
+            clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8], colormap=chroma_adjust,
+                                           smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
                                            stab=True, stab_p=[5, 'A', 1, 15, 0.2, 0.15])
         else:  # 'placebo', 'veryslow', 'slower', 'slow'
-            clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8],
-                                           smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, chroma_adjust],
+            clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8], colormap=chroma_adjust,
+                                           smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
                                            stab=True, stab_p=[5, 'A', 1, 15, 0.2, 0.15, hue_range2])
 
     return clip_colored
@@ -446,9 +461,11 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
                                 The HAVC reference frames must be produced with frequency = 1.
                                 Allowed values are:
                                         0 = No RF merge (reference frames can be produced with any frequency)
-                                        1 = RF-Merge Low (reference frames are merged with low weight)
-                                        2 = RF-Merge Med. (reference frames are merged with medium weight)
-                                        3 = RF-Merge High (reference frames are merged with high weight)
+                                        1 = RF-Merge VeryLow (reference frames are merged with weight=0.3)
+                                        2 = RF-Merge Low (reference frames are merged with weight=0.4)
+                                        3 = RF-Merge Med (reference frames are merged with weight=0.5)
+                                        4 = RF-Merge High (reference frames are merged with weight=0.6)
+                                        5 = RF-Merge VeryHigh (reference frames are merged with weight=0.7)
     :param ref_weight:          If (ref_merge > 0), represent the weight used to merge the reference frames.
                                 If is not set, is assigned automatically a value depending on ref_merge value.
     :param ref_thresh:          If (ref_merge > 0), represent the threshold used to create the reference frames.
@@ -558,9 +575,9 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
     if ref_merge not in range(4):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: method must be in range [0-3]")
 
-    if ref_merge > 0 and method not in (0, 1, 2, 5):
+    if ref_merge > 0 and method not in (0, 1):
         HAVC_LogMessage(MessageType.EXCEPTION,
-                        "HAVC_deepex: method must be in range [0-2,5] to be used with ref_merge > 0")
+                        "HAVC_deepex: method must be in range [0, 1] to be used with ref_merge > 0")
 
     if method in (0, 1, 2, 5):
         sc_threshold, sc_frequency = get_sc_props(clip_ref)
@@ -602,16 +619,16 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
     colormap_enabled = (colormap != "none" and colormap != "")
 
     enable_refmerge: bool = (ref_merge > 0 and sc_frequency == 1)
-    refmerge_weight: list[float] = [0.0, 0.4, 0.5, 0.6]
+    refmerge_weight: list[float] = [0.0, 0.3, 0.4, 0.5, 0.6, 0.7]
     if enable_refmerge:
         if ref_weight is None:
             ref_weight = refmerge_weight[ref_merge]
         if ref_thresh is None:
             ref_thresh = 0.10
         clip_sc = SceneDetect(clip, threshold=ref_thresh)
-        if method in (1, 2):
+        if method in (1, 2, 5) and not (sc_framedir is None):
             clip_sc = SceneDetectFromDir(clip_sc, sc_framedir=sc_framedir, merge_ref_frame=True,
-                                         ref_frame_ext=(method == 2))
+                                         ref_frame_ext=(method in (2, 5)))
     else:
         ref_weight = 1.0
         clip_sc = None
@@ -659,7 +676,7 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
         clip_ref = vs_sc_chroma_bright_tweak(clip_ref, black_threshold=black_threshold, white_threshold=white_threshold,
                                              dark_sat=dark_sat, dark_bright=dark_bright,
                                              chroma_adjust=chroma_adjust.lower())
-    ref_same_as_video = method in (0, 1, 3)
+    ref_same_as_video = method == 3   # unico caso in cui è True il flag
     if only_ref_frames:
         clip_colored = clip_ref
     else:
