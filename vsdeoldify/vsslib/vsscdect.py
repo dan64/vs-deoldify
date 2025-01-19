@@ -193,7 +193,11 @@ class SceneDetection:
                 sc = sc_clip_normalize(sc)
 
             if sc_tht_filter > 0.0 or threshold < 0.10 or tht_offset > 1:
-                sc = self.SceneDetectCustom(sc, threshold=threshold, offset=tht_offset)
+                if 0.0 < sc_tht_filter < 1.0 or min_length > 1:
+                    sc = self.SceneDetectCustom(sc, threshold=threshold, offset=tht_offset)
+                else:  # DEF_SC_MIN_DISTANCE
+                    sc = self.SceneDetectCustom(sc, threshold=threshold, offset=tht_offset,
+                                                min_length=DEF_SC_MIN_DISTANCE)
             else:
                 sc = sc.misc.SCDetect(threshold=threshold)
                 sc = self.filter_black_white(clip, sc)
@@ -252,13 +256,14 @@ class SceneDetection:
 
         return clip_new
 
-    def SceneDetectCustom(self, clip: vs.VideoNode, threshold: float = DEF_THRESHOLD, offset: int = 1) -> vs.VideoNode:
+    def SceneDetectCustom(self, clip: vs.VideoNode, threshold: float = DEF_THRESHOLD, offset: int = 1,
+                          min_length: int = 1) -> vs.VideoNode:
         clip_prev = clip
         for i in range(offset):
             clip_prev = clip_prev.std.DuplicateFrames(frames=0).std.Trim(last=clip.num_frames - 1)
         clip_diff = vs.core.std.PlaneStats(clipa=clip_prev, clipb=clip, plane=0)
 
-        def set_SCDetect(n, f, sc_threshold: float) -> vs.VideoFrame:
+        def set_SCDetect(n, f, sc_threshold: float, min_length: int) -> vs.VideoFrame:
 
             f_out = f[0].copy()
 
@@ -273,7 +278,11 @@ class SceneDetection:
                 is_scenechange = True
                 self._sc_prev_diff = n_diff
                 self._sc_ref_luma = f_luma
+                self._sc_last_ref = 0
                 ratio = 0
+            elif n - self._sc_last_ref < min_length:
+                ratio = round(n_diff / self._sc_prev_diff, 4)
+                is_scenechange = False
             else:
                 ratio = round(n_diff / self._sc_prev_diff, 4)
                 is_scenechange = ratio > self._sc_adaptive_ratio and n_diff > sc_threshold  # adaptive threshold
@@ -313,7 +322,8 @@ class SceneDetection:
         # sc = vsutil.debug_ModifyFrame(458, 467,
         #      clips=[clip, clip_diff], selector=partial(set_SCDetect, sc_threshold=threshold))
 
-        sc = clip.std.ModifyFrame(clips=[clip, clip_diff], selector=partial(set_SCDetect, sc_threshold=threshold))
+        sc = clip.std.ModifyFrame(clips=[clip, clip_diff], selector=partial(set_SCDetect, sc_threshold=threshold,
+                                                                            min_length=min_length))
 
         return sc
 
