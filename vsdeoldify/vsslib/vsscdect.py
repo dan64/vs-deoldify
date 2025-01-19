@@ -195,7 +195,7 @@ class SceneDetection:
             if sc_tht_filter > 0.0 or threshold < 0.10 or tht_offset > 1:
                 if 0.0 < sc_tht_filter < 1.0 or min_length > 1:
                     sc = self.SceneDetectCustom(sc, threshold=threshold, offset=tht_offset)
-                else:  # DEF_SC_MIN_DISTANCE
+                else:
                     sc = self.SceneDetectCustom(sc, threshold=threshold, offset=tht_offset,
                                                 min_length=DEF_SC_MIN_DISTANCE)
             else:
@@ -274,7 +274,7 @@ class SceneDetection:
             # set luma property
             f_out.props['sc_luma'] = f_luma
             n_diff = round(max(float(f[1].props['PlaneStatsDiff']), 0.0001), 5)
-            if n == 0:
+            if n == 0 or self._sc_last_ref is None:
                 is_scenechange = True
                 self._sc_prev_diff = n_diff
                 self._sc_ref_luma = f_luma
