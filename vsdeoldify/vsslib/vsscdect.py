@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-05
+LastEditTime: 2025-01-19
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -192,7 +192,7 @@ class SceneDetection:
             if frame_norm:
                 sc = sc_clip_normalize(sc)
 
-            if sc_tht_filter > 0.0 or threshold < 0.05 or tht_offset > 1:
+            if sc_tht_filter > 0.0 or threshold < 0.10 or tht_offset > 1:
                 sc = self.SceneDetectCustom(sc, threshold=threshold, offset=tht_offset)
             else:
                 sc = sc.misc.SCDetect(threshold=threshold)

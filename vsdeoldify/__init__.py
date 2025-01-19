@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-17
+LastEditTime: 2025-01-19
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -44,7 +44,7 @@ from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDe
 
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 
-__version__ = "4.6.7"
+__version__ = "4.6.8"
 
 import warnings
 import logging
@@ -321,7 +321,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
 
     # Select Color Mapping
     ColorMap = ColorMap.lower()
-    hue_w = ["0.90", "0.85", "0.80"]
+    hue_w = ["0.90", "0.80", "0.70"]
     colormap = ['none', 'blue->brown', 'blue->red', 'blue->green', 'green->brown', 'green->red', 'green->blue',
                 'redrose->brown', 'redrose->blue', "red->brown", 'yellow->rose']
     hue_map = ["none", "180:280|+140", "180:280|+100", "180:280|+220", "80:180|+260", "80:180|+220",
