@@ -190,7 +190,11 @@ def frame_normalize(frame_np: np.ndarray, tht_black: float = 0.10, tht_white: fl
 
     img_np = frame_np.copy()
 
-    frame_y = np.multiply(255, (frame_y - np.min(frame_y)) / (np.max(frame_y) - np.min(frame_y)))
+    np_min = np.min(frame_y)
+    np_max = np.max(frame_y)
+    np_delta = np_max - np_min
+    np_norm = (frame_y - np_min) / np_delta
+    frame_y = np.multiply(255, np_norm)
 
     img_np[:, :, 0] = frame_y.clip(0, 255).astype('uint8')
 

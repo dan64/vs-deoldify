@@ -212,7 +212,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
                                 by "Exemplar-based" Video Colorization models.
     :param ScThreshold:         Scene change threshold used to generate the reference frames to be used by
                                 "Exemplar-based" Video Colorization. It is a percentage of the luma change between
-                                the previous and the current frame. range [0-1], default 0.03. If =0 are not generate
+                                the previous and the current frame. range [0-1], default 0.10. If =0 are not generate
                                 reference frames.
     :param ScThtOffset:         Offset index used for the Scene change detection. The comparison will be performed,
                                 between frame[n] and frame[n-offset]. An offset > 1 is useful to detect blended scene
@@ -369,7 +369,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
             if ScThreshold is not None and 0 < ScThreshold < 1:
                 ref_tresh = ScThreshold
             else:
-                ref_tresh = 0.10
+                ref_tresh = DEF_THRESHOLD
 
         clip_ref = HAVC_ddeoldify(clip, method=dd_method, mweight=ddcolor_weight[w_id],
                                   deoldify_p=[0, deoldify_rf, 1.0, 0.0],
@@ -624,7 +624,7 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
         if ref_weight is None:
             ref_weight = refmerge_weight[ref_merge]
         if ref_thresh is None:
-            ref_thresh = 0.10
+            ref_thresh = DEF_THRESHOLD
         clip_sc = SceneDetect(clip, threshold=ref_thresh)
         if method in (1, 2, 5) and not (sc_framedir is None):
             clip_sc = SceneDetectFromDir(clip_sc, sc_framedir=sc_framedir, merge_ref_frame=True,
@@ -1083,7 +1083,7 @@ def HAVC_SceneDetect(clip: vs.VideoNode, sc_threshold: float = DEF_THRESHOLD, sc
     :param clip:                clip to process, only RGB24 format is supported.
     :param sc_threshold:        Scene change threshold used to generate the reference frames.
                                 It is a percentage of the luma change between the previous n-frame (n=sc_tht_offset)
-                                and the current frame. range [0-1], default 0.05.
+                                and the current frame. range [0-1], default 0.10.
     :param sc_tht_offset:       Offset index used for the Scene change detection. The comparison will be performed,
                                 between frame[n] and frame[n-offset]. An offset > 1 is useful to detect blended scene
                                 change, range[1, 25]. Default = 1.
