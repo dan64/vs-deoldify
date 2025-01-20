@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-11-20
 version:
 LastEditors: Dan64
-LastEditTime: 2024-11-20
+LastEditTime: 2025-01-19
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
@@ -24,9 +24,8 @@ DEF_ADAPTIVE_RATIO_VHI: float = 15.0
 DEF_SSIM_SCORE_EQUAL: float = 0.69
 DEF_HIST_SCORE_EQUAL: float = 0.70
 DEF_HIST_SCORE_HIGH: float = 0.90
-DEF_MERGE_LOW_WEIGHT: float = 0.30
+DEF_MERGE_LOW_WEIGHT: float = 0.20
 DEF_JPG_QUALITY: int = 95
 DEF_THRESHOLD: float = 0.10
 DEF_SC_MIN_DISTANCE: int = 15
-DEF_THRESHOLD_MIN: float = 0.033
 DEF_MAX_MEMORY_FRAMES: int = 10000   # theoretically MAX_MEMORY must be < 95000
