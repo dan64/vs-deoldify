@@ -29,4 +29,4 @@ DEF_JPG_QUALITY: int = 95
 DEF_THRESHOLD: float = 0.10
 DEF_SC_MIN_DISTANCE: int = 15
 DEF_THRESHOLD_MIN: float = 0.033
-DEF_MAX_MEMORY_FRAMES: int = 15000   # theoretically MAX_MEMORY must be < 95000
+DEF_MAX_MEMORY_FRAMES: int = 10000   # theoretically MAX_MEMORY must be < 95000

@@ -200,8 +200,8 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
                                 Its value depend on encode mode and must be defined manually following the suggested values.
                                 DeepExEncMode=0: there is no memory limit (it could be all the frames in the clip).
                                 Suggested values are:
-                                    min=150, max=15000
-                                If = 0 will be filled with the value of 15000 or the clip length if lower.
+                                    min=150, max=10000
+                                If = 0 will be filled with the value of 10000 or the clip length if lower.
                                 DeepExEncMode=1: the max memory frames is limited by available GPU memory.
                                 Suggested values are:
                                     min=1, max=4      : for 8GB GPU
@@ -511,8 +511,8 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
                                 Its value depend on encode mode and must be defined manually following the suggested values.
                                 encode_mode=0: there is no memory limit (it could be all the frames in the clip).
                                 Suggested values are:
-                                    min=150, max=15000
-                                If = 0 will be filled with the value of 15000 or the clip length if lower.
+                                    min=150, max=10000
+                                If = 0 will be filled with the value of 10000 or the clip length if lower.
                                 encode_mode=1: the max memory frames is limited by available GPU memory.
                                 Suggested values are:
                                     min=1, max=4    : for 8GB GPU
