@@ -584,7 +584,10 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
         if sc_threshold == 0 and sc_frequency == 0:
             HAVC_LogMessage(MessageType.EXCEPTION,
                             "HAVC_deepex: method in (0, 1, 2, 5) but sc_threshold and sc_frequency are not set")
-        if ref_merge > 0 and sc_frequency != 1:
+        if sc_frequency == 1 and only_ref_frames:
+            HAVC_LogMessage(MessageType.EXCEPTION,
+                            "HAVC_deepex: only_ref_frames is enabled but sc_frequency == 1")
+        if not only_ref_frames and ref_merge > 0 and sc_frequency != 1:
             HAVC_LogMessage(MessageType.EXCEPTION,
                             "HAVC_deepex: method in (0, 1, 2, 5) and ref_merge > 0 but sc_frequency != 1")
 
@@ -626,7 +629,7 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
         if ref_thresh is None:
             ref_thresh = DEF_THRESHOLD
         clip_sc = SceneDetect(clip, threshold=ref_thresh)
-        if method in (1, 2, 5) and not (sc_framedir is None):
+        if method in (1, 2, 5) and not (sc_framedir is None) and not only_ref_frames:
             clip_sc = SceneDetectFromDir(clip_sc, sc_framedir=sc_framedir, merge_ref_frame=True,
                                          ref_frame_ext=(method in (2, 5)))
     else:
