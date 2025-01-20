@@ -278,7 +278,7 @@ class SceneDetection:
                 is_scenechange = True
                 self._sc_prev_diff = n_diff
                 self._sc_ref_luma = f_luma
-                self._sc_last_ref = 0
+                self._sc_last_ref = n
                 ratio = 0
             elif n - self._sc_last_ref < min_length:
                 ratio = round(n_diff / self._sc_prev_diff, 4)
