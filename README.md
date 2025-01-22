@@ -1,5 +1,5 @@
 # Hybrid Automatic Video Colorizer (aka DDeoldify)
-A Deep Learning based Vaoursynth filter for colorizing and restoring old images and video, based on the following projects: [DeOldify](https://github.com/jantic/DeOldify)
+A Deep Learning based [ VapourSynth](https://www.vapoursynth.com/) filter for colorizing and restoring old images and video, based on the following projects: [DeOldify](https://github.com/jantic/DeOldify)
 ,  [DDColor](https://github.com/HolyWu/vs-ddcolor), [Colorization](https://github.com/richzhang/colorization), [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization) and [ColorMNet](https://github.com/yyang181/colormnet). The project  [Colorization](https://github.com/richzhang/colorization) includes 2 models: _Real-Time User-Guided Image Colorization with Learned Deep Priors_ (Zhang, 2017) and _Colorful Image Colorization_ (Zhang, 2016). These 2 models has been added as alternative models (named: _siggraph17_, _eccv16_) to DDColor .
 
 The Vapoursynth filter version has the advantage of coloring the images directly in memory, without the need to use the filesystem to store the video frames. 
