@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-09-14
 version:
 LastEditors: Dan64
-LastEditTime: 2025-01-05
+LastEditTime: 2025-01-31
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
@@ -47,37 +47,50 @@ package_dir = os.path.dirname(os.path.realpath(__file__))
 
 def vs_colormnet_local(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode, image_size: int = -1,
                        enable_resize: bool = False, frame_propagate: bool = False, render_vivid: bool = True,
-                       max_memory_frames: int = 0, ref_weight: float = 1.0) -> vs.VideoNode:
+                       max_memory_frames: int = 0, ref_weight: float = 1.0, use_all_refs: bool = False) -> vs.VideoNode:
     vid_length = clip.num_frames
 
     colorizer = ColorMNetRender(image_size=image_size, vid_length=vid_length, enable_resize=enable_resize,
                                 encode_mode=1, max_memory_frames=max_memory_frames, reset_on_ref_update=render_vivid,
                                 project_dir=package_dir)
 
-    clip_colored = _colormnet_async(colorizer, clip, clip_ref, clip_sc, frame_propagate, ref_weight)
+    clip_colored = _colormnet_async(colorizer, clip, clip_ref, clip_sc, frame_propagate, ref_weight, use_all_refs)
 
     return clip_colored
 
 
 def _colormnet_async(colorizer: ColorMNetRender, clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode,
-                     frame_propagate: bool = False, ref_weight: float = 1.0) -> vs.VideoNode:
-    def colormnet_clip_color_merge(n, f, colorizer: ColorMNetRender = None, propagate: bool = False,
-                                   weight: float = 1.0) -> vs.VideoFrame:
+                     frame_propagate: bool = False, ref_weight: float = 1.0,
+                     use_all_refs: bool = False) -> vs.VideoNode:
+
+    reader: RefImageReader = RefImageReader(use_all_refs=use_all_refs)
+
+    if use_all_refs:
+        reader.load_clip_ref(clip_ref, clip_sc)
+
+    def colormnet_clip_color_merge(n, f, reader: RefImageReader, colorizer: ColorMNetRender = None,
+                                   propagate: bool = False, weight: float = 1.0) -> vs.VideoFrame:
 
         is_scenechange = f[2].props['_SceneChangePrev'] == 1
         is_scenechange_ext = is_scenechange and f[2].props['_SceneChangeNext'] == 1
         img_orig = frm_to_img(f[0])
         img_ref = frm_to_img(f[1])  # must always be same as video to be merged, even if frame_as_video = False
 
-        if n == 0:
-            # vs.core.log_message(2, "Reference Frame: " + str(n))
-            colorizer.set_ref_frame(img_ref)
-        elif is_scenechange:
-            frame_as_video = not is_scenechange_ext and propagate
-            # vs.core.log_message(2, "Reference Frame: " + str(n))
-            colorizer.set_ref_frame(img_ref, frame_as_video)
+        if reader.enabled():
+            # if n > 1 and colorizer.get_frame_count() == 0:
+            #    reader.reload_clip_ref(n - 1)
+            ref_i = reader.get_next_ref_frame(n)
+            colorizer.set_ref_frame(ref_i)
         else:
-            colorizer.set_ref_frame(None)
+            if n == 0:
+                # vs.core.log_message(2, "Reference Frame: " + str(n))
+                colorizer.set_ref_frame(img_ref)
+            elif is_scenechange:
+                frame_as_video = not is_scenechange_ext and propagate
+                # vs.core.log_message(2, "Reference Frame: " + str(n))
+                colorizer.set_ref_frame(img_ref, frame_as_video)
+            else:
+                colorizer.set_ref_frame(None)
 
         img_color = colorizer.colorize_frame(ti=n, frame_i=img_orig)
 
@@ -86,27 +99,34 @@ def _colormnet_async(colorizer: ColorMNetRender, clip: vs.VideoNode, clip_ref: v
         if not is_scenechange:
             img_color_m = image_weighted_merge(img_color, img_ref, weight)
         else:   # the frame obtained from a reference should be already good is merged with low weight
-            img_color_m = image_weighted_merge(img_color, img_ref, DEF_MERGE_LOW_WEIGHT)
+            img_color_m = img_color   # image_weighted_merge(img_color, img_ref, DEF_MERGE_LOW_WEIGHT)
 
         return img_to_frm(img_color_m, f[0].copy())
 
-    def colormnet_clip_color(n, f, colorizer: ColorMNetRender = None, propagate: bool = False) -> vs.VideoFrame:
+    def colormnet_clip_color(n, f, reader: RefImageReader, colorizer: ColorMNetRender = None,
+                             propagate: bool = False) -> vs.VideoFrame:
 
         is_scenechange = f[1].props['_SceneChangePrev'] == 1
         is_scenechange_ext = f[1].props['_SceneChangeNext'] == 1
         img_orig = frm_to_img(f[0])
 
-        if n == 0:
-            img_ref = frm_to_img(f[1])
-            # vs.core.log_message(2, "Reference Frame: " + str(n))
-            colorizer.set_ref_frame(img_ref)
-        elif is_scenechange:
-            img_ref = frm_to_img(f[1])
-            # vs.core.log_message(2, "Reference Frame: " + str(n))
-            frame_as_video = not is_scenechange_ext and propagate
-            colorizer.set_ref_frame(img_ref, frame_as_video)
+        if reader.enabled():
+            # if n > 1 and colorizer.get_frame_count() == 0:
+            #    reader.reload_clip_ref(n - 1)
+            ref_i = reader.get_next_ref_frame(n)
+            colorizer.set_ref_frame(ref_i)
         else:
-            colorizer.set_ref_frame(None)
+            if n == 0:
+                img_ref = frm_to_img(f[1])
+                # vs.core.log_message(2, "Reference Frame: " + str(n))
+                colorizer.set_ref_frame(img_ref)
+            elif is_scenechange:
+                img_ref = frm_to_img(f[1])
+                # vs.core.log_message(2, "Reference Frame: " + str(n))
+                frame_as_video = not is_scenechange_ext and propagate
+                colorizer.set_ref_frame(img_ref, frame_as_video)
+            else:
+                colorizer.set_ref_frame(None)
 
         img_color = colorizer.colorize_frame(ti=n, frame_i=img_orig)
 
@@ -114,22 +134,27 @@ def _colormnet_async(colorizer: ColorMNetRender, clip: vs.VideoNode, clip_ref: v
 
     if 0 < ref_weight < 1 and not (clip_sc is None):
         clip_colored = clip.std.ModifyFrame(clips=[clip, clip_ref, clip_sc],
-                                            selector=partial(colormnet_clip_color_merge, colorizer=colorizer,
-                                                             propagate=frame_propagate, weight=ref_weight))
+                                            selector=partial(colormnet_clip_color_merge, reader=reader,
+                                                             colorizer=colorizer, propagate=frame_propagate,
+                                                             weight=ref_weight))
 
         # clip_colored = debug_ModifyFrame(80, 140, clip, clips=[clip, clip_ref, clip_sc],
         #                                selector=partial(colormnet_clip_color_merge, colorizer=colorizer,
         #                                                 propagate=frame_propagate, weight=ref_weight))
     else:
         clip_colored = clip.std.ModifyFrame(clips=[clip, clip_ref],
-                                        selector=partial(colormnet_clip_color, colorizer=colorizer,
-                                                         propagate=frame_propagate))
+                                            selector=partial(colormnet_clip_color, reader=reader, colorizer=colorizer,
+                                                             propagate=frame_propagate))
+        #clip_colored = debug_ModifyFrame(0, 1000, clip, clips=[clip, clip_ref],
+        #                                 selector=partial(colormnet_clip_color, reader=reader, colorizer=colorizer,
+        #                                                  propagate=frame_propagate))
     return clip_colored
 
 
 def vs_colormnet_remote(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode, image_size: int = -1,
                         enable_resize: bool = False, frame_propagate: bool = False, render_vivid: bool = True,
-                        max_memory_frames: int = 0, ref_weight: float = 1.0, server_port: int = 0) -> vs.VideoNode:
+                        max_memory_frames: int = 0, ref_weight: float = 1.0, use_all_refs: bool = False,
+                        server_port: int = 0) -> vs.VideoNode:
     vid_length = clip.num_frames
 
     server = ColorMNetServer(server_port=server_port).run_server()
@@ -140,30 +165,42 @@ def vs_colormnet_remote(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.
     if not colorizer.is_initialized():
         HAVC_LogMessage(MessageType.EXCEPTION, "Failed to initialize ColorMNet[remote] try ColorMNet[local]")
 
-    clip_colored = _colormnet_client(colorizer, clip, clip_ref, clip_sc, frame_propagate, ref_weight)
+    clip_colored = _colormnet_client(colorizer, clip, clip_ref, clip_sc, frame_propagate, ref_weight, use_all_refs)
 
     return clip_colored
 
 
 def _colormnet_client(colorizer: ColorMNetClient, clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode,
-                      frame_propagate: bool = False, ref_weight: float = 1.0,) -> vs.VideoNode:
-    def colormnet_client_color_merge(n, f, colorizer: ColorMNetClient = None, propagate: bool = False,
-                                     weight: float = 1.0) -> vs.VideoFrame:
+                      frame_propagate: bool = False, ref_weight: float = 1.0,
+                      use_all_refs: bool = False) -> vs.VideoNode:
+    reader: RefImageReader = RefImageReader(use_all_refs=use_all_refs)
+
+    if use_all_refs:
+        reader.load_clip_ref(clip_ref, clip_sc)
+
+    def colormnet_client_color_merge(n, f, reader: RefImageReader, colorizer: ColorMNetClient = None,
+                                     propagate: bool = False, weight: float = 1.0) -> vs.VideoFrame:
 
         is_scenechange = f[2].props['_SceneChangePrev'] == 1
         is_scenechange_ext = is_scenechange and f[2].props['_SceneChangeNext'] == 1
         img_orig = frm_to_img(f[0])
         img_ref = frm_to_img(f[1])  # must always be same as video to be merged, even if frame_as_video = False
 
-        if n == 0:
-            # vs.core.log_message(2, "Reference Frame: " + str(n))
-            colorizer.set_ref_frame(img_ref)
-        elif is_scenechange:
-            frame_as_video = not is_scenechange_ext and propagate
-            # vs.core.log_message(2, "Reference Frame: " + str(n))
-            colorizer.set_ref_frame(img_ref, frame_as_video)
+        if reader.enabled():
+            # if n > 1 and colorizer.get_frame_count() == 0:
+            #    reader.reload_clip_ref(n - 1)
+            ref_i = reader.get_next_ref_frame(n)
+            colorizer.set_ref_frame(ref_i)
         else:
-            colorizer.set_ref_frame(None)
+            if n == 0:
+                # vs.core.log_message(2, "Reference Frame: " + str(n))
+                colorizer.set_ref_frame(img_ref)
+            elif is_scenechange:
+                frame_as_video = not is_scenechange_ext and propagate
+                # vs.core.log_message(2, "Reference Frame: " + str(n))
+                colorizer.set_ref_frame(img_ref, frame_as_video)
+            else:
+                colorizer.set_ref_frame(None)
 
         img_color = colorizer.colorize_frame(ti=n, frame_i=img_orig)
 
@@ -172,27 +209,34 @@ def _colormnet_client(colorizer: ColorMNetClient, clip: vs.VideoNode, clip_ref: 
         if not is_scenechange:
             img_color_m = image_weighted_merge(img_color, img_ref, weight)
         else:   # the frame obtained from a reference should be already good is merged with low weight
-            img_color_m = image_weighted_merge(img_color, img_ref, DEF_MERGE_LOW_WEIGHT)
+            img_color_m = img_color   # image_weighted_merge(img_color, img_ref, DEF_MERGE_LOW_WEIGHT)
 
         return img_to_frm(img_color_m, f[0].copy())
 
-    def colormnet_client_color(n, f, colorizer: ColorMNetClient = None, propagate: bool = False) -> vs.VideoFrame:
+    def colormnet_client_color(n, f, reader: RefImageReader, colorizer: ColorMNetClient = None,
+                               propagate: bool = False) -> vs.VideoFrame:
 
         is_scenechange = f[1].props['_SceneChangePrev'] == 1
         is_scenechange_ext = f[1].props['_SceneChangeNext'] == 1
         img_orig = frm_to_img(f[0])
 
-        if n == 0:
-            img_ref = frm_to_img(f[1])
-            # vs.core.log_message(2, "Reference Frame: " + str(n))
-            colorizer.set_ref_frame(img_ref)
-        elif is_scenechange:
-            img_ref = frm_to_img(f[1])
-            # vs.core.log_message(2, "Reference Frame: " + str(n))
-            frame_as_video = not is_scenechange_ext and propagate
-            colorizer.set_ref_frame(img_ref, frame_as_video)
+        if reader.enabled():
+            # if n > 1 and colorizer.get_frame_count() == 0:
+            #    reader.reload_clip_ref(n - 1)
+            ref_i = reader.get_next_ref_frame(n)
+            colorizer.set_ref_frame(ref_i)
         else:
-            colorizer.set_ref_frame(None)
+            if n == 0:
+                img_ref = frm_to_img(f[1])
+                # vs.core.log_message(2, "Reference Frame: " + str(n))
+                colorizer.set_ref_frame(img_ref)
+            elif is_scenechange:
+                img_ref = frm_to_img(f[1])
+                # vs.core.log_message(2, "Reference Frame: " + str(n))
+                frame_as_video = not is_scenechange_ext and propagate
+                colorizer.set_ref_frame(img_ref, frame_as_video)
+            else:
+                colorizer.set_ref_frame(None)
 
         img_color = colorizer.colorize_frame(ti=n, frame_i=img_orig)
 
@@ -200,15 +244,17 @@ def _colormnet_client(colorizer: ColorMNetClient, clip: vs.VideoNode, clip_ref: 
 
     if 0 < ref_weight < 1 and not (clip_sc is None):
         clip_colored = clip.std.ModifyFrame(clips=[clip, clip_ref, clip_sc],
-                                            selector=partial(colormnet_client_color_merge, colorizer=colorizer,
-                                                             propagate=frame_propagate, weight=ref_weight))
+                                            selector=partial(colormnet_client_color_merge, reader=reader,
+                                                             colorizer=colorizer, propagate=frame_propagate,
+                                                             weight=ref_weight))
     else:
         clip_colored = clip.std.ModifyFrame(clips=[clip, clip_ref],
-                                            selector=partial(colormnet_client_color, colorizer=colorizer,
+                                            selector=partial(colormnet_client_color, reader=reader, colorizer=colorizer,
                                                              propagate=frame_propagate))
     return clip_colored
 
 
+"""
 def _img_colormnet(img_color: Image, clip: vs.VideoNode) -> vs.VideoNode:
     def colormnet_clip_color(n, f, img: Image = None) -> vs.VideoFrame:
         return img_to_frm(img, f.copy())
@@ -217,3 +263,4 @@ def _img_colormnet(img_color: Image, clip: vs.VideoNode) -> vs.VideoNode:
                                         selector=partial(colormnet_clip_color, img=img_color))
 
     return clip_colored
+"""

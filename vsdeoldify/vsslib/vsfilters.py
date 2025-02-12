@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-05
+LastEditTime: 2025-02-09
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -23,6 +23,7 @@ from .imfilters import _color_temporal_stabilizer
 from .vsutils import *
 from .imfilters import *
 from .restcolor import *
+from .constants import *
 
 """
 ------------------------------------------------------------------------------- 
@@ -265,7 +266,7 @@ def vs_get_clip_frame(clip: vs.VideoNode, nframe: int = 0) -> vs.VideoNode:
     weights_list = list()
 
     for i in range(-n, n + 1):
-        if (i == nframe):
+        if i == nframe:
             weights_list.append(100)
         else:
             weights_list.append(0)
@@ -279,7 +280,7 @@ def vs_get_clip_frame(clip: vs.VideoNode, nframe: int = 0) -> vs.VideoNode:
     clip_yuv = vs.core.std.AverageFrames(clip_yuv, weights_list, scale=100, scenechange=False, planes=[1, 2])
 
     # convert to the original clip format
-    if (clip.format.color_family == "YUV"):
+    if clip.format.color_family == "YUV":
         clip = clip_yuv.resize.Bicubic(format=vs_format)
     else:
         clip = clip_yuv.resize.Bicubic(format=vs_format, matrix_in_s="709", range_s="full",
@@ -299,7 +300,7 @@ wrapper to function restore_color() to restore gray frames.
 
 
 def vs_recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = None, sat: float = 1.0, tht: int = 0,
-                          weight: float = 0.2, tht_scen: float = 0.8, hue_adjust: str = 'none',
+                          weight: float = 0.2, tht_scen: float = 0.15, hue_adjust: str = 'none',
                           return_mask: bool = False) -> vs.VideoNode:
     def color_frame(n, f, sat: float = 1.0, tht: int = 0, weight: float = 0.2, tht_scen: float = 0.8,
                     hue_adjust: str = 'none', return_mask: bool = False):
@@ -702,8 +703,9 @@ Function to copy the luma of video Clip "orig" in the video "clip"
 
 
 def vs_sc_recover_clip_luma(orig: vs.VideoNode = None, clip: vs.VideoNode = None, scenechange: bool = False,
-                            sc_framedir=None) -> vs.VideoNode:
-    def copy_luma_frame(n, f):
+                            sc_framedir: str =None, ref_ext: str = DEF_EXPORT_FORMAT,
+                            ref_jpg_quality: int = DEF_JPG_QUALITY) -> vs.VideoNode:
+    def copy_luma_frame(n, f, sc_framedir: str, ref_ext: str, ref_jpg_quality: int):
 
         img_orig = frame_to_image(f[0])
         img_clip = frame_to_image(f[1])
@@ -721,14 +723,16 @@ def vs_sc_recover_clip_luma(orig: vs.VideoNode = None, clip: vs.VideoNode = None
         # col_next = f[1].props['_SceneChangeNext']
 
         if not (sc_framedir is None) and is_scenechange:
-            img_path = os.path.join(sc_framedir, f"ref_{n:06d}.png")
-            # HAVC_LogMessage(MessageType.WARNING, "Frame[", n, "] BW: ", orig_prv, "/", orig_next,
-            #                 " -> COL:", col_prv, "/", col_next)
-            img_m.save(img_path)
+            img_path = os.path.join(sc_framedir, f"ref_{n:06d}.{ref_ext}")
+            if ref_ext == "jpg":
+                img_m.save(img_path, subsampling=0, quality=ref_jpg_quality)
+            else:
+                img_m.save(img_path)
 
         return image_to_frame(img_m, f[0].copy())
 
-    clip = clip.std.ModifyFrame(clips=[orig, clip], selector=copy_luma_frame)
+    clip = clip.std.ModifyFrame(clips=[orig, clip], selector=partial(copy_luma_frame, sc_framedir=sc_framedir,
+                                                                     ref_ext=ref_ext, ref_jpg_quality=ref_jpg_quality))
 
     return clip
 

@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-03
+LastEditTime: 2025-02-08
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -19,11 +19,15 @@ from PIL import Image
 from functools import partial
 
 from vsdeoldify.deoldify.visualize import *
-from vsdeoldify.vsslib.vsutils import *
+from vsdeoldify.vsslib.vsutils import debug_ModifyFrame
 from vsdeoldify.vsslib.vsfilters import *
 from vsdeoldify.colormnet import vs_colormnet_remote, vs_colormnet_local
 from vsdeoldify.deepex import deepex_colorizer, ModelColorizer
 from vsdeoldify.colorization import ModelColorization
+from vsdeoldify.remaster import *
+
+
+#from vsdeoldify.remaster.remaster_utils import *
 
 
 def vs_colormnet(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode, image_size: int = -1,
@@ -41,12 +45,12 @@ def vs_colormnet(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNo
                 max_memory_frames = 15
 
     match encode_mode:
-        case 0:
+        case 0 | 2:
             return vs_colormnet_remote(clip, clip_ref, clip_sc, image_size, enable_resize, frame_propagate,
-                                       render_vivid, max_memory_frames, ref_weight)
-        case 1:
+                                       render_vivid, max_memory_frames, ref_weight, use_all_refs=(encode_mode == 2))
+        case 1 | 3:  # encode_mode = 3 is supported only for testing, given the memory limitation of this method
             return vs_colormnet_local(clip, clip_ref, clip_sc, image_size, enable_resize, frame_propagate,
-                                      render_vivid, max_memory_frames, ref_weight)
+                                      render_vivid, max_memory_frames, ref_weight, use_all_refs=(encode_mode == 3))
         case _:
             raise vs.Error("HAVC_deepex: unknown encode mode: " + str(encode_mode))
 
@@ -80,7 +84,7 @@ def vs_deepex(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode,
         if not is_scenechange:
             img_color_m = image_weighted_merge(img_color, img_ref, weight)
         else:  # the frame obtained from a reference should be already good is merged with low weight
-            img_color_m = image_weighted_merge(img_color, img_ref, 0.20)
+            img_color_m = img_color   # image_weighted_merge(img_color, img_ref, 0.20)
 
         return image_to_frame(img_color_m, f[0].copy())
 
@@ -115,6 +119,33 @@ def vs_deepex(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode,
                                             selector=partial(deepex_clip_color, colorizer=colorizer,
                                                              propagate=propagate,
                                                              wls_on=wls_filter_on, render_vivid=render_vivid))
+    return clip_colored
+
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+wrapper to DeepRemaster. 
+"""
+
+
+def vs_deepremaster(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode, render_vivid: bool = True,
+                    ref_weight: float = 1.0, ref_size: int = 256, frame_size: int = 320, memory_size: int = None,
+                    ref_frequency: int = 0, device_index: int = 0) -> vs.VideoNode:
+    if memory_size is None or memory_size == 0:
+        memory_size = DEF_NUM_RF_FRAMES
+    if memory_size < DEF_MIN_RF_FRAMES:
+        memory_size = DEF_MIN_RF_FRAMES
+
+    clip_colored = vs_sc_remaster_colorize(clip, clip_ref, clip_sc=clip_sc, length=DEF_BATCH_SIZE,
+                                           render_vivid=render_vivid, ref_minedge=ref_size,
+                                           frame_mindim=frame_size, merge_weight=ref_weight,
+                                           ref_buffer_size=memory_size, ref_frequency=ref_frequency,
+                                           device_index=device_index)
+
     return clip_colored
 
 

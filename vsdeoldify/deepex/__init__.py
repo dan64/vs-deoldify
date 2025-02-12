@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-05-14
 version:
 LastEditors: Dan64
-LastEditTime: 2024-06-04
+LastEditTime: 2025-02-09
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
@@ -37,32 +37,49 @@ torch.cuda.set_device(0)
 Tensor = torch.Tensor
 
 import warnings
+
 warnings.filterwarnings("ignore", category=UserWarning, message="Conversion from CIE-LAB,*?")
 
 package_dir = os.path.dirname(os.path.realpath(__file__))
 
+
 def deepex_colorizer(image_size: list = [432, 768], enable_resize: bool = False) -> ModelColorizer:
     return ModelColorizer(image_size=image_size, enable_resize=enable_resize, project_dir=package_dir)
 
-def get_deepex_size(render_speed: str = 'medium', enable_resize: bool = False) -> list:
 
+def get_deepex_size(render_speed: str = 'medium', enable_resize: bool = False, ex_model: int = 1) -> list:
     if enable_resize:
-        scale=2
+        scale = 2
     else:
-        scale=1
+        scale = 1
 
     d_size = None
-    match render_speed:
-        case 'medium':
-            d_size = [216 * scale, 384 * scale]
-        case 'fast':
-            d_size = [144 * scale, 256 * scale]
-        case 'slow':
-            d_size = [288 * scale, 512 * scale]
-        case 'slower':
-            d_size = [360 * scale, 640 * scale]
-        case _:
-            raise vs.Error("HAVC_deepex: unknown render_speed ->" + render_speed)
+
+    if ex_model in (0, 1):
+        match render_speed:
+            case 'medium':
+                d_size = [216 * scale, 384 * scale]
+            case 'fast':
+                d_size = [144 * scale, 256 * scale]
+            case 'slow':
+                d_size = [288 * scale, 512 * scale]
+            case 'slower':
+                d_size = [360 * scale, 640 * scale]
+            case _:
+                raise vs.Error("HAVC_deepex: unknown render_speed ->" + render_speed)
+    else:
+        match render_speed:
+            case 'medium':
+                d_size = [256 * scale, 256 * scale]
+            case 'fast':
+                d_size = [224 * scale, 224 * scale]
+            case 'slow':
+                d_size = [320 * scale, 320 * scale]
+            case 'slower':
+                d_size = [360 * scale, 360 * scale]
+            case _:
+                raise vs.Error("HAVC_deepex: unknown render_speed ->" + render_speed)
+
     return d_size
 
 
@@ -76,17 +93,19 @@ class ModelColorizer:
     propagate = False
 
     def __new__(cls, *args, **kwargs):
-         if cls._instance is None:
-             cls._instance = super().__new__(cls)
-         return cls._instance
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     def __init__(self, image_size: list = [216 * 2, 384 * 2], enable_resize: bool = False, project_dir: str = None):
 
+        self.I_last_lab_predict = None
+        self.enable_resize = enable_resize
+        self.project_dir = project_dir
+
         if not self._initialized:
-            self.enable_resize = enable_resize
-            self.project_dir = project_dir
             self._frame_size = image_size
-            self._colorize_init(image_size)
+            self._colorize_model_init(image_size)
             self._initialized = True
 
     def set_ref_frame(self, frame_ref: Image = None, frame_propagate: bool = True):
@@ -99,7 +118,7 @@ class ModelColorizer:
         if self.enable_resize:
             self.IB_lab = torch.nn.functional.interpolate(IB_lab_large, scale_factor=0.5, mode="bilinear")
         else:
-            self.IB_lab =  IB_lab_large
+            self.IB_lab = IB_lab_large
         # IB_l = self.IB_lab[:, 0:1, :, :]
         # IB_ab = self.IB_lab[:, 1:3, :, :]
         with torch.no_grad():
@@ -159,12 +178,14 @@ class ModelColorizer:
         if render_vivid:
             # increase saturation by 25%
             if self.enable_resize:
-                curr_predict = (torch.nn.functional.interpolate(I_current_ab_predict.data.cpu(), scale_factor=2, mode="bilinear") * 1.25)
+                curr_predict = (torch.nn.functional.interpolate(I_current_ab_predict.data.cpu(), scale_factor=2,
+                                                                mode="bilinear") * 1.25)
             else:
                 curr_predict = I_current_ab_predict.data.cpu() * 1.25
         else:
             if self.enable_resize:
-                curr_predict = (torch.nn.functional.interpolate(I_current_ab_predict.data.cpu(), scale_factor=2, mode="bilinear"))
+                curr_predict = (
+                    torch.nn.functional.interpolate(I_current_ab_predict.data.cpu(), scale_factor=2, mode="bilinear"))
             else:
                 curr_predict = I_current_ab_predict.data.cpu()
 
@@ -207,7 +228,7 @@ class ModelColorizer:
         orig_copy[:, :, 1:3] = img_yuv[:, :, 1:3]
         return cv2.cvtColor(orig_copy, cv2.COLOR_YUV2RGB)
 
-    def _colorize_init(self, image_size: list = [216 * 2, 384 * 2]):
+    def _colorize_model_init(self, image_size: list = [216 * 2, 384 * 2]):
 
         cudnn.benchmark = True
 

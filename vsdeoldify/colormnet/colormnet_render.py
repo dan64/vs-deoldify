@@ -22,6 +22,7 @@ from torchvision.transforms import InterpolationMode
 import torch.nn.functional as F
 from PIL import Image
 import numpy as np
+import math
 
 from vsdeoldify.colormnet.colormnet_utils import *
 
@@ -30,6 +31,7 @@ from vsdeoldify.colormnet.dataset.range_transform import im_normalization, im_rg
 from vsdeoldify.colormnet.model.network import ColorMNet
 from vsdeoldify.colormnet.inference.inference_core import InferenceCore
 from vsdeoldify.vsslib.constants import *
+from vsdeoldify.vsslib.vsutils import *
 
 import warnings
 
@@ -68,33 +70,35 @@ class ColorMNetRender:
 
     def __init__(self, image_size: int = -1, vid_length: int = None, enable_resize: bool = False,
                  encode_mode: int = None, propagate: bool = False, max_memory_frames: int = None,
-                 reset_on_ref_update: bool = True, project_dir: str = None):
+                 reset_on_ref_update: bool = True,  project_dir: str = None):
+
+        self.reset_on_ref_update = reset_on_ref_update
+        self.enable_resize = enable_resize
+        if project_dir is None:
+            project_dir = os.path.dirname(os.path.realpath(__file__))
+        self.project_dir = project_dir
+        self._frame_size = image_size
+        if encode_mode is None:
+            self.encode_mode = 0
+        else:
+            self.encode_mode = encode_mode
+        if max_memory_frames is None or max_memory_frames == 0:
+            self.max_memory_frames = min(DEF_MAX_MEMORY_FRAMES, vid_length)
+        else:
+            self.max_memory_frames = min(DEF_MAX_MEMORY_FRAMES, max_memory_frames)
+        self.total_colored_frames = 0
+
+        self._colorize_config_init(image_size, vid_length, propagate)
 
         if not self._initialized:
-            self.reset_on_ref_update = reset_on_ref_update
-            self.enable_resize = enable_resize
-            if project_dir is None:
-                project_dir = os.path.dirname(os.path.realpath(__file__))
-            self.project_dir = project_dir
-            self._frame_size = image_size
-            if encode_mode is None:
-                self.encode_mode = 0
-            else:
-                self.encode_mode = encode_mode
-            if max_memory_frames is None or max_memory_frames == 0:
-                self.max_memory_frames = min(DEF_MAX_MEMORY_FRAMES, vid_length)
-            else:
-                self.max_memory_frames = min(DEF_MAX_MEMORY_FRAMES, max_memory_frames)
-            self.total_colored_frames = 0
-            self._colorize_init(image_size, vid_length, propagate)
+            self._colorize_model_init(vid_length)
             self._initialized = True
 
-    def _colorize_init(self, image_size: int = -1, vid_length: int = 100, propagate: bool = False):
-
+    def _colorize_config_init(self, image_size: int = -1, vid_length: int = 100, propagate: bool = False):
         """
-                size - resize min. side to size. Does nothing if <0.
-                Resize the shorter side to this size. -1 to use original resolution.
-        """
+                        size - resize min. side to size. Does nothing if <0.
+                        Resize the shorter side to this size. -1 to use original resolution.
+       """
 
         cudnn.benchmark = True
         torch.autograd.set_grad_enabled(False)
@@ -138,6 +142,13 @@ class ColorMNetRender:
                 transforms.Resize(image_size, interpolation=InterpolationMode.BILINEAR),
             ])
         self.size = image_size
+        self.ref_img = None
+        self.img = None
+
+    def _colorize_model_init(self, vid_length: int = 100):
+
+        cudnn.benchmark = True
+        torch.autograd.set_grad_enabled(False)
 
         # Model setup
         self.network = ColorMNet(self.config, self.config['model']).cuda().eval()
@@ -152,8 +163,6 @@ class ColorMNetRender:
                 >= self.config['max_long_term_elements']
         )
         self.processor = InferenceCore(self.network, config=self.config)
-        self.ref_img = None
-        self.img = None
 
     def set_config(self, param_name: str = None, param_value: any = None):
         self.config[param_name] = param_value
@@ -181,6 +190,9 @@ class ColorMNetRender:
             col_i = self.colorize_frame(i, frame_i)
             frames_colored.append(col_i)
         return frames_colored
+
+    def get_frame_count(self) -> int:
+        return self.frame_count
 
     def colorize_frame(self, ti: int = None, frame_i: Image = None) -> Image:
 
@@ -241,13 +253,14 @@ class ColorMNetRender:
             labels = None
 
         # Run the model on this frame
-        is_last_frame = self.vid_length == self.total_colored_frames - 1   # (ti == (self.vid_length - 1))
+        is_last_frame = self.vid_length == self.total_colored_frames - 1  # (ti == (self.vid_length - 1))
         if self.config['FirstFrameIsNotExemplar']:
 
             if msk is None:
-                prob = self.processor.step_AnyExemplar(rgb, None,None, labels, end=is_last_frame)
+                prob = self.processor.step_AnyExemplar(rgb, None, None, labels, end=is_last_frame)
             else:
-                prob = self.processor.step_AnyExemplar(rgb, msk[:1, :, :].repeat(3, 1, 1), msk[1:3, :, :], labels, end=is_last_frame)
+                prob = self.processor.step_AnyExemplar(rgb, msk[:1, :, :].repeat(3, 1, 1), msk[1:3, :, :], labels,
+                                                       end=is_last_frame)
         else:
             prob = self.processor.step(rgb, msk, labels, end=is_last_frame)
 

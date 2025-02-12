@@ -85,6 +85,13 @@ class ColorMNetRPCServer:
                 warnings.warn("ColorMNet Render is not initialized")
                 return img_byte_array
 
+        def GetFrameCount(self) -> int:
+            if self.render is not None:
+                return self.render.get_frame_count()
+            else:
+                warnings.warn("ColorMNet Render is not initialized")
+                return 0
+
     def start_server(self):
         warnings.warn("start ColorMNet server, listening on : " + str(self.server.server_address))
         # Run the server's main loop

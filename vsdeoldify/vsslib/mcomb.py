@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-05
+LastEditTime: 2025-02-08
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -33,17 +33,30 @@ function to build the refrence image used for the inference by DeepEx
 """
 
 
-def vs_ext_reference_clip(clip: vs.VideoNode, sc_framedir: str = None) -> vs.VideoNode:
+def vs_ext_reference_clip(clip: vs.VideoNode, sc_framedir: str = None, clip_resize: bool = False) -> vs.VideoNode:
     if not os.path.exists(sc_framedir):
         HAVC_LogMessage(MessageType.EXCEPTION, "vs_ext_reference_clip(): frames path '", sc_framedir, "' is invalid")
 
     ref_images = get_ref_images(sc_framedir)
     ref_images.sort()
 
+    f_size = (clip.width, clip.height)
+    if clip_resize:
+        # resize the clip to the same size of first reference image
+        img_path = ref_images[0]
+        if os.path.isfile(img_path):
+            try:
+                ref_img = Image.open(img_path).convert('RGB')
+                if ref_img.size != f_size:
+                    clip = clip.resize.Spline64(width=ref_img.size[0], height=ref_img.size[1])
+                    f_size = ref_img.size
+            except Exception as error:
+                HAVC_LogMessage(MessageType.WARNING, "Error reading reference frame: ", img_path, " -> ", error)
+
     def set_clip_frame(n, f, img_list: list = None, f_size: Tuple[int, int] = None):
 
         is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1)
-        ref_img = None
+
         if not is_scenechange:
             return f.copy()
 
@@ -71,8 +84,7 @@ def vs_ext_reference_clip(clip: vs.VideoNode, sc_framedir: str = None) -> vs.Vid
 
         return image_to_frame(ref_img, f.copy())
 
-    clip_ref = clip.std.ModifyFrame(clips=[clip], selector=partial(set_clip_frame, img_list=ref_images,
-                                                                   f_size=(clip.width, clip.height)))
+    clip_ref = clip.std.ModifyFrame(clips=[clip], selector=partial(set_clip_frame, img_list=ref_images, f_size=f_size))
 
     return clip_ref
 
@@ -94,16 +106,18 @@ def vs_sc_combine_models(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None,
 
     if clipa is not None:
         clipa = vs_sc_tweak(clipa, hue=hue[0], sat=sat[0], scenechange=scenechange)
-        if clipb is None: return clipa
+        if clipb is None:
+            return clipa
 
     if clipb is not None:
         clipb = vs_sc_tweak(clipb, hue=hue[1], sat=sat[1], scenechange=scenechange)
-        if clipa is None: return clipb
+        if clipa is None:
+            return clipb
 
     if method == 2:
         return SCSimpleMerge(clipa, clipb, clipb_weight, scenechange)
     else:
-        raise vs.Error("HybridAVC: only dd_method=(0,5) is supported")
+        raise vs.Error("HAVC: only dd_method=2 (Simple Merge) is supported")
 
 
 def vs_combine_models(clip_a: vs.VideoNode = None, clip_b: vs.VideoNode = None, method: int = 0, sat: list = [1, 1],
@@ -129,11 +143,13 @@ def vs_combine_models(clip_a: vs.VideoNode = None, clip_b: vs.VideoNode = None, 
 
     if clipa is not None:
         clipa = vs_tweak(clipa, hue=hue[0], sat=sat[0])
-        if clipb is None: return clipa
+        if clipb is None:
+            return clipa
 
     if clipb is not None:
         clipb = vs_tweak(clipb, hue=hue[1], sat=sat[1])
-        if clipa is None: return clipb
+        if clipa is None:
+            return clipb
 
     if method == 2:
         return SimpleMerge(clipa, clipb, clipb_weight)
@@ -144,7 +160,7 @@ def vs_combine_models(clip_a: vs.VideoNode = None, clip_b: vs.VideoNode = None, 
     if method == 5:
         return AdaptiveLumaMerge(clipa, clipb, luma_threshold, alpha, clipb_weight, min_weight)
     else:
-        raise vs.Error("HybridAVC: only dd_method=(0,5) is supported")
+        raise vs.Error("HAVC: only dd_method in (0,5) is supported")
 
 
 """

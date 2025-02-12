@@ -50,8 +50,11 @@ class ColorMNetClient:
             except Exception as exe:
                 warnings.warn("ERROR[" + str(type(exe)) + "]: " + str(exe))
 
-    def is_initialized(self):
+    def is_initialized(self) -> bool:
         return self.server.IsInitialized()
+
+    def get_frame_count(self) -> int:
+        return self.server.GetFrameCount()
 
     def set_ref_frame(self, frame_ref: Image = None, frame_propagate: bool = False):
         if frame_ref is None:

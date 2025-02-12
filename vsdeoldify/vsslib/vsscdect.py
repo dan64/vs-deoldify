@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-19
+LastEditTime: 2025-02-09
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -34,9 +34,9 @@ if sc_tht_filter > 0 it will be activated the post change scene detection filter
 based on SSIM. This metric is used to measure how similar are two images. 
 It measures images luminance, contrast and structure and compare those values on 2 images.
 Suggested values to use this features are:
-threshold=0.03-0.05 (very sensitive threshold)
-frequency=25 (or tht_offset=5)
-sc_tht_filter=0.70-0.75  
+threshold=0.05-0.09 (very sensitive threshold)
+frequency=25
+sc_tht_filter=0.65-0.75  
 """
 
 
@@ -49,17 +49,26 @@ def SceneDetect(clip: vs.VideoNode, threshold: float = DEF_THRESHOLD, frequency:
     if threshold == 0 and frequency == 0:
         return clip
 
-    def set_scene_change_all(n, f) -> vs.VideoFrame:
+    def set_scene_change_freq(n, f, freq: int = 1) -> vs.VideoFrame:
 
         f_out = f.copy()
 
-        f_out.props['_SceneChangePrev'] = 1
-        f_out.props['_SceneChangeNext'] = 0
-
+        if freq == 1:
+            f_out.props['_SceneChangePrev'] = 1
+            f_out.props['_SceneChangeNext'] = 0
+        elif n == 0:
+            f_out.props['_SceneChangePrev'] = 1
+            f_out.props['_SceneChangeNext'] = 0
+        elif n % freq == 0:
+            f_out.props['_SceneChangePrev'] = 1
+            f_out.props['_SceneChangeNext'] = 0
+        else:
+            f_out.props['_SceneChangePrev'] = 0
+            f_out.props['_SceneChangeNext'] = 0
         return f_out
 
-    if frequency == 1:
-        return clip.std.ModifyFrame(clips=[clip], selector=partial(set_scene_change_all))
+    if frequency == 1 or (threshold == 0 and frequency > 1):
+        return clip.std.ModifyFrame(clips=[clip], selector=partial(set_scene_change_freq, freq=frequency))
 
     try:
         sc_class = SceneDetection(sc_adaptive_ratio=DEF_ADAPTIVE_RATIO_MED if frequency > 0 else DEF_ADAPTIVE_RATIO_LO,
@@ -72,7 +81,7 @@ def SceneDetect(clip: vs.VideoNode, threshold: float = DEF_THRESHOLD, frequency:
         m_length = min(max(min_length, 1), 25)
         sc = sc_class.SceneDetect(clip, threshold, sc_tht_filter, m_length, frame_norm, t_offset)
     except Exception as error:
-        raise vs.Error("HAVC_ddeoldify: failure in SceneDetect(): -> " + str(error))
+        raise vs.Error("HAVC_colorizer: failure in SceneDetect(): -> " + str(error))
 
     return sc
 
@@ -108,6 +117,13 @@ def get_sc_props(clip: vs.VideoNode) -> tuple[float, int]:
 def CopySCDetect(clip: vs.VideoNode, sc: vs.VideoNode) -> vs.VideoNode:
     return clip.std.CopyFrameProps(prop_src=sc, props=['_SceneChangePrev', '_SceneChangeNext',
                                                        'sc_threshold', 'sc_frequency', 'sc_luma', 'sc_ratio'])
+
+
+def BuildSCDetect(clip_ref: vs.VideoNode) -> vs.VideoNode:
+    clip = vs.core.std.BlankClip(clip=clip_ref, length=clip_ref.num_frames,
+                                 fpsnum=clip_ref.fps_num, fpsden=clip_ref.fps_den)
+    return clip.std.CopyFrameProps(prop_src=clip_ref, props=['_SceneChangePrev', '_SceneChangeNext',
+                                                             'sc_threshold', 'sc_frequency', 'sc_luma', 'sc_ratio'])
 
 
 def SceneDetectFromDir(clip: vs.VideoNode, sc_framedir: str = None, merge_ref_frame: bool = False,
@@ -203,7 +219,7 @@ class SceneDetection:
                 sc = self.filter_black_white(clip, sc)
 
         except Exception as error:
-            raise vs.Error("HAVC_ddeoldify: plugin 'MiscFilters.dll' not properly loaded/installed: -> " + str(error))
+            raise vs.Error("HAVC_colorizer: plugin 'MiscFilters.dll' not properly loaded/installed: -> " + str(error))
 
         if 0.0 < sc_tht_filter < 1.0 or min_length > 1:
             clip = clip.std.CopyFrameProps(prop_src=sc, props=['_SceneChangePrev', '_SceneChangeNext',

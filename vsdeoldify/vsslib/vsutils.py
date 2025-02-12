@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-05
+LastEditTime: 2025-02-09
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -35,12 +35,13 @@ class MessageType(IntEnum):
     EXCEPTION = 10  # raise a fatal exception that terminates the process
 
 
+"""
 def HAVC_LogMessage(message_type: MessageType = MessageType.INFORMATION, message_text: str = None):
     if message_type == MessageType.EXCEPTION:
         raise vs.Error(message_text)
     else:
         vs.core.log_message(int(message_type), message_text)
-
+"""
 
 def HAVC_LogMessage(message_type: MessageType = MessageType.INFORMATION, *args):
     message_text: str = ' '.join(map(str, args))
@@ -123,19 +124,30 @@ Description:
 Function to save the reference frames of a clip 
 """
 
+# global variable for sc counting
+_sc_counter: int
+_sc_list: list[int]
+
 
 def vs_sc_export_frames(clip: vs.VideoNode = None, sc_framedir: str = None, ref_offset: int = 0,
                         ref_ext: str = 'png', ref_jpg_quality: int = 95, ref_override: bool = True,
-                        prop_name: str = "_SceneChangePrev") -> vs.VideoNode:
+                        prop_name: str = "_SceneChangePrev", sequence: bool = False) -> vs.VideoNode:
     pil_ext = ref_ext.lower()
+    global _sc_counter
+    _sc_counter = 0
 
-    def save_sc_frame(n, f, sc_framedir: str = None, ref_offset: int = 0,
-                      ref_ext: str = 'png', ref_jpg_quality: int = 95, ref_override: bool = True):
+    def save_sc_frame(n, f, sc_framedir: str = None, ref_offset: int = 0, prop_name: str = "_SceneChangePrev",
+                      ref_ext: str = 'png', ref_jpg_quality: int = 95, ref_override: bool = True,
+                      sequence: bool = False):
+        global _sc_counter
 
         is_scenechange = (n == 0) or (f.props[prop_name] == 1)
-
         if is_scenechange:
-            ref_n = n + ref_offset
+            if sequence:
+                ref_n = _sc_counter
+                _sc_counter = _sc_counter + 1
+            else:
+                ref_n = n + ref_offset
             img = frame_to_image(f)
             img_path = os.path.join(sc_framedir, f"ref_{ref_n:06d}.{ref_ext}")
             if not ref_override and os.path.exists(img_path):
@@ -148,11 +160,54 @@ def vs_sc_export_frames(clip: vs.VideoNode = None, sc_framedir: str = None, ref_
         return f.copy()
 
     clip = clip.std.ModifyFrame(clips=[clip], selector=partial(save_sc_frame, sc_framedir=sc_framedir,
-                                                               ref_offset=ref_offset, ref_ext=pil_ext,
-                                                               ref_jpg_quality=ref_jpg_quality,
-                                                               ref_override=ref_override))
+                                                               ref_offset=ref_offset, prop_name=prop_name,
+                                                               ref_ext=pil_ext, ref_jpg_quality=ref_jpg_quality,
+                                                               ref_override=ref_override, sequence=sequence))
 
     return clip
+
+
+def vs_get_video_ref(clip: vs.VideoNode = None, prop_name: str = "_SceneChangePrev") -> vs.VideoNode:
+    global _sc_list, _sc_counter
+    _sc_list = []
+
+    def get_sc_list(n, f, prop_name: str):
+        global _sc_list
+
+        is_scenechange = (n == 0) or (f.props[prop_name] == 1)
+        if is_scenechange:
+            _sc_list.append(n)
+        return f.copy()
+
+    clip = clip.std.ModifyFrame(clips=[clip], selector=partial(get_sc_list, prop_name=prop_name))
+
+    # set property to set the next reference frame position
+    clip = clip.std.SetFrameProp(prop="sc_next_frame", intval=0)
+    _sc_counter = 0
+
+    def set_sc_list(n, f, sc_list: list[int], prop_name: str):
+        global _sc_counter
+        f_out = f.copy()
+        is_scenechange = (n == 0) or (f.props[prop_name] == 1)
+        if is_scenechange:
+            if _sc_counter < len(sc_list):
+                f_out.props["sc_next_frame"] = sc_list[_sc_counter]
+            else:
+                f_out.props["sc_next_frame"] = -1   # end list
+            _sc_counter = _sc_counter + 1
+        else:
+            f_out.props["sc_next_frame"] = 0
+
+        return f.copy()
+
+    clip = clip.std.ModifyFrame(clips=[clip], selector=partial(set_sc_list, sc_list=_sc_list, prop_name=prop_name))
+
+    return clip
+
+
+def get_ref_last_list() -> list[int]:
+    global _sc_list
+    return _sc_list
 
 
 def get_ref_num(filename: str = ""):
@@ -190,11 +245,7 @@ def frame_normalize(frame_np: np.ndarray, tht_black: float = 0.10, tht_white: fl
 
     img_np = frame_np.copy()
 
-    np_min = np.min(frame_y)
-    np_max = np.max(frame_y)
-    np_delta = np_max - np_min
-    np_norm = (frame_y - np_min) / np_delta
-    frame_y = np.multiply(255, np_norm)
+    frame_y = np.multiply(255, (frame_y - np.min(frame_y)) / (np.max(frame_y) - np.min(frame_y)))
 
     img_np[:, :, 0] = frame_y.clip(0, 255).astype('uint8')
 
@@ -220,25 +271,32 @@ def mean_pixel_distance(y_left: np.ndarray, y_right: np.ndarray, normalize: bool
 
 
 def debug_ModifyFrame(f_start: int = 0, f_end: int = 1, clip: vs.VideoNode = None,
-                      clips: list[vs.VideoNode] = None, selector: partial = None) -> vs.VideoNode:
-
+                      clips: list[vs.VideoNode] = None, selector: partial = None, silent: bool = True) -> vs.VideoNode:
     if len(clips) == 1:
         if f_start > 0:
             frame = clips[0].get_frame(0)
+            if not silent:
+                print("Debug Frame: ", 0)
             selector(0, frame)
         for n in range(f_start, f_end):
             frame = clips[0].get_frame(n)
+            if not silent:
+                print("Debug Frame: ", n)
             selector(n, frame)
     else:
         if f_start > 0:
             frame = []
             for j in range(0, len(clips)):
                 frame.append(clips[j].get_frame(0))
+            if not silent:
+                print("Debug Frame: ", 0)
             selector(0, frame)
         for n in range(f_start, f_end):
             frame = []
             for j in range(0, len(clips)):
                 frame.append(clips[j].get_frame(n))
+            if not silent:
+                print("Debug Frame: ", n)
             selector(n, frame)
 
     return clip

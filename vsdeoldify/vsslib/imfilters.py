@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-14
+LastEditTime: 2025-02-08
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -109,9 +109,22 @@ numpy implementation of image merge on 3 planes, faster than vs.core.std.Merge()
 
 
 def image_weighted_merge(img1: Image, img2: Image, weight: float = 0.5) -> Image:
+
+    if weight == 0.0:
+        return Image.fromarray(img1)
+
+    if weight == 1.0:
+        return Image.fromarray(img2)
+
     img1_np = np.asarray(img1)
     img2_np = np.asarray(img2)
 
+    img_new = np_image_weighted_merge(img1_np, img2_np, weight)
+
+    return Image.fromarray(img_new)
+
+
+def np_image_weighted_merge(img1_np: np.ndarray, img2_np: np.ndarray, weight: float = 0.5) -> np.ndarray:
     img_new = np.copy(img1_np)
 
     img_m = np.multiply(img1_np, 1 - weight) + np.multiply(img2_np, weight)
@@ -123,7 +136,7 @@ def image_weighted_merge(img1: Image, img2: Image, weight: float = 0.5) -> Image
     img_new[:, :, 1] = img_m[:, :, 1]
     img_new[:, :, 2] = img_m[:, :, 2]
 
-    return Image.fromarray(img_new)
+    return img_new
 
 
 """

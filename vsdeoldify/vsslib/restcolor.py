@@ -8,7 +8,7 @@ LastEditTime: 2025-01-05
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
-Library of functions used by "ddeoldify" to restore color and change the hue of frames.
+Library of functions used by "HAVC" to restore color and change the hue of frames.
 """
 import vapoursynth as vs
 import math
@@ -36,7 +36,7 @@ So the range of hue in the HSV color space of OpenCV is [0,179]
 
 
 def restore_color(img_color: Image = None, img_gray: Image = None, sat: float = 1.0, tht: int = 15, weight: float = 0,
-                  tht_scen: float = 0.15, hue_adjust: str = 'none', return_mask: bool = False) -> Image:
+                  tht_scen: float = 0.8, hue_adjust: str = 'none', return_mask: bool = False) -> Image:
     np_color = np.asarray(img_color)
     np_gray = np.asarray(img_gray)
 
@@ -54,7 +54,7 @@ def restore_color(img_color: Image = None, img_gray: Image = None, sat: float = 
 
     scenechange = np.mean(hsv_mask) / 255
 
-    if tht_scen > 0 and tht_scen < 1 and scenechange > tht_scen:
+    if 0 < tht_scen < 1 and scenechange > tht_scen:
         if hue_adjust != "" and hue_adjust != "none":
             return adjust_hue_range(img_gray, hue_adjust=hue_adjust)
         else:

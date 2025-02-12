@@ -1,10 +1,16 @@
-# Hybrid Automatic Video Colorizer (aka DDeoldify)
+# Hybrid Automatic Video Colorizer (aka HAVC)
 A Deep Learning based [ VapourSynth](https://www.vapoursynth.com/) filter for colorizing and restoring old images and video, based on the following projects: [DeOldify](https://github.com/jantic/DeOldify)
-,  [DDColor](https://github.com/HolyWu/vs-ddcolor), [Colorization](https://github.com/richzhang/colorization), [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization) and [ColorMNet](https://github.com/yyang181/colormnet). The project  [Colorization](https://github.com/richzhang/colorization) includes 2 models: _Real-Time User-Guided Image Colorization with Learned Deep Priors_ (Zhang, 2017) and _Colorful Image Colorization_ (Zhang, 2016). These 2 models has been added as alternative models (named: _siggraph17_, _eccv16_) to DDColor .
+,  [DDColor](https://github.com/HolyWu/vs-ddcolor), [Colorization](https://github.com/richzhang/colorization), [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization), [DeepRemaster](https://github.com/satoshiiizuka/siggraphasia2019_remastering) and [ColorMNet](https://github.com/yyang181/colormnet). The project  [Colorization](https://github.com/richzhang/colorization) includes 2 models: _Real-Time User-Guided Image Colorization with Learned Deep Priors_ (Zhang, 2017) and _Colorful Image Colorization_ (Zhang, 2016). These 2 models has been added as alternative models (named: _siggraph17_, _eccv16_) to DDColor .
 
 The Vapoursynth filter version has the advantage of coloring the images directly in memory, without the need to use the filesystem to store the video frames. 
 
-This filter (_HAVC_ in short) is able to combine the results provided by _DeOldify_ and _DDColor_ (_Colorization_), which are some of the best models available for coloring pictures, providing often a final colorized image that is better than the image obtained from the individual models.  But the main strength of this filter is the addition of specialized filters to improve the quality of videos obtained by using these color models and the possibility to improve further the stability by using these models as input to [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization) model (_DeepEx_ in short) and  [ColorMNet](https://github.com/yyang181/colormnet). Both _DeepEx_ and _ColorMNet_ are exemplar-based video colorization models and allow to colorize a Video in sequence based on the colorization history, enforcing its coherency by using a temporal consistency loss. ColorMNet is more recent and advanced respect to DeepEx and it is suggested to use it as default exemplar-based model. 
+For this filter is available a [User Guide](https://github.com/dan64/vs-deoldify/blob/main/documentation/HAVC%20User%20Guide.pdf) which provides useful tips and detailed explanations regarding the filter functions and usage. It is strongly recommended reading it.
+
+The filter (_HAVC_ in short) is able to combine the results provided by _DeOldify_ and _DDColor_ (_Colorization_), which are some of the best models available for coloring pictures, providing often a final colorized image that is better than the image obtained from the individual models.  But the main strength of this filter is the addition of specialized filters to improve the quality of videos obtained by using these color models and the possibility to improve further the stability by using these models as input to [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization) model (_DeepEx_ in short), [DeepRemaster](https://github.com/satoshiiizuka/siggraphasia2019_remastering) and  [ColorMNet](https://github.com/yyang181/colormnet).
+
+  _DeepEx_, _DeepRemaster_ and _ColorMNet_ are exemplar-based video colorization models, which allow to colorize a movie starting from an external-colored reference image. They allow to colorize a Video in sequence based on the colorization history, enforcing its coherency by using a temporal consistency loss. _ColorMNet_ is more recent and advanced respect to _DeepEx_ and it is suggested to use it as default exemplar-based model.
+
+  _DeepRemaster_ has the interesting feature to be able store the reference images, so that is able to manages situations where the reference images not are synchronized with the movie to colorize. Conversely _ColorMNet_ is not storing the full reference frame image (like _DeepRemaster_) but it stores only the key points (e.g., representative pixels in each frame). This imply that the colored frames could have some colors that are very different from the reference image. _DeepRemaster_ has not this problem since it stores the full reference image. Unfortunately, the number of reference images that DeepRemaster is able to use depends on GPU memory and power, because the time required for inference increase with the number of reference images provided. Instead _ColorMNet_ has some interpolation capability while _DeepRemaster_ is very basic and is unable to properly colorize a frame if is missing a reference image very similar and it need a lot of reference images to be able to properly colorize a movie (the time resolution of _DeepRemaster_ is 15 frames). So, the choice of which exemplar-based video colorization model to use depends on the source to colorize and the number of reference image available. 
 
 ## Quick Start
 
@@ -52,6 +58,8 @@ To use ColorMNet it also necessary to download the file [DINOv2FeatureV6_LocalAt
 
 .\Lib\site-packages\vsdeoldify\colormnet\weights
 
+With the version 5.0 of HAVC has been added the model [DeepRemaster](https://github.com/satoshiiizuka/siggraphasia2019_remastering), for using it is necessary to download the file [remasternet.pth.tar ](http://iizuka.cs.tsukuba.ac.jp/data/remasternet.pth.tar) (is not a tar, just a "pth" renamed as "pth.tar") and copy it in: ".\Lib\site-packages\vsdeoldify\remaster\model".
+
 At the first usage it is possible that are automatically downloaded by torch the neural networks: **resnet101** and **resnet34**, and starting with the release 4.5.0:  **resnet50**, **resnet18**, **dinov2_vits14_pretrain** and the folder **facebookresearch_dinov2_main** 
 
 So don't be worried if at the first usage the filter will be very slow to start, at the initialization are loaded almost all the _Fastai_ and _PyTorch_ modules and the resnet networks.
@@ -80,15 +88,15 @@ clip = core.std.SetFrameProps(clip=clip, _ColorRange=0)
 # adjusting color space from YUV420P16 to RGB24
 clip = core.resize.Bicubic(clip=clip, format=vs.RGB24, matrix_in_s="709", range_s="full")
 
-from vsdeoldify import HAVC_main, HAVC_ddeoldify
+from vsdeoldify import HAVC_main, HAVC_colorizer
 # DeOldify with DDColor, Preset = "fast"
 clip = HAVC_main(clip=clip, Preset="fast")
 # DeOldify only model
-clip = HAVC_ddeoldify(clip, method=0)
+clip = HAVC_colorizer(clip, method=0)
 # DDColor only model
-clip = HAVC_ddeoldify(clip, method=1)
+clip = HAVC_colorizer(clip, method=1)
 
-# To apply video color stabilization filters for ddeoldify
+# To apply video color stabilization filters to colored clip 
 clip = HAVC_stabilizer(clip, dark=True, smooth=True, stab=True)
 
 # Simplest way to use Presets
@@ -103,13 +111,17 @@ clip = core.resize.Bicubic(clip, range_in_s="full", range_s="limited")
 
 See `__init__.py` for the description of the parameters.
 
-**NOTE**: In the _DDColor_ version included with **HAVC** the parameter _input_size_ has changed name in _render_factor_ because were changed the range of values of this parameter to be equivalent to _render_factor_ in _DeOldify_, the relationship between these 2 parameters is the following:
+**NOTES**: 
+
+- In the _DDColor_ version included with **HAVC** the parameter _input_size_ has changed name in _render_factor_ because were changed the range of values of this parameter to be equivalent to _render_factor_ in _DeOldify_, the relationship between these 2 parameters is the following:
 
 ```
 input_size = render_factor * 16
 ``` 
 
-In the modified version of _DDColor_  1.0.1 was added the boolean parameter _scenechange_, if this parameter is set to _True_, will be colored only the frames tagged as scene change.  
+- In the modified version of _DDColor_  1.0.1 was added the boolean parameter _scenechange_, if this parameter is set to _True_, will be colored only the frames tagged as scene change.  
+
+- In the folder __samples__ there are some clips and reference images that can be used to test the filter. The clips _sample_colored_sync.mp4_ and _sample_colored_async.mp4_ are useful to test the new video restore functionality added in HAVC 5.0 (described in the User Guide). The clip _sample_colored_sync.mp4_ is fully in sync with the clip _sample_bw_.mp4 and any of the exemplar-based models can be used to colorize it, while the clip _sample_colored_async.mp4_ is not in sync and only _DeepRemaster_ is able to properly colorize the movie.   
 
 ## Filter Usage
 
@@ -302,7 +314,7 @@ First of all, it should be noted that the individual models added (**DA** for _D
 
 ## Exemplar-based Models
 
-As stated previously to stabilize further the colorized videos it is possible to use the frames colored by HAVC as reference frames (exemplar) as input to the supported exemplar-based models: [ColorMNet](https://github.com/yyang181/colormnet) and [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization) model. 
+As stated previously to stabilize further the colorized videos it is possible to use the frames colored by HAVC as reference frames (exemplar) as input to the supported exemplar-based models: [ColorMNet](https://github.com/yyang181/colormnet),  [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization) and [DeepRemaster](https://github.com/satoshiiizuka/siggraphasia2019_remastering). 
 
 In Hybrid the _Exemplar Models_ have their own panel, as shown in the following picture: 
 ![Hybrid DeepEx](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_DeepEx.JPG)   
@@ -323,7 +335,7 @@ The field **SC thresh** define the sensitivity for the scene detection (suggeste
 The  flag **Vivid** has 2 different meanings depending on the _Exemplar Model_ used:
 
 - __ColorMNet__ (the frames memory is reset at every reference frame update)
-- __DeepEx__ (given that the colors generated by the  inference are a little washed out , the saturation of colored frames will be increased by about 25%).
+- __DeepEx__, __DeepRemaster__ (given that the colors generated by the  inference are a little washed out , the saturation of colored frames will be increased by about 25%).
 
 The field **Method** allows to specify the type of reference frames (RF) provided in input to the _Exemplar-based Models_, allowed values are:
 - 0 = HAVC same as video (default)
@@ -331,9 +343,10 @@ The field **Method** allows to specify the type of reference frames (RF) provide
 - 2 = HAVC + RF different from video
 - 3 = external RF same as video
 - 4 = external RF different from video
-- 5 = HAVC different from video
+- 5 = external ClipRef same as video
+- 6 = external ClipRef different from video
 
-It is possible to specify the directory containing the external reference frames by using the field **Ref FrameDir**. The frames must be named using the following format: _ref_nnnnnn.[png|jpg]_.
+It is possible to specify the directory containing the external reference frames by using the field **Ref FrameDir**. The frames must be named using the following format: _ref_nnnnnn.[png|jpg]_. For the methods 5 and 6 it is possible to pass a video clip as source for reference images.
 
 Unfortunately all the Deep-Exemplar methods have the problem that are unable to properly colorize the new "features" (new elements not available in the reference frame) so that often these new elements are colored with implausible colors (see for an example: [New "features" are not properly colored](https://github.com/yyang181/NTIRE23-VIDEO-COLORIZATION/issues/10)). To try to fix this problem has been introduced the possibility to merge the frames propagated by DeepEx with the frames colored with DDColor and/or DeOldify. The merge is controlled by the field **Ref merge**, allowed values are:
 - 0 = no merge
@@ -372,7 +385,7 @@ In the following picture are shown the suggested parameters:
 
 ## Conclusions
 
-In Summary **HAVC** is able to provide often a final colorized image that is better than the image obtained from the individual models, and can be considered an improvement respect to the current Models.  It is suggested to read the [HAVC User Guide](https://github.com/dan64/vs-deoldify/blob/main/documentation/HAVC%20User%20Guide.pdf) which provides useful tips on how to improve the colored movies.   
+In Summary **HAVC** is able to provide often a final colorized image that is better than the image obtained from the individual models, and can be considered an improvement respect to the current Models.  It is highly recommended to read the [HAVC User Guide](https://github.com/dan64/vs-deoldify/blob/main/documentation/HAVC%20User%20Guide.pdf) which provides useful tips on how to improve the colored movies.   
 
 As a final consideration I would like to point out that the test results showed that the images coloring technology is mature enough to be used concretely both for coloring images and, thanks to **Hybrid**, videos.
 
