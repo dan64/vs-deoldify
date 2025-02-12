@@ -80,6 +80,7 @@ The archive  **colorization_checkpoint.zip** have to be unziped in: .\Lib\site-p
 ```python
 # loading plugins
 core.std.LoadPlugin(path="MiscFilters.dll")
+import vsdeoldify as havc
 
 # changing range from limited to full range for HAVC
 clip = core.resize.Bicubic(clip, range_in_s="limited", range_s="full")
@@ -88,22 +89,22 @@ clip = core.std.SetFrameProps(clip=clip, _ColorRange=0)
 # adjusting color space from YUV420P16 to RGB24
 clip = core.resize.Bicubic(clip=clip, format=vs.RGB24, matrix_in_s="709", range_s="full")
 
-from vsdeoldify import HAVC_main, HAVC_colorizer
+
 # DeOldify with DDColor, Preset = "fast"
-clip = HAVC_main(clip=clip, Preset="fast")
+clip = havc.HAVC_main(clip=clip, Preset="fast")
 # DeOldify only model
-clip = HAVC_colorizer(clip, method=0)
+clip = havc.HAVC_colorizer(clip, method=0)
 # DDColor only model
-clip = HAVC_colorizer(clip, method=1)
+clip = havc.HAVC_colorizer(clip, method=1)
 
 # To apply video color stabilization filters to colored clip 
-clip = HAVC_stabilizer(clip, dark=True, smooth=True, stab=True)
+clip = havc.HAVC_stabilizer(clip, dark=True, smooth=True, stab=True)
 
 # Simplest way to use Presets
-clip = HAVC_main(clip=clip, Preset="fast", ColorFix="violet/red", ColorTune="medium", ColorMap="none")
+clip = havc.HAVC_main(clip=clip, Preset="fast", ColorFix="violet/red", ColorTune="medium", ColorMap="none")
 
 # ColorMNet model using HAVC as input for the reference frames
-clip = HAVC_main(clip=clip, EnableDeepEx=True, ScThreshold=0.1)
+clip = havc.HAVC_main(clip=clip, EnableDeepEx=True, ScThreshold=0.1)
 
 # changing range from full to limited range for HAVC
 clip = core.resize.Bicubic(clip, range_in_s="full", range_s="limited")
