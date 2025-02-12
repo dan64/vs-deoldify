@@ -4,7 +4,7 @@ A Deep Learning based [ VapourSynth](https://www.vapoursynth.com/) filter for co
 
 The Vapoursynth filter version has the advantage of coloring the images directly in memory, without the need to use the filesystem to store the video frames. 
 
-For this filter is available a [User Guide](https://github.com/dan64/vs-deoldify/blob/main/documentation/HAVC%20User%20Guide.pdf) which provides useful tips and detailed explanations regarding the filter functions and usage. It is strongly recommended reading it.
+For this filter is available a [User Guide](https://github.com/dan64/vs-deoldify/blob/main/documentation/HAVC%20User%20Guide.pdf) which provides useful tips and detailed explanations regarding the filter functions and usage. It is strongly recommended reading it before using the filter.
 
 The filter (_HAVC_ in short) is able to combine the results provided by _DeOldify_ and _DDColor_ (_Colorization_), which are some of the best models available for coloring pictures, providing often a final colorized image that is better than the image obtained from the individual models.  But the main strength of this filter is the addition of specialized filters to improve the quality of videos obtained by using these color models and the possibility to improve further the stability by using these models as input to [Deep Exemplar based Video Colorization](https://github.com/zhangmozhe/Deep-Exemplar-based-Video-Colorization) model (_DeepEx_ in short), [DeepRemaster](https://github.com/satoshiiizuka/siggraphasia2019_remastering) and  [ColorMNet](https://github.com/yyang181/colormnet).
 
