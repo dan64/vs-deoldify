@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-02-12
+LastEditTime: 2025-02-14
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -621,8 +621,9 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
     # ------------------------------------------------------------------------------------------------------------------
     # SPECIAL MANAGEMENT OF DeepRemaster (ex_model = 2)
     if method in (0, 1, 2) and ex_model == 2:
-        return HAVC_restore_video(clip, clip_ref, method, render_speed, ex_model, ref_merge, ref_weight, sc_threshold,
-                                  sc_frequency, ref_norm, max_memory_frames, render_vivid, encode_mode)
+        HAVC_LogMessage(MessageType.EXCEPTION,
+                        "HAVC_deepex: DeepRemaster cannot be used with methods: 0, 1, 2 (HAVC)")
+
     # SPECIAL MANAGEMENT OF METHOD=(5,6)
     if method in (5, 6):
         return HAVC_restore_video(clip, clip_ref, method, render_speed, ex_model, ref_merge, ref_weight, ref_thresh,
@@ -835,8 +836,8 @@ def HAVC_restore_video(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None,
     # disable packages warnings
     disable_warnings()
 
-    if method not in (0, 1, 2, 5, 6):
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC: Video restore is supported on with methods: 0, 1, 2, 5, 6")
+    if method not in (5, 6):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC: Video restore is supported only with methods: 5, 6")
 
     if not isinstance(clip, vs.VideoNode):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: this is not a clip")
@@ -1483,29 +1484,6 @@ def HAVC_export_reference_frames(clip: vs.VideoNode, sc_framedir: str = "./", re
                                    HAVC INTERNAL FUNCTIONS
 ------------------------------------------------------------------------------------------------------------------------ 
 """
-
-
-def _colorizer_stable(clip: vs.VideoNode = None, do_model: int = 0, deoldify_rf: int = 22,
-                      mweight: float = 0.5) -> vs.VideoNode:
-    clip_colored = HAVC_colorizer(clip=clip, method=0, deoldify_p=[do_model, deoldify_rf, 1, 0])
-
-    # the adjustment force DeepRemaster to return a clip brown colored
-    clip_ref = havc_utils.adjust_rgb(rgb=clip_colored, rb=30.0, gb=10.0, bb=-20.0)
-
-    clip_brown = HAVC_restore_video(clip, clip_ref, render_speed="medium", ex_model=2, ref_merge=0, ref_thresh=0.10,
-                                    ref_freq=5, max_memory_frames=6, render_vivid=False, ref_norm=False)
-
-    # adjusting output color from: RGB24 to YUV420P8
-    clip_colored = vs.core.resize.Bicubic(clip=clip_colored, format=vs.YUV420P8, matrix_s="709", range_s="full")
-    clip_brown = vs.core.resize.Bicubic(clip=clip_brown, format=vs.YUV420P8, matrix_s="709", range_s="full")
-
-    clip_stable = vs.core.std.Merge(clipa=clip_brown, clipb=clip_colored, weight=mweight)
-
-    # adjusting output color from: YUV420P8 to RGB24
-    clip_stable = core.resize.Bicubic(clip=clip_stable, format=vs.RGB24, matrix_in_s="709", range_s="full")
-
-    return clip_stable
-
 
 """
 ------------------------------------------------------------------------------- 
