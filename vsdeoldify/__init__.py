@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-02-14
+LastEditTime: 2025-02-15
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -47,7 +47,7 @@ from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDe
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 from vsdeoldify.havc_utils import *
 
-__version__ = "5.0.0"
+__version__ = "5.0.2"
 
 import warnings
 import logging
@@ -135,7 +135,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
                                     'Stable',
                                     'Balanced',
                                     'Vivid',
-                                    ,MoreVivid'
+                                    'MoreVivid',
                                     'VeryVivid',
     :param ColorFix:            This parameter allows to reduce color noise on specific chroma ranges.
                                 Allowed values are:
@@ -381,39 +381,63 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
-Pre/post - process  filter for improving contrast and luminosity of Black & White
-clips to be colored with HAVC
+Pre/post - process  filter for improving contrast and luminosity of clips to be
+colored with HAVC.
 """
 
 
-def HAVC_bw_tune(clip: vs.VideoNode = None, bw_tune: str = 'none', action: str = None) -> vs.VideoNode:
-    """Pre/post - process filter for improving contrast and luminosity of B&W clips
+def HAVC_bw_tune(clip: vs.VideoNode = None, bw_tune: str = 'none', action: str = None,
+                 hue: float = 0, sat: float = 1, bright: float = 0, cont: float = 1) -> vs.VideoNode:
+    """Pre/post - process filter for improving contrast and luminosity of B&W/Colored clips
 
         :param clip:        Clip to process. Only RGB24 format is supported.
-        :param bw_tune:     This parameter allows to improve contrast and luminosity of Black & White input clip to
+        :param bw_tune:     This parameter allows to improve contrast and luminosity of input clip to
                             be colored with HAVC. Allowed values are:
                                  'None' (default)
                                  'Light',
                                  'Medium',
                                  'Strong'
+                                 'Custom' (allow to adjust: hue, saturation, brightness, contrast)
         :param action:      This parameter allows to apply the improvement to Black & White clips and to revert
                             the adjustments.
                             Allowed values are:
                                  'ON': the adjustments are applied on the input clip
                                  'OFF', the adjustments previous applied are almost reverted
+                                 None, allowed only for bw_tune = 'Custom'
+        :param hue:         Adjust the color hue of the image.
+                                 hue>0.0 shifts the image towards red.
+                                 hue<0.0 shifts the image towards green.
+                            Range -180.0 to +180.0, default = 0.0
+        :param sat:         Adjust the color saturation of the image by controlling gain of the color channels.
+                                 sat>1.0 increases the saturation.
+                                 sat<1.0 reduces the saturation.
+                            Use sat=0 to convert to GreyScale.
+                            Range 0.0 to 10.0, default = 1.0
+        :param bright:      Change the brightness of the image by applying a constant bias to the luma channel.
+                                 bright>0.0 increases the brightness.
+                                 bright<0.0 decreases the brightness.
+                            Range -255.0 to 255.0, default = 0.0
+        :param cont:        Change the contrast of the image by multiplying the luma values by a constant.
+                                 cont>1.0 increase the contrast (the luma range will be stretched).
+                                 cont<1.0 decrease the contrast (the luma range will be contracted).
+                            Range 0.0 to 10.0, default = 1.0
+
     """
     bw_tune_p = bw_tune.lower()
-    bw_tune = ['none', 'light', 'medium', 'strong']
-    bw_cont_on = [1.0, 0.95, 0.90, 0.80]
-    bw_cont_off = [1.0, 1.03, 1.08, 1.15]
-    bw_bright_on = [0.0, 0.05, 0.10, 0.15]
-    bw_bright_off = [0.0, -0.05, -0.10, -0.15]
+    bw_tune = ['none', 'light', 'medium', 'strong', 'custom']
+    bw_cont_on = [1.0, 0.95, 0.90, 0.80, 1.0]
+    bw_cont_off = [1.0, 1.03, 1.08, 1.15, 1.0]
+    bw_bright_on = [0.0, -1, -2, -4, 0.0]
+    bw_bright_off = [0.0, +1, +2, +4, 0.0]
 
     bw_id = 0
     try:
         bw_id = bw_tune.index(bw_tune_p)
     except ValueError:
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_bw_tune: B&W tune choice is invalid: ", bw_tune_p)
+
+    if bw_id == 4:
+        return vs_tweak(clip, hue=hue, sat=sat, bright=bright, cont=cont)
 
     if bw_id == 0 or action is None:
         return clip

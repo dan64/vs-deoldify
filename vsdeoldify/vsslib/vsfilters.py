@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-02-09
+LastEditTime: 2025-02-15
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -55,7 +55,7 @@ def vs_clip_color_stabilizer(clip: vs.VideoNode = None, nframes: int = 5, mode: 
             # vs.core.log_message(2, "weight_list= " + str(len(weight_list)))
 
     # convert the clip format for AverageFrames to YUV    
-    clip_yuv = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="full")
+    clip_yuv = clip.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
     # apply AverageFrames to YUV colorspace      
     clip_yuv = vs.core.std.AverageFrames(clip_yuv, weight_list, scale=100, scenechange=scenechange, planes=[1, 2])
     # convert the clip format for deoldify to RGB24 
@@ -274,7 +274,7 @@ def vs_get_clip_frame(clip: vs.VideoNode, nframe: int = 0) -> vs.VideoNode:
     vs_format = clip.format.id
 
     # clip converted
-    clip_yuv = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="full")
+    clip_yuv = clip.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
 
     # apply AverageFrames to YUV colorspace      
     clip_yuv = vs.core.std.AverageFrames(clip_yuv, weights_list, scale=100, scenechange=False, planes=[1, 2])
@@ -579,7 +579,7 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
-video clip tweak function, that allowa to change the hue, saturation and brigh, 
+video clip tweak function, that allow to change the hue, saturation and brigh, 
 with the support of scene change detection.
 """
 
@@ -617,19 +617,49 @@ Author: Dan64
 Description:
 ------------------------------------------------------------------------------- 
 This function is an extension of the Tweak() function available in Hybrid with
-the possibility to change also the gamma of a video clip.    
+the possibility to change also the gamma of a video clip. It can adjust:
+hue, saturation, brightness, contrast and gamma of a video clip.     
 """
 
 
 def vs_tweak(clip: vs.VideoNode, hue: float = 0, sat: float = 1, bright: float = 0, cont: float = 1, gamma: float = 1,
              coring: bool = False) -> vs.VideoNode:
+    """Pre/post - process filter for adjust: hue, saturation, brightness, contrast and gamma of a video clip
+
+    :param clip:      Clip to process. Only RGB24 format is supported.
+    :param hue:       Adjust the color hue of the image.
+                          hue>0.0 shifts the image towards red.
+                          hue<0.0 shifts the image towards green.
+                      Range -180.0 to +180.0, default 0.0
+    :param sat:       Adjust the color saturation of the image by controlling gain of the color channels.
+                          sat>1.0 increases the saturation.
+                          sat<1.0 reduces the saturation.
+                      Use sat=0 to convert to GreyScale.
+                      Range 0.0 to 10.0, default 1.0
+    :param bright:    Change the brightness of the image by applying a constant bias to the luma channel.
+                            bright>0.0 increases the brightness.
+                            bright<0.0 decreases the brightness.
+                      Range -255.0 to 255.0, default 0.0
+    :param cont:      Change the contrast of the image by multiplying the luma values by a constant.
+                            cont>1.0 increase the contrast (the luma range will be stretched).
+                            cont<1.0 decrease the contrast (the luma range will be contracted).
+                      Range 0.0 to 10.0, default 1.0
+    :param gamma:     Change the gamma of image which controls the degree of non-linearity in the luma
+                      correction. Higher gamma brightens the output; lower gamma darkens the output.
+                      Range -10.0 to 10.0, default 1.0
+    :param coring     When set to true, the luma (Y) and chroma are clipped to TV-range;
+                      When set to false (the default), the luma and chroma are unconstrained.
+    """
     if hue == 0 and sat == 1 and bright == 0 and cont == 1 and gamma == 1:
         return clip  # non changes
 
     c = vs.core
 
-    # convert the format for tewak
-    clip = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="full")
+    # convert the format for tweak to YUV 8bits
+    clip = clip.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
+
+    if -1.0 < bright < 1.0:
+        bright = bright * 255.0   # normalized to 255 = 2^8-1
 
     if (hue != 0 or sat != 1) and clip.format.color_family != vs.GRAY:
 
@@ -775,7 +805,7 @@ def vs_degrain(clip: vs.VideoNode = None, strength: int = 1, device_id: int = 0)
         case _:
             raise vs.Error("HybridAVC: not supported strength value: " + str(strength))
 
-    clip = clip.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="full")
+    clip = clip.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
     clip = vs.core.knlm.KNLMeansCL(clip=clip, d=dtmp, a=2, s=4, h=dstr, channels='Y', device_type="gpu",
                                    device_id=device_id)
     clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion")
@@ -825,7 +855,7 @@ def vs_adaptive_Merge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None,
     def merge_frame(n, f, core, clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clipb_weight: float = 0.0):
         clip1 = clipa[n]
         clip2 = clipb[n]
-        clip2_yuv = clip2.resize.Bicubic(format=vs.YUV444PS, matrix_s="709", range_s="full")
+        clip2_yuv = clip2.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
         clip2_avg_y = vs.core.std.PlaneStats(clip2_yuv, plane=0)
         luma = clip2_avg_y.get_frame(0).props['PlaneStatsAverage']
         # vs.core.log_message(2, "Luma(" + str(n) + ") = " + str(luma))
