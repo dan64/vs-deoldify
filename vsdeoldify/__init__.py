@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-02-15
+LastEditTime: 2025-02-18
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -47,7 +47,7 @@ from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDe
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 from vsdeoldify.havc_utils import *
 
-__version__ = "5.0.2"
+__version__ = "5.0.3"
 
 import warnings
 import logging
@@ -91,7 +91,8 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
               DeepExPreset: str = 'Medium', DeepExRefMerge: int = 0, DeepExOnlyRefFrames: bool = False,
               ScFrameDir: str = None, ScThreshold: float = DEF_THRESHOLD, ScThtOffset: int = 1, ScMinFreq: int = 0,
               ScMinInt: int = 1, ScThtSSIM: float = 0.0, ScNormalize: bool = False, DeepExModel: int = 0,
-              DeepExVivid: bool = True, DeepExEncMode: int = 0, DeepExMaxMemFrames=0, RefRange: tuple[int, int] = (0, 0),
+              DeepExVivid: bool = True, DeepExEncMode: int = 0, DeepExMaxMemFrames=0,
+              RefRange: tuple[int, int] = (0, 0),
               enable_fp16: bool = True, sc_debug: bool = False) -> vs.VideoNode:
     """Main HAVC function supporting the Presets
 
@@ -1177,6 +1178,110 @@ def HAVC_colorizer(
 ------------------------------------------------------------------------------- 
 Author: Dan64
 ------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+function with HAVC merge methods  
+"""
+
+
+def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, weight: float = 0.5, method: int = 2, cmc_tresh: float = 0.2,
+               lmm_p: list = (0.2, 0.8, 1.0), alm_p: list = (0.8, 1.0, 0.15)) -> vs.VideoNode:
+    """Utility function with the implementation of HAVC merge methods
+
+    :param clipa:               first clip to merge, only RGB24 format is supported
+    :param clipb:               second clip to merge, only RGB24 format is supported
+    :param method:              method used to combine clipa with clipb (default = 2):
+                                    0 : clipa only (no merge)
+                                    1 : clipb only (no merge)
+                                    2 : Simple Merge (default):
+                                        the frames are combined using a weighted merge, where the parameter "weight"
+                                        represent the weight assigned to the colors provided by the clipb frames.
+                                        If weight = 0 will be returned clipa, if = 1 will be returned clipb.
+                                    3 : Constrained Chroma Merge:
+                                        The frames are combined by assigning a limit to the amount of difference in
+                                        chroma values between clipa and clipb this limit is defined by the threshold
+                                        parameter "cmc_tresh".
+                                        The limit is applied to the image converted to "YUV". For example when
+                                        cmc_tresh=0.2, the chroma values "U","V" of clipb frame will be constrained
+                                        to have an absolute percentage difference respect to "U","V" provided by clipa
+                                        not higher than 20%. The final limited frame will be merged again with the clipa
+                                        frame. With this method is suggested a starting weight > 50% (ex. = 60%).
+                                    4 : Luma Masked Merge:
+                                        the frames are combined using a masked merge, the pixels of clipb with
+                                        luma < "luma_mask_limit" will be filled with the pixels of clipa.
+                                        If "luma_white_limit" > "luma_mask_limit" the mask will apply a gradient till
+                                        "luma_white_limit". If the parameter "weight" > 0 the final masked frame will
+                                        be merged again with the clipa frame.
+                                    5 : Adaptive Luma Merge:
+                                        The frames are combined by decreasing the weight assigned to clipb when the
+                                        luma is below a given threshold given by: luma_threshold. The weight is
+                                        calculated using the formula:
+                                            merge_weight = max(weight * (luma/luma_threshold)^alpha, min_weight).
+                                        For example with: luma_threshold = 0.6 and alpha = 1, the weight assigned to
+                                        clipb will start to decrease linearly when the luma < 60% till "min_weight".
+                                        For alpha=2, begins to decrease quadratically (because luma/luma_threshold < 1).
+                                    The methods 3 and 4 are similar to Simple Merge, but before the merge with clipa
+                                    the clipb frame is limited in the chroma changes (method 3) or limited based on the
+                                    luma (method 4). The method 5 is a Simple Merge where the weight decrease with luma.
+    :param weight:              weight given to clipb in all merge methods. If weight = 0 will be returned
+                                clipa, if = 1 will be returned clipb. range [0-1] (0.01=1%)
+    :param cmc_tresh:           chroma_threshold (%), used by: "Constrained Chroma Merge", range [0-1] (0.01=1%)
+    :param lmm_p:               parameters for method: "Luma Masked Merge" (see method=4 for a full explanation)
+                                   [0] : luma_mask_limit: luma limit for build the mask used in Luma Masked Merge,
+                                         range [0-1] (0.01=1%)
+                                   [1] : luma_white_limit: the mask will apply a gradient till luma_white_limit,
+                                         range [0-1] (0.01=1%)
+                                   [2] : luma_mask_sat: if < 1 the clipb dark pixels will substitute with the
+                                         desaturated clipa pixels, range [0-1] (0.01=1%)
+    :param alm_p:               parameters for method: "Adaptive Luma Merge" (see method=5 for a full explanation)
+                                   [0] : luma_threshold: threshold for the gradient merge, range [0-1] (0.01=1%)
+                                   [1] : alpha: exponent parameter used for the weight calculation, range [>0]
+                                   [2] : min_weight: min merge weight, range [0-1] (0.01=1%)
+    """
+    # disable packages warnings
+    disable_warnings()
+
+    if not isinstance(clipa, vs.VideoNode):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_merge: this is not a clip: clipa")
+
+    if not isinstance(clipb, vs.VideoNode):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_merge: this is not a clip: clipb")
+
+    if method == 0 or weight == 0:
+        return clipa
+
+    if method == 1 or weight == 1:
+        return clipb
+
+    merge_weight = weight
+
+    if clipa.format.id != vs.RGB24:
+        # clip not in RGB24 format, it will be converted
+        if clipa.format.color_family == "YUV":
+            clipa = clipa.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
+                                         dither_type="error_diffusion")
+        else:
+            clipa = clipa.resize.Bicubic(format=vs.RGB24, range_s="full")
+
+    if clipb.format.id != vs.RGB24:
+        # clip not in RGB24 format, it will be converted
+        if clipb.format.color_family == "YUV":
+            clipb = clipb.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
+                                         dither_type="error_diffusion")
+        else:
+            clipb = clipb.resize.Bicubic(format=vs.RGB24, range_s="full")
+
+    clip_merged = vs_combine_models(clip_a=clipa, clip_b=clipb, method=method, sat=[1, 1],
+                                    hue=[0, 0], clipb_weight=merge_weight, CMC_p=cmc_tresh,
+                                    LMM_p=lmm_p, ALM_p=alm_p, invert_clips=False)
+
+    return clip_merged
+
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
 Description: 
 ------------------------------------------------------------------------------- 
 Function to perform colorization with DeepRemaster: : Temporal Source-Reference 
@@ -1662,7 +1767,7 @@ def ddeoldify(clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldif
 
 def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2, 0.8), smooth: bool = False,
                          smooth_p: list = (0.3, 0.7, 0.9, 0.0, "none"),
-                         stab: bool = False, stab_p: list = (5, 'A', 1, 15, 0.2, 0.15), colormap: str = "none",
+                         stab: bool = False, stab_p: list = (5, 'A', 1, 15, 0.2, 0.80), colormap: str = "none",
                          render_factor: int = 24) -> vs.VideoNode:
     vs.core.log_message(
         vs.MESSAGE_TYPE_WARNING,
