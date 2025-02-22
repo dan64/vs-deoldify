@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-05
+LastEditTime: 2025-02-21
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -171,9 +171,13 @@ merge image1 with image2 using the mask (white->img2, black->img1)
 
 
 def np_image_mask_merge(img1_np: np.ndarray, img2_np: np.ndarray,
-                        mask_np: np.ndarray) -> np.ndarray:
-    mask_white = (mask_np / 255).astype(float)  # pass only white
-    mask_black = (1 - mask_white).astype(float)  # pass only black
+                        mask_np: np.ndarray, normalize: bool = True) -> np.ndarray:
+    if normalize:
+        mask_white = (mask_np / 255).astype(float)  # pass only white
+        mask_black = (1 - mask_white).astype(float)  # pass only black
+    else:
+        mask_white = mask_np.astype(float)
+        mask_black = (1 - mask_white).astype(float)
 
     img_np = img1_np.copy()
 
@@ -196,15 +200,18 @@ numpy weighted merge of image1 with image2 using the mask (white->img2, black->i
 
 
 def w_np_image_mask_merge(img1_np: np.ndarray, img2_np: np.ndarray,
-                          mask_w_np: np.ndarray) -> np.ndarray:
-    mask_white = mask_w_np
-    mask_black = (1 - mask_white)
+                          mask_w_np: np.ndarray, normalize: bool = False) -> np.ndarray:
+
+    if normalize:
+        mask_white = (mask_w_np / 255).astype(float)  # pass only white
+        mask_black = (1 - mask_white).astype(float)  # pass only black
+    else:
+        mask_white = mask_w_np.astype(float)
+        mask_black = (1 - mask_white).astype(float)
 
     img_np = img1_np.copy()
 
-    img_m = np.multiply(img1_np, mask_black).clip(0, 255).astype(int) + np.multiply(img2_np, mask_white).clip(0,
-                                                                                                              255).astype(
-        int)
+    img_m = (np.multiply(img1_np, mask_black) + np.multiply(img2_np, mask_white))
 
     for i in range(3):
         img_np[:, :, i] = img_m[:, :, i].clip(0, 255).astype(int)

@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-11-20
 version:
 LastEditors: Dan64
-LastEditTime: 2025-02-09
+LastEditTime: 2025-02-21
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
@@ -47,6 +47,8 @@ DEF_VIVID_HUE_LOW: float = 3.0
 DEF_VIVID_SAT_HIGH: float = 1.30
 DEF_VIVID_HUE_HIGH: float = 5.0
 DEF_VIVID_SAT_LOW: float = 1.15
+DEF_MIN_COLOR_ALPHA: float = 1.0
+DEF_MAX_COLOR_ALPHA: float = 10.0
 
 
 

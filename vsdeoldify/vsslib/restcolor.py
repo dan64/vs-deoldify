@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-01-05
+LastEditTime: 2025-02-21
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -25,13 +25,14 @@ Author: Dan64
 Description:
 ------------------------------------------------------------------------------- 
 Restore the colors of past/future frame. The restore is applied using a mask
-to selectect only the gray images on HSV color space.
+to select only the gray images on HSV color space.
 The ranges that OpenCV manage for HSV format are the following:
 - Hue range is [-180,+180], 
 - Saturation range is [0,255] 
 - Value range is [0,255].
 For the 8-bit images, H is converted to H/2 to fit to the [0,255] range. 
 So the range of hue in the HSV color space of OpenCV is [0,179]
+The vector order is: H = 0, S = 1, V = 2
 """
 
 
@@ -82,6 +83,66 @@ def restore_color(img_color: Image = None, img_gray: Image = None, sat: float = 
     else:
         return img_restored
 
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+Restore the gray frame colors frame. The restore is applied using a gradient mask
+to select only the gray images on HSV color space.
+The vector order is: H = 0, S = 1, V = 2
+"""
+
+
+def restore_color_gradient(img_color: Image = None, img_gray: Image = None, sat: float = 1.0, tht: int = 15,
+                           weight: float = 0, alpha: float = 2.0, return_mask: bool = False) -> Image:
+    np_color = np.asarray(img_color)
+    np_gray = np.asarray(img_gray)
+
+    hsv_color = cv2.cvtColor(np_color, cv2.COLOR_RGB2HSV)
+    hsv_gray = cv2.cvtColor(np_gray, cv2.COLOR_RGB2HSV)
+
+    # desatured the color image
+    if sat != 1.0:
+        hsv_color[:, :, 1] = hsv_color[:, :, 1] * min(max(sat, 0), 10)
+
+    np_color_sat = cv2.cvtColor(hsv_color, cv2.COLOR_HSV2RGB)
+
+    hsv_s = hsv_gray[:, :, 1]
+
+    hsv_mask = w_np_gradient_mask(hsv_s, tht, alpha)  # white only gray pixels
+
+    mask_rgb = np_gray.copy()
+
+    for i in range(3):
+        mask_rgb[:, :, i] = hsv_mask
+
+    if return_mask:
+        return Image.fromarray(mask_rgb, 'RGB').convert('RGB')
+
+    np_restored = w_np_image_mask_merge(np_gray, np_color_sat, mask_rgb, normalize=True)
+
+    if weight > 0:
+        np_restored = np_weighted_merge(np_restored, np_color_sat, weight)  # merge with colored frame
+
+    img_restored = Image.fromarray(np_restored, 'RGB').convert('RGB')
+
+    return img_restored
+
+
+def w_np_gradient_mask(img_np: np.ndarray, tht: int = 15, alpha: float = 2.0, steep: float = 2.0) -> np.ndarray:
+
+    luma_np = img_np.clip(0, 255)
+
+    # grad = np.where(luma_np < tht, luma_np, tht + (luma_np - tht)*alpha)
+    # luma_grad = (255.0 - luma_np - grad).clip(0, 255).astype(int)
+
+    grad = np.where(luma_np < tht, steep*luma_np/alpha - tht, steep*(luma_np - tht)*alpha)
+    luma_grad = (255.0 - tht - grad).clip(0, 255).astype(int)
+
+    return luma_grad
 
 """
 ------------------------------------------------------------------------------- 

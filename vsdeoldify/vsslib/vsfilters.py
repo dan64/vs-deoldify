@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-02-15
+LastEditTime: 2025-02-19
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -300,7 +300,7 @@ wrapper to function restore_color() to restore gray frames.
 
 
 def vs_recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = None, sat: float = 1.0, tht: int = 0,
-                          weight: float = 0.2, tht_scen: float = 0.15, hue_adjust: str = 'none',
+                          weight: float = 0.2, tht_scen: float = 0.8, hue_adjust: str = 'none',
                           return_mask: bool = False) -> vs.VideoNode:
     def color_frame(n, f, sat: float = 1.0, tht: int = 0, weight: float = 0.2, tht_scen: float = 0.8,
                     hue_adjust: str = 'none', return_mask: bool = False):
@@ -317,6 +317,26 @@ def vs_recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = 
                                                  hue_adjust=hue_adjust, return_mask=return_mask))
     return clip
 
+
+def vs_recover_gradient_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = None, sat: float = 1.0,
+                              tht: int = 15, weight: float = 0.0, alpha: float = 2.0,
+                              return_mask: bool = False) -> vs.VideoNode:
+    def color_grad_frame(n, f, sat: float, tht: int, weight: float, alpha: float, return_mask: bool):
+        f_out = f[0].copy()
+        img_gray = frame_to_image(f[0])
+        img_color = frame_to_image(f[1])
+        img_restored = restore_color_gradient(img_color, img_gray, sat, tht, weight, alpha, return_mask)
+        return image_to_frame(img_restored, f_out)
+
+    clip = clip.std.ModifyFrame(clips=[clip, clip_color],
+                                selector=partial(color_grad_frame, sat=sat, tht=tht, weight=weight, alpha=alpha,
+                                                 return_mask=return_mask))
+
+    #clip = debug_ModifyFrame(f_start=33162, f_end=33175, clip=clip, clips=[clip, clip_color],
+    #                         selector=partial(color_grad_frame, sat=sat, tht=tht, weight=weight, alpha=alpha,
+    #                                          return_mask=return_mask))
+
+    return clip
 
 """
 ------------------------------------------------------------------------------- 
@@ -616,6 +636,28 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
+Wrapper to vapoursynth function Merge.     
+"""
+
+
+def vs_simple_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, weight: float = 0.5) -> vs.VideoNode:
+    # convert the format for Merge to YUV 8bits
+    clipa = clipa.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
+    clipb = clipb.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
+
+    clip = vs.core.std.Merge(clipa=clipa, clipb=clipb, weight=weight)
+
+    # convert the clip format for HAVC to RGB24
+    clip_rgb = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion")
+
+    return clip_rgb
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
 This function is an extension of the Tweak() function available in Hybrid with
 the possibility to change also the gamma of a video clip. It can adjust:
 hue, saturation, brightness, contrast and gamma of a video clip.     
@@ -659,7 +701,7 @@ def vs_tweak(clip: vs.VideoNode, hue: float = 0, sat: float = 1, bright: float =
     clip = clip.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
 
     if -1.0 < bright < 1.0:
-        bright = bright * 255.0   # normalized to 255 = 2^8-1
+        bright = bright * 255.0  # normalized to 255 = 2^8-1
 
     if (hue != 0 or sat != 1) and clip.format.color_family != vs.GRAY:
 
@@ -713,7 +755,7 @@ def vs_tweak(clip: vs.VideoNode, hue: float = 0, sat: float = 1, bright: float =
 
             clip = clip.std.Expr(expr=[expression, "", ""])
 
-    # convert the clip format for deoldify and std.Levels() to RGB24 
+    # convert the clip format for HAVC and std.Levels() to RGB24
     clip_rgb = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion")
 
     if gamma != 1:
@@ -733,7 +775,7 @@ Function to copy the luma of video Clip "orig" in the video "clip"
 
 
 def vs_sc_recover_clip_luma(orig: vs.VideoNode = None, clip: vs.VideoNode = None, scenechange: bool = False,
-                            sc_framedir: str =None, ref_ext: str = DEF_EXPORT_FORMAT,
+                            sc_framedir: str = None, ref_ext: str = DEF_EXPORT_FORMAT,
                             ref_jpg_quality: int = DEF_JPG_QUALITY) -> vs.VideoNode:
     def copy_luma_frame(n, f, sc_framedir: str, ref_ext: str, ref_jpg_quality: int):
 

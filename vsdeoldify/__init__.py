@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-02-18
+LastEditTime: 2025-02-21
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -47,7 +47,7 @@ from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDe
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 from vsdeoldify.havc_utils import *
 
-__version__ = "5.0.3"
+__version__ = "5.0.4"
 
 import warnings
 import logging
@@ -85,7 +85,7 @@ wrapper to HAVC filter with "presets" management
 """
 
 
-def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video+Artistic', CombMethod: str = 'Simple',
+def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: str = 'Video+Artistic', CombMethod: str = 'Simple',
               VideoTune: str = 'Stable', ColorFix: str = 'Violet/Red', ColorTune: str = 'Light', ColorMap: str = 'None',
               BlackWhiteTune: str = 'None', EnableDeepEx: bool = False, DeepExMethod: int = 0,
               DeepExPreset: str = 'Medium', DeepExRefMerge: int = 0, DeepExOnlyRefFrames: bool = False,
@@ -103,8 +103,8 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
                                     'VerySlow',
                                     'Slower',
                                     'Slow',
-                                    'Medium',
-                                    'Fast',  (default)
+                                    'Medium', (default)
+                                    'Fast',  
                                     'Faster',
                                     'VeryFast'
     :param ColorModel:          Preset to control the Color Models to be used for the color inference
@@ -133,7 +133,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Fast', ColorModel: str = 'Video
                                 Allowed values are:
                                     'VeryStable',
                                     'MoreStable'
-                                    'Stable',
+                                    'Stable',  (default)
                                     'Balanced',
                                     'Vivid',
                                     'MoreVivid',
@@ -1184,8 +1184,9 @@ function with HAVC merge methods
 """
 
 
-def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, weight: float = 0.5, method: int = 2, cmc_tresh: float = 0.2,
-               lmm_p: list = (0.2, 0.8, 1.0), alm_p: list = (0.8, 1.0, 0.15)) -> vs.VideoNode:
+def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, clip_luma: vs.VideoNode = None, weight: float = 0.5,
+               method: int = 2, cmc_tresh: float = 0.2, lmm_p: list = (0.2, 0.8, 1.0), alm_p: list = (0.8, 1.0, 0.25)
+               ) -> vs.VideoNode:
     """Utility function with the implementation of HAVC merge methods
 
     :param clipa:               first clip to merge, only RGB24 format is supported
@@ -1237,6 +1238,10 @@ def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, weight: float = 0.5, me
                                    [0] : luma_threshold: threshold for the gradient merge, range [0-1] (0.01=1%)
                                    [1] : alpha: exponent parameter used for the weight calculation, range [>0]
                                    [2] : min_weight: min merge weight, range [0-1] (0.01=1%)
+    :param clip_luma:           if specified, clip_luma will be used as source of luma component for the merge. It is an
+                                optional parameter, and it is suggested to provide the clip with the best luma
+                                resolution between clipa and clipb. It is used only with the methods: 3, 4, 5 and can
+                                speed up the filter when it uses these methods. 
     """
     # disable packages warnings
     disable_warnings()
@@ -1252,6 +1257,9 @@ def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, weight: float = 0.5, me
 
     if method == 1 or weight == 1:
         return clipb
+
+    if method == 2:
+        return vs_simple_merge(clipa, clipb, weight)
 
     merge_weight = weight
 
@@ -1271,9 +1279,20 @@ def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, weight: float = 0.5, me
         else:
             clipb = clipb.resize.Bicubic(format=vs.RGB24, range_s="full")
 
+    if clip_luma is not None:
+        if not isinstance(clip_luma, vs.VideoNode):
+            HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_merge: this is not a clip: clip_luma")
+        rf = min(max(math.trunc(0.4 * clip_luma.width / 16), 16), 48)
+        frame_size = min(rf * 16, clip_luma.width)
+        clipa = clipa.resize.Spline64(width=frame_size, height=frame_size)
+        clipb = clipb.resize.Spline64(width=frame_size, height=frame_size)
+
     clip_merged = vs_combine_models(clip_a=clipa, clip_b=clipb, method=method, sat=[1, 1],
                                     hue=[0, 0], clipb_weight=merge_weight, CMC_p=cmc_tresh,
                                     LMM_p=lmm_p, ALM_p=alm_p, invert_clips=False)
+
+    if clip_luma is not None:
+        clip_merged = _clip_chroma_resize(clip_luma, clip_merged)
 
     return clip_merged
 
@@ -1483,6 +1502,79 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description: 
 ------------------------------------------------------------------------------- 
+Utility function to restore the colors of gray pixels.
+"""
+
+
+def HAVC_recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = None, sat: float = 0.8, tht: int = 30,
+                            weight: float = 0.0, alpha: float = 2.0, chroma_resize: bool = True,
+                            return_mask: bool = False, binary_mask: bool = False) -> vs.VideoNode:
+    """Utility function to restore the colors of gray pixels in the input clip by using the colors provided in the clip:
+       clip_color. Useful to repair the clips colored with DeepRemaster
+
+        :param clip:          clip to repair the colors, only RGB24 format is supported
+        :param clip_color:    clip with the colors to restore, only RGB24 format is supported
+        :param sat:           this parameter allows to change the saturation of colored clip (default = 0.8)
+        :param tht:           threshold to identify gray pixels, range[0, 255] (default = 30)
+        :param weight:        if > 0, the restored frame will be merged with clip_color's frame. (default = 0.0)
+        :param alpha:         parameter used to control the steepness of gradient curve, values above the default value
+                              will preserve more pixels, but could introduce some artifacts, range[1, 10] (default = 2)
+        :param chroma_resize: if True, the frames will be resized to improve the filter speed (default = True)
+        :param return_mask:   if True, will be returned the mask used to identify the gray pixels (white region), could
+                              be useful to visualize the gradient mask for debugging, (default = false).
+        :param binary_mask:   if True, will be used a binary mask instead of a gradient mask, could be useful to get a
+                              clear view on the selected desaturated regions for debugging, (default = false)
+    """
+
+    if not isinstance(clip, vs.VideoNode):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_merge: this is not a clip: clip")
+
+    if not isinstance(clip_color, vs.VideoNode):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_merge: this is not a clip: clip_color")
+
+    if clip.format.id != vs.RGB24:
+        # clip not in RGB24 format, it will be converted
+        if clip.format.color_family == "YUV":
+            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
+                                       dither_type="error_diffusion")
+        else:
+            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
+
+    if clip_color.format.id != vs.RGB24:
+        # clip not in RGB24 format, it will be converted
+        if clip_color.format.color_family == "YUV":
+            clip_color = clip_color.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
+                                                   dither_type="error_diffusion")
+        else:
+            clip_color = clip_color.resize.Bicubic(format=vs.RGB24, range_s="full")
+
+    alpha = max(min(alpha, DEF_MAX_COLOR_ALPHA), DEF_MIN_COLOR_ALPHA)
+
+    clip_luma = clip
+    if chroma_resize and not return_mask:
+        rf = min(max(math.trunc(0.4 * clip_luma.width / 16), 16), 48)
+        frame_size = min(rf * 16, clip_luma.width)
+        clip = clip.resize.Spline64(width=frame_size, height=frame_size)
+        clip_color = clip_color.resize.Spline64(width=frame_size, height=frame_size)
+
+    if binary_mask:
+        clip_restored = vs_recover_clip_color(clip=clip, clip_color=clip_color, sat=sat, tht=tht, weight=-weight,
+                                              tht_scen=1.0, hue_adjust='none', return_mask=return_mask)
+    else:
+        clip_restored = vs_recover_gradient_color(clip=clip, clip_color=clip_color, sat=sat, tht=tht, weight=weight,
+                                                  alpha=alpha, return_mask=return_mask)
+    if chroma_resize and not return_mask:
+        clip_restored = _clip_chroma_resize(clip_luma, clip_restored)
+
+    return clip_restored
+
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description: 
+------------------------------------------------------------------------------- 
 wrapper to function vSceneDetect() to set the scene-change frames in the clip
 """
 
@@ -1659,24 +1751,6 @@ wrapper to function vs_get_clip_frame() to get frames fast.
 
 def _get_clip_frame(clip: vs.VideoNode, nframe: int = 0) -> vs.VideoNode:
     clip = vs_get_clip_frame(clip=clip, nframe=nframe)
-    return clip
-
-
-"""
-------------------------------------------------------------------------------- 
-Author: Dan64
-------------------------------------------------------------------------------- 
-Description: 
-------------------------------------------------------------------------------- 
-wrapper to function vs_recover_clip_color() to restore gray frames.
-"""
-
-
-def _recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = None, sat: float = 1.0, tht: int = 0,
-                        weight: float = 0.2, tht_scen: float = 0.8, hue_adjust: str = 'none',
-                        return_mask: bool = False) -> vs.VideoNode:
-    clip = vs_recover_clip_color(clip=clip, clip_color=clip_color, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen,
-                                 hue_adjust=hue_adjust, return_mask=return_mask)
     return clip
 
 
