@@ -163,14 +163,14 @@ def _get_color_model(ColorModel: str):
     if 'stable' in ColorModel:
         do_model = 1
 
-    if 'deoldify' in ColorModel:
+    if '+' in ColorModel:
+        dd_method = 2
+    elif 'deoldify' in ColorModel:
         dd_method = 0
     elif 'ddcolor' in ColorModel:
         dd_method = 1
-    elif 'zhang' in ColorModel:
+    else :
         dd_method = 1
-    else:
-        dd_method = 2
 
     return do_model, dd_model, dd_method
 
@@ -204,7 +204,7 @@ def _get_color_tune(ColorTune: str, ColorFix: str, ColorMap: str, dd_model: int)
     ColorFix = ColorFix.lower()
     color_fix = ['none', 'magenta', 'magenta/violet', 'violet', 'violet/red', 'blue/magenta', 'yellow', 'yellow/orange',
                  'yellow/green']
-    hue_fix = ["none", "270:300", "270:330", "300:330", "300:360", "220:280", "60:90", "30:90", "60:120"]
+    hue_fix = ["none", "270:300", "250:360", "300:330", "300:360", "220:280", "60:90", "30:90", "60:120"]
 
     co_id = 5
     try:
@@ -225,18 +225,25 @@ def _get_color_tune(ColorTune: str, ColorFix: str, ColorMap: str, dd_model: int)
     ColorMap = ColorMap.lower()
     hue_w = ["1.0", "0.90", "0.80", "0.75"]
     colormap = ['none', 'blue->brown', 'blue->red', 'blue->green', 'green->brown', 'green->red', 'green->blue',
-                'redrose->brown', 'redrose->blue', "red->brown", 'yellow->rose']
-    hue_map = ["none", "180:280|+140", "180:280|+100", "180:280|+220", "80:180|+260", "80:180|+220",
-               "80:180|+140", "300:360,0:20|+40", "300:360,0:20|+260", "320:360,0:15|+50", "30:90|+300"]
+                'redrose->brown', 'redrose->blue', "red->brown", 'red->blue', 'yellow->rose']
+    hue_map = ["none", "180:280|+140", "180:280|+100", "180:280|+220", "80:180|+260", "80:180|+220", "80:180|+140",
+               "300:360,0:20|+40", "300:360,0:20|+260", "320:360|+50", "300:360|+260", "30:90|+300"]
 
     cl_id = 0
     try:
         cl_id = colormap.index(ColorMap)
     except ValueError:
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: ColorMap choice is invalid for '" + ColorMap + "'")
+        ret_range = restcolor._parse_hue_adjust(ColorMap)
+        if ret_range is None:
+            HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: ColorMap choice is invalid for '" + ColorMap + "'")
+        else:
+            cl_id = -1
 
     if cl_id == 0:
         chroma_adjust = "none"
+        chroma_adjust2 = "none"
+    elif cl_id == -1:
+        chroma_adjust = ColorMap
         chroma_adjust2 = "none"
     else:
         chroma_adjust = hue_map[cl_id] + "," + hue_w[tn_id]
@@ -246,6 +253,7 @@ def _get_color_tune(ColorTune: str, ColorFix: str, ColorMap: str, dd_model: int)
             chroma_adjust2 = chroma_adjust
 
     return dd_tweak, hue_range, hue_range2, chroma_adjust, chroma_adjust2
+
 
 
 def _check_input(DeepExOnlyRefFrames: bool, ScFrameDir: str, DeepExMethod: int, ScThreshold: float,
