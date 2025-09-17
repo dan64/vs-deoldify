@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-09-14
 version:
 LastEditors: Dan64
-LastEditTime: 2025-01-31
+LastEditTime: 2025-09-17
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
@@ -145,7 +145,7 @@ def _colormnet_async(colorizer: ColorMNetRender, clip: vs.VideoNode, clip_ref: v
         clip_colored = clip.std.ModifyFrame(clips=[clip, clip_ref],
                                             selector=partial(colormnet_clip_color, reader=reader, colorizer=colorizer,
                                                              propagate=frame_propagate))
-        #clip_colored = debug_ModifyFrame(0, 1000, clip, clips=[clip, clip_ref],
+        #clip_colored = debug_ModifyFrame(0, 100, clip, clips=[clip, clip_ref],
         #                                 selector=partial(colormnet_clip_color, reader=reader, colorizer=colorizer,
         #                                                  propagate=frame_propagate))
     return clip_colored

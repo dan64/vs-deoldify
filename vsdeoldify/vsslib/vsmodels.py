@@ -41,8 +41,10 @@ def vs_colormnet(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNo
                 max_memory_frames = 4
             elif mem_tot_k < 12.5:
                 max_memory_frames = 8
+            elif mem_tot_k < 16.5:
+                max_memory_frames = 18
             else:
-                max_memory_frames = 15
+                max_memory_frames = 25
 
     match encode_mode:
         case 0 | 2:
@@ -259,7 +261,8 @@ def vs_sc_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 1, render_fa
                   num_streams: int = 1) -> vs.VideoNode:
     if method == 0:
         return None
-    else:
+
+    if model in (0, 1):
         import vsddcolor
 
     # input size must a multiple of 32

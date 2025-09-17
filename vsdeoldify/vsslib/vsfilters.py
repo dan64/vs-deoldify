@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-02-19
+LastEditTime: 2025-09-17
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -338,6 +338,7 @@ def vs_recover_gradient_color(clip: vs.VideoNode = None, clip_color: vs.VideoNod
 
     return clip
 
+
 """
 ------------------------------------------------------------------------------- 
 Author: Dan64
@@ -503,8 +504,11 @@ def _vs_sc_colormap(clip: vs.VideoNode = None, colormap: str = 'none', scenechan
 
         return image_to_frame(img_m, f.copy())
 
-    return clip.std.ModifyFrame(clips=clip,
-                                selector=partial(merge_frame, chroma_adjust=colormap, scenechange=scenechange))
+    clip_new = clip.std.ModifyFrame(clips=clip,
+                                    selector=partial(merge_frame, chroma_adjust=colormap, scenechange=scenechange))
+    # clip_new = debug_ModifyFrame(82228, 82232, clip, clips=[clip],
+    #                             selector=partial(merge_frame, chroma_adjust=colormap, scenechange=scenechange))
+    return clip_new
 
 
 """
@@ -642,6 +646,13 @@ Wrapper to vapoursynth function Merge.
 
 def vs_simple_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, weight: float = 0.5) -> vs.VideoNode:
     # convert the format for Merge to YUV 8bits
+
+    # A zero weight means that clipa is returned unchanged and 1 means that clipb is returned unchanged
+    if weight == 0:
+        return clipa
+    if weight == 1:
+        return clipb
+
     clipa = clipa.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
     clipb = clipb.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
 
@@ -651,6 +662,7 @@ def vs_simple_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, weight: float = 0.
     clip_rgb = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion")
 
     return clip_rgb
+
 
 """
 ------------------------------------------------------------------------------- 
@@ -694,6 +706,9 @@ def vs_tweak(clip: vs.VideoNode, hue: float = 0, sat: float = 1, bright: float =
     """
     if hue == 0 and sat == 1 and bright == 0 and cont == 1 and gamma == 1:
         return clip  # non changes
+
+    if gamma != 1:
+        clip = clip.std.Levels(gamma=gamma)
 
     c = vs.core
 
@@ -755,11 +770,8 @@ def vs_tweak(clip: vs.VideoNode, hue: float = 0, sat: float = 1, bright: float =
 
             clip = clip.std.Expr(expr=[expression, "", ""])
 
-    # convert the clip format for HAVC and std.Levels() to RGB24
+    # convert the clip format for HAVC to RGB24
     clip_rgb = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion")
-
-    if gamma != 1:
-        clip_rgb = clip_rgb.std.Levels(gamma=gamma)
 
     return clip_rgb
 
@@ -911,3 +923,42 @@ def vs_adaptive_Merge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None,
     clipm = clipa.std.ModifyFrame(clips=clipa, selector=partial(merge_frame, core=vs.core, clipa=clipa, clipb=clipb,
                                                                 clipb_weight=clipb_weight))
     return clipm
+
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description: the function takes a video clip as an input and calculates the average 
+color values for each of the three color planes (red, green, blue).
+Then the function is used to adjust the white balance of the input clip based on the 
+color balance of the individual frames.
+------------------------------------------------------------------------------- 
+"""
+
+def vs_rgb_normalize(clip: vs.VideoNode) -> vs.VideoNode:
+    rgb_clip = clip
+    r_avg = vs.core.std.PlaneStats(rgb_clip, plane=0)
+    g_avg = vs.core.std.PlaneStats(rgb_clip, plane=1)
+    b_avg = vs.core.std.PlaneStats(rgb_clip, plane=2)
+
+    def auto_white_adjust(n, f, clip, core):
+        small_number = 0.000000001
+        red = f[0].props['PlaneStatsAverage']
+        green = f[1].props['PlaneStatsAverage']
+        blue = f[2].props['PlaneStatsAverage']
+        max_rgb = max(red, green, blue)
+        red_corr = max_rgb / max(red, small_number)
+        green_corr = max_rgb / max(green, small_number)
+        blue_corr = max_rgb / max(blue, small_number)
+        norm = max(blue,
+                   math.sqrt(red_corr * red_corr + green_corr * green_corr + blue_corr * blue_corr) / math.sqrt(3),
+                   small_number)
+        r_gain = red_corr / norm
+        g_gain = green_corr / norm
+        b_gain = blue_corr / norm
+        return core.std.Expr(clip,
+                             expr=['x ' + repr(r_gain) + ' *', 'x ' + repr(g_gain) + ' *', 'x ' + repr(b_gain) + ' *'])
+
+    return vs.core.std.FrameEval(rgb_clip, partial(auto_white_adjust, clip=rgb_clip, core=vs.core),
+                                 prop_src=[r_avg, g_avg, b_avg])

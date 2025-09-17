@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-02-08
+LastEditTime: 2025-09-17
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -77,6 +77,7 @@ def vs_ext_reference_clip(clip: vs.VideoNode, sc_framedir: str = None, clip_resi
                 HAVC_LogMessage(MessageType.WARNING, "vs_ext_reference_clip(): path '", img_path, "' is invalid")
                 return f.copy()
         else:
+            HAVC_LogMessage(MessageType.WARNING, "vs_ext_reference_clip(): not found file: '", img_name, ".*' ")
             return f.copy()
 
         if ref_img is None:
@@ -85,6 +86,9 @@ def vs_ext_reference_clip(clip: vs.VideoNode, sc_framedir: str = None, clip_resi
         return image_to_frame(ref_img, f.copy())
 
     clip_ref = clip.std.ModifyFrame(clips=[clip], selector=partial(set_clip_frame, img_list=ref_images, f_size=f_size))
+
+    #clip_ref = debug_ModifyFrame(50, 80, clip, clips=[clip],
+    #                             selector=partial(set_clip_frame, img_list=ref_images, f_size=f_size))
 
     return clip_ref
 
@@ -99,30 +103,18 @@ main function used to combine the colored images with deoldify() and ddcolor()
 """
 
 
-def vs_sc_combine_models(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, method: int = 0, sat: list = [1, 1],
-                         hue: list = [0, 0],
-                         clipb_weight: float = 0.6, scenechange: bool = True) -> vs.VideoNode:
-    # vs.core.log_message(2, "combine_models: method=" + str(method) + ", clipa = " + str(clipa) + ", clipb = " + str(clipb))
+def vs_combine_models(clip_a: vs.VideoNode = None, clip_b: vs.VideoNode = None, method: int = 0, sat: list = (1, 1),
+                      hue: list = (0, 0), clipb_weight: float = 0.5, CMC_p: float = 0.2, LMM_p: list = (0.3, 0.6, 1.0),
+                      ALM_p: list = (0.3, 0.6, 1.0), invert_clips: bool = False,
+                      scenechange: bool = False) -> vs.VideoNode:
 
-    if clipa is not None:
-        clipa = vs_sc_tweak(clipa, hue=hue[0], sat=sat[0], scenechange=scenechange)
-        if clipb is None:
-            return clipa
-
-    if clipb is not None:
-        clipb = vs_sc_tweak(clipb, hue=hue[1], sat=sat[1], scenechange=scenechange)
-        if clipa is None:
-            return clipb
-
-    if method == 2:
-        return SCSimpleMerge(clipa, clipb, clipb_weight, scenechange)
-    else:
-        raise vs.Error("HAVC: only dd_method=2 (Simple Merge) is supported")
+    return vs_sc_combine_models(clip_a, clip_b, method, sat, hue, clipb_weight, CMC_p, LMM_p,
+                                ALM_p, invert_clips, scenechange=False)
 
 
-def vs_combine_models(clip_a: vs.VideoNode = None, clip_b: vs.VideoNode = None, method: int = 0, sat: list = [1, 1],
-                      hue: list = [0, 0], clipb_weight: float = 0.5, CMC_p: float = 0.2, LMM_p: list = [0.3, 0.6, 1.0],
-                      ALM_p: list = [0.3, 0.6, 1.0], invert_clips: bool = False) -> vs.VideoNode:
+def vs_sc_combine_models(clip_a: vs.VideoNode = None, clip_b: vs.VideoNode = None, method: int = 0, sat: list = (1, 1),
+                      hue: list = (0, 0), clipb_weight: float = 0.5, CMC_p: float = 0.2, LMM_p: list = (0.3, 0.6, 1.0),
+                      ALM_p: list = (0.3, 0.6, 1.0), invert_clips: bool = False, scenechange: bool = True) -> vs.VideoNode:
     # vs.core.log_message(2, "combine_models: method=" + str(method) + ", clipa = " + str(clipa) + ", clipb = " + str(clipb))
 
     # unpack combine_params
@@ -152,13 +144,14 @@ def vs_combine_models(clip_a: vs.VideoNode = None, clip_b: vs.VideoNode = None, 
             return clipb
 
     if method == 2:
-        return SimpleMerge(clipa, clipb, clipb_weight)
+        return SimpleMerge(clipa, clipb, clipb_weight, scenechange=scenechange)
     if method == 3:
-        return ConstrainedChromaMerge(clipa, clipb, clipb_weight, chroma_threshold)
+        return ConstrainedChromaMerge(clipa, clipb, clipb_weight, chroma_threshold, scenechange=scenechange)
     if method == 4:
-        return LumaMaskedMerge(clipa, clipb, luma_mask_limit, luma_white_limit, luma_mask_sat, clipb_weight)
+        return LumaMaskedMerge(clipa, clipb, luma_mask_limit, luma_white_limit, luma_mask_sat, clipb_weight,
+                               scenechange=scenechange)
     if method == 5:
-        return AdaptiveLumaMerge(clipa, clipb, luma_threshold, alpha, clipb_weight, min_weight)
+        return AdaptiveLumaMerge(clipa, clipb, luma_threshold, alpha, clipb_weight, min_weight, scenechange=scenechange)
     else:
         raise vs.Error("HAVC: only dd_method in (0,5) is supported")
 
@@ -174,8 +167,8 @@ represent the weight assigned to the colors provided by ddcolor()
 """
 
 
-def SCSimpleMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clipb_weight: float = 0.5,
-                  scenechange: bool = True) -> vs.VideoNode:
+def SimpleMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clipb_weight: float = 0.5,
+                  scenechange: bool = False) -> vs.VideoNode:
     def merge_frame(n, f, weight: float = 0.5, scenechange: bool = True):
 
         if scenechange:
@@ -194,17 +187,6 @@ def SCSimpleMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clipb_
     return clipm
 
 
-def SimpleMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clipb_weight: float = 0.5) -> vs.VideoNode:
-    def merge_frame(n, f, weight: float = 0.5):
-        img1 = frame_to_image(f[0])
-        img2 = frame_to_image(f[1])
-        img_m = image_weighted_merge(img1, img2, weight)
-        return image_to_frame(img_m, f[0].copy())
-
-    clipm = clipa.std.ModifyFrame(clips=[clipa, clipb], selector=partial(merge_frame, weight=clipb_weight))
-    return clipm
-
-
 """
 ------------------------------------------------------------------------------- 
 Author: Dan64
@@ -218,14 +200,21 @@ the masked image will be merged with clipa
 
 
 def LumaMaskedMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, luma_mask_limit: float = 0.4,
-                    luma_white_limit: float = 0.7, luma_mask_sat=1.0, clipm_weight: float = 0.5) -> vs.VideoNode:
+                    luma_white_limit: float = 0.7, luma_mask_sat=1.0, clipm_weight: float = 0.5,
+                    scenechange: bool = False) -> vs.VideoNode:
     if luma_mask_sat < 1:
         # vs.core.log_message(2, "LumaMaskedMerge: mask_sat = " + str(luma_mask_sat))
         clipc = vs_tweak(clipa, sat=luma_mask_sat)
     else:
         clipc = clipa
 
-    def merge_frame(n, f, weight: float = 0.5, luma_limit: float = 0.4, white_limit: float = 0.7):
+    def merge_frame(n, f, weight: float, luma_limit: float, white_limit: float, scenechange: bool):
+
+        if scenechange:
+            is_scenechange = (n == 0) or (f[0].props['_SceneChangePrev'] == 1 and f[0].props['_SceneChangeNext'] == 0)
+            if not is_scenechange:
+                return f[0].copy()
+
         img1 = frame_to_image(f[0])
         img2 = frame_to_image(f[1])
         img3 = frame_to_image(f[2])
@@ -234,7 +223,7 @@ def LumaMaskedMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, luma
             img_masked = image_luma_merge(img3, img2, luma_limit)
         else:
             img_masked = w_image_luma_merge(img3, img2, luma_limit, white_limit)
-        if clipm_weight < 1:
+        if clipm_weight < 1.0:
             img_m = image_weighted_merge(img1, img_masked, weight)
         else:
             img_m = img_masked
@@ -242,7 +231,7 @@ def LumaMaskedMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, luma
 
     clipm = clipa.std.ModifyFrame(clips=[clipa, clipb, clipc],
                                   selector=partial(merge_frame, weight=clipm_weight, luma_limit=luma_mask_limit,
-                                                   white_limit=luma_white_limit))
+                                                   white_limit=luma_white_limit, scenechange=scenechange))
     return clipm
 
 
@@ -262,8 +251,15 @@ For alpha=2, begins to decrease quadratically.
 
 
 def AdaptiveLumaMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, luma_threshold: float = 0.6,
-                      alpha: float = 1.0, clipb_weight: float = 0.5, min_weight: float = 0.15) -> vs.VideoNode:
-    def merge_frame(n, f, luma_limit: float = 0.6, min_w: float = 0.15, alpha: float = 1.0, weight: float = 0.5):
+                      alpha: float = 1.0, clipb_weight: float = 0.5, min_weight: float = 0.15,
+                      scenechange: bool = False) -> vs.VideoNode:
+    def merge_frame(n, f, luma_limit: float, min_w: float, alpha: float, weight: float, scenechange: bool):
+
+        if scenechange:
+            is_scenechange = (n == 0) or (f[0].props['_SceneChangePrev'] == 1 and f[0].props['_SceneChangeNext'] == 0)
+            if not is_scenechange:
+                return f[0].copy()
+
         img1 = frame_to_image(f[0])
         img2 = frame_to_image(f[1])
         luma = get_image_luma(img2)
@@ -278,7 +274,7 @@ def AdaptiveLumaMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, lu
 
     clipm = clipa.std.ModifyFrame(clips=[clipa, clipb],
                                   selector=partial(merge_frame, luma_limit=luma_threshold, min_w=min_weight,
-                                                   alpha=alpha, weight=clipb_weight))
+                                                   alpha=alpha, weight=clipb_weight, scenechange=scenechange))
     return clipm
 
 
@@ -299,13 +295,20 @@ percentage difference respect to "U","V" provided by deoldify() not higher than 
 
 
 def ConstrainedChromaMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clipb_weight: float = 0.5,
-                           chroma_threshold: float = 0.2) -> vs.VideoNode:
-    def merge_frame(n, f, level: float = 0.2, weight: float = 0.5):
+                           chroma_threshold: float = 0.2, scenechange: bool = False) -> vs.VideoNode:
+    def merge_frame(n, f, level: float, weight: float, scenechange: bool):
+
+        if scenechange:
+            is_scenechange = (n == 0) or (f[0].props['_SceneChangePrev'] == 1 and f[0].props['_SceneChangeNext'] == 0)
+            if not is_scenechange:
+                return f[0].copy()
+
         img1 = frame_to_image(f[0])
         img2 = frame_to_image(f[1])
         img_m = chroma_stabilizer(img1, img2, level, weight)
         return image_to_frame(img_m, f[0].copy())
 
     clipm = clipa.std.ModifyFrame(clips=[clipa, clipb],
-                                  selector=partial(merge_frame, level=chroma_threshold, weight=clipb_weight))
+                                  selector=partial(merge_frame, level=chroma_threshold, weight=clipb_weight,
+                                                   scenechange=scenechange))
     return clipm

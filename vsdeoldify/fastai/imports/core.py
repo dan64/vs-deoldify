@@ -5,7 +5,7 @@ import abc, collections, hashlib, itertools, json, operator, pathlib
 import mimetypes, inspect, typing, functools, importlib, weakref
 import html, re, requests, tarfile, numbers, tempfile, bz2
 
-from abc import abstractmethod, abstractproperty
+from abc import abstractmethod
 from collections import abc,  Counter, defaultdict, namedtuple, OrderedDict
 from collections.abc import Iterable
 import concurrent
@@ -26,6 +26,7 @@ from matplotlib.patches import Patch
 from pandas import Series, DataFrame
 from io import BufferedWriter, BytesIO
 
+"""
 import pkg_resources
 pkg_resources.require("fastprogress>=0.1.19")
 from fastprogress.fastprogress import master_bar, progress_bar
@@ -48,3 +49,38 @@ def have_min_pkg_version(package, version):
         return True
     except:
         return False
+"""
+import importlib
+from importlib.metadata import version, PackageNotFoundError
+
+# Verifica versione minima di fastprogress
+try:
+    if tuple(map(int, version("fastprogress").split("."))) < (0, 1, 19):
+        raise RuntimeError("fastprogress>=0.1.19 is required")
+except PackageNotFoundError:
+    raise RuntimeError("fastprogress is not installed")
+
+from fastprogress.fastprogress import master_bar, progress_bar
+
+# for type annotations
+from numbers import Number
+from typing import Any, AnyStr, Callable, Collection, Dict, Hashable, Iterator, List, Mapping, NewType, Optional
+from typing import Sequence, Tuple, TypeVar, Union
+from types import SimpleNamespace
+
+
+def try_import(module):
+    "Try to import `module`. Returns module's object on success, None on failure"
+    try:
+        return importlib.import_module(module)
+    except ImportError:
+        return None
+
+
+def have_min_pkg_version(package: str, min_version: str) -> bool:
+    "Check whether we have at least `min_version` of `package`. Returns True on success, False otherwise."
+    try:
+        pkg_version = version(package)
+    except PackageNotFoundError:
+        return False
+    return tuple(map(int, pkg_version.split("."))) >= tuple(map(int, min_version.split(".")))

@@ -96,7 +96,7 @@ The vector order is: H = 0, S = 1, V = 2
 """
 
 
-def restore_color_gradient(img_color: Image = None, img_gray: Image = None, sat: float = 1.0, tht: int = 15,
+def restore_color_gradient(img_color: Image = None, img_gray: Image = None, sat: float = 1.0, tht: int = 50,
                            weight: float = 0, alpha: float = 2.0, return_mask: bool = False) -> Image:
     np_color = np.asarray(img_color)
     np_gray = np.asarray(img_gray)
@@ -126,6 +126,9 @@ def restore_color_gradient(img_color: Image = None, img_gray: Image = None, sat:
 
     if weight > 0:
         np_restored = np_weighted_merge(np_restored, np_color_sat, weight)  # merge with colored frame
+
+    if weight < 0:
+        np_restored = np_weighted_merge(np_restored, np_gray, -weight)  # merge with gray frame
 
     img_restored = Image.fromarray(np_restored, 'RGB').convert('RGB')
 
@@ -321,7 +324,6 @@ def np_adjust_chroma2(np_color_rgb: np.ndarray, np_gray_rgb: np.ndarray, hue_ran
 def _parse_hue_adjust(hue_adjust: str = 'none') -> ():
     p = hue_adjust.split("|")
 
-    hue_range = ""
     sat = 1.0
     hue = 0
     weight = 0
@@ -330,12 +332,18 @@ def _parse_hue_adjust(hue_adjust: str = 'none') -> ():
     if num < 1 or num > 2:
         return None
 
+    #pp = p[0].split(":")
+    #if not pp[0].isnumeric() or not pp[1].isnumeric():
+    #    return None
+
     hue_range = p[0]
 
     if num == 1:
         return hue_range, sat, hue, weight
 
     sw = p[1].split(",")
+    if len(sw) != 2 or not isfloat(sw[0]) or not isfloat(sw[1]):
+        return None
 
     if (sw[0])[0] in ('-', '+'):
         hue = int(sw[0])

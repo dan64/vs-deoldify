@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-02-08
+LastEditTime: 2025-09-17
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -15,9 +15,10 @@ import numpy as np
 import cv2
 from PIL import Image, ImageMath
 
+
+from .constants import *
 from .nputils import *
-from .restcolor import np_adjust_chroma2
-from .restcolor import np_image_chroma_tweak
+from .restcolor import np_adjust_chroma2, restore_color_gradient, np_image_chroma_tweak
 
 """
 ------------------------------------------------------------------------------- 
@@ -254,7 +255,6 @@ defined by the parameter "luma_min". The function allow to modify the gamma
 of image if the average luma is below the parameter "gamma_luma_min"  
 """
 
-
 def luma_adjusted_levels(img: Image, luma_min: float = 0, gamma: float = 1.0, gamma_luma_min: float = 0,
                          gamma_alpha: float = 0, gamma_min: float = 0.2, i_min: int = 0, i_max: int = 255) -> Image:
     img_np = np.asarray(img)
@@ -440,11 +440,34 @@ get the value of average luma of an image
 """
 
 
-def get_image_luma(img: Image) -> float:
+def get_image_luma(img: Image, maxrange: int = 255) -> float:
     img_np = np.asarray(img)
     yuv = cv2.cvtColor(img_np, cv2.COLOR_RGB2YUV)
     luma = np.mean(yuv[:, :, 0])
-    return luma / 255
+    return round(luma / maxrange, 6)
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+image blend based on luma 
+"""
+
+def image_luma_blend(img: Image, img_new: Image, f_luma: float = 0.5, luma_limit: float = 0.4,
+                     alpha: float = 0.90, min_w: float = 0.15, decay: float = 4.0) -> Image:
+
+    # Luma merge
+    if f_luma < luma_limit:
+        bright_scale = min(max(pow(f_luma / luma_limit, decay), 0), 1)
+        w = round(max(alpha * bright_scale, min_w), 6)
+        # img_m = img * (1.0 - w) + img_new * w
+        img_m = Image.blend(img, img_new, w)
+    else:
+        img_m = img_new
+
+    return img_m
 
 
 """

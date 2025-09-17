@@ -4,18 +4,20 @@ Author: Dan64
 Date: 2024-11-20
 version:
 LastEditors: Dan64
-LastEditTime: 2025-02-21
+LastEditTime: 2025-09-17
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
 Constants for vs-deoldify functions.
 """
 
-DEF_THT_WHITE: float = 0.88
-DEF_THT_BLACK: float = 0.12
+DEF_THT_WHITE: float = 0.85
+DEF_THT_BLACK: float = 0.05
 DEF_THT_BLACK_FREQ: float = 0.14
 DEF_THT_BLACK_MIN: float = 0.19
 DEF_THT_WHITE_MIN: float = 0.81
+DEF_THT_DARK_BLACK: float = 0.12
+DEF_THT_BRIGHT_WHITE: float = 0.88
 DEF_ADAPTIVE_RATIO_LO: float = 1.02
 DEF_ADAPTIVE_RATIO_MED: float = 1.12
 DEF_ADAPTIVE_RATIO_HI: float = 1.20
@@ -49,6 +51,8 @@ DEF_VIVID_HUE_HIGH: float = 5.0
 DEF_VIVID_SAT_LOW: float = 1.15
 DEF_MIN_COLOR_ALPHA: float = 1.0
 DEF_MAX_COLOR_ALPHA: float = 10.0
+DEF_RECOVER_WEIGHT: float = 0.99
+
 
 
 

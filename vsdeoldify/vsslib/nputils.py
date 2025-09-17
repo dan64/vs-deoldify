@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-02-21
+LastEditTime: 2025-09-17
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -232,14 +232,26 @@ numpy implementation of image merge on 3 planes, faster than vs.core.std.Merge()
 def np_weighted_merge(img1_np: np.ndarray, img2_np: np.ndarray, weight: float = 0.5) -> np.ndarray:
     img_new = np.copy(img1_np)
 
-    img_m = np.multiply(img1_np, 1 - weight).clip(0, 255).astype(int) + np.multiply(img2_np, weight).clip(0,
-                                                                                                          255).astype(
-        int)
+    img_m = (np.multiply(img1_np, 1 - weight) + np.multiply(img2_np, weight)).clip(0, 255).astype(int)
     img_new[:, :, 0] = img_m[:, :, 0]
     img_new[:, :, 1] = img_m[:, :, 1]
     img_new[:, :, 2] = img_m[:, :, 2]
 
     return img_new
+
+def np_luma_blend(img_np: np.ndarray, img_new_np: np.ndarray, f_luma: float = 0.5, luma_limit: float = 0.6,
+                     alpha: float = 0.95, min_w: float = 0.10, decay: float = 2.0) -> np.ndarray:
+
+    # Luma merge
+    if f_luma < luma_limit:
+        bright_scale = pow(f_luma / luma_limit, decay)
+        w = max(alpha * bright_scale, min_w)
+        # img_m = img * (1.0 - w) + img_new * w
+        img_m = np_weighted_merge(img_np, img_new_np, w)
+    else:
+        img_m = img_new_np
+
+    return img_m
 
 
 """
@@ -315,3 +327,11 @@ def np_image_gamma_contrast(np_img: np.ndarray = None, gamma: float = 1.0, cont:
     np_img_rgb = cv2.cvtColor(yuv_new, cv2.COLOR_YUV2RGB)
 
     return np_img_rgb
+
+
+def isfloat(x) -> bool:
+    try:
+        n = float(x)
+        return True
+    except ValueError:
+        return False

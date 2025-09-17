@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-02-21
+LastEditTime: 2025-09-17
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -47,7 +47,7 @@ from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDe
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 from vsdeoldify.havc_utils import *
 
-__version__ = "5.0.4"
+__version__ = "5.5.0"
 
 import warnings
 import logging
@@ -84,15 +84,14 @@ Description:
 wrapper to HAVC filter with "presets" management
 """
 
-
-def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: str = 'Video+Artistic', CombMethod: str = 'Simple',
-              VideoTune: str = 'Stable', ColorFix: str = 'Violet/Red', ColorTune: str = 'Light', ColorMap: str = 'None',
-              BlackWhiteTune: str = 'None', EnableDeepEx: bool = False, DeepExMethod: int = 0,
+def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0,  ColorModel: str = 'Video+Artistic',
+              CombMethod: str = 'Simple',  VideoTune: str = 'Stable', ColorFix: str = 'Magenta/Violet',
+              ColorTune: str = 'Light', ColorMap: str = 'None',  BlackWhiteTune: str = 'None', BlackWhiteMode: int = 0,
+              BlackWhiteBlend: bool = True, EnableDeepEx: bool = False, DeepExMethod: int = 0,
               DeepExPreset: str = 'Medium', DeepExRefMerge: int = 0, DeepExOnlyRefFrames: bool = False,
               ScFrameDir: str = None, ScThreshold: float = DEF_THRESHOLD, ScThtOffset: int = 1, ScMinFreq: int = 0,
               ScMinInt: int = 1, ScThtSSIM: float = 0.0, ScNormalize: bool = False, DeepExModel: int = 0,
-              DeepExVivid: bool = True, DeepExEncMode: int = 0, DeepExMaxMemFrames=0,
-              RefRange: tuple[int, int] = (0, 0),
+              DeepExVivid: bool = True, DeepExEncMode: int = 0, DeepExMaxMemFrames=0, RefRange: tuple[int, int] = (0, 0),
               enable_fp16: bool = True, sc_debug: bool = False) -> vs.VideoNode:
     """Main HAVC function supporting the Presets
 
@@ -104,9 +103,14 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: str = 'Vid
                                     'Slower',
                                     'Slow',
                                     'Medium', (default)
-                                    'Fast',  
+                                    'Fast',
                                     'Faster',
                                     'VeryFast'
+    :param FrameInterp:         This parameter will allow to enable the frame interpolation. This method will use
+                                Deep-Exemplar to interpolate the colored frames. If = 0, the interpolation is disabled,
+                                if > 0 represent the number of frames used for interpolation. The quality of
+                                interpolation will decrease with the number of frames, suggested value is 5.
+                                Range [0-10], Default = 0
     :param ColorModel:          Preset to control the Color Models to be used for the color inference
                                 Allowed values are:
                                     'Video+Artistic'  (default)
@@ -142,9 +146,9 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: str = 'Vid
                                 Allowed values are:
                                     'None',
                                     'Magenta',
-                                    'Magenta/Violet',
+                                    'Magenta/Violet',   (default)
                                     'Violet',
-                                    'Violet/Red', (default)
+                                    'Violet/Red',
                                     'Blue/Magenta',
                                     'Yellow',
                                     'Yellow/Orange',
@@ -152,8 +156,8 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: str = 'Vid
     :param ColorTune:           This parameter allows to define the intensity of noise reduction applied by ColorFix.
                                 Allowed values are:
                                     'None'
-                                    'Light',  (default)
-                                    'Medium',
+                                    'Light',
+                                    'Medium',  (default)
                                     'Strong',
     :param ColorMap:            This parameter allows to change a given color range to another color.
                                 Allowed values are:
@@ -167,12 +171,21 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: str = 'Vid
                                     'Red->Brown',
                                     'Red->Blue'
                                     'Yellow->Rose'
-    :param BlackWhiteTune:      This parameter allows to improve contrast and luminosity of Black & White input clip to
-                                be colored with HAVC. Allowed values are:
+    :param BlackWhiteTune:      This parameter allows to improve contrast and luminosity of frames colored with HAVC.
+                                Allowed values are:
                                     'None' (default)
                                     'Light',
                                     'Medium',
                                     'Strong'
+    :param BlackWhiteMode:      Method used by BlackWhiteTune to perform colors adjustments.
+                                Allowed values are:
+                                      0 : Apply Contrast Limited Adaptive Histogram Equalization on Luma (default)
+                                      1 : Apply Simple Histogram Equalization on all RGB channels
+                                      2 : Apply CLAHE on all RGB channels
+                                      3 : method=0 and method=1 are merged
+                                      4 : Automatic brightness and contrast optimization with ScaleAbs
+                                      5 : Auto bright and contrast optim. with saturation arithmetic
+    :param BlackWhiteBlend:     If enabled the frames adjusted with BlackWhiteTune will be blended with the original frames.
     :param EnableDeepEx:        Enable coloring using "Exemplar-based" Video Colorization models
     :param DeepExMethod:        Method to use to generate reference frames.
                                         0 = HAVC same as video (default)
@@ -190,7 +203,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: str = 'Vid
     :param DeepExRefMerge:      Method used by DeepEx to merge the reference frames with the frames propagated by DeepEx.
                                 It is applicable only with DeepEx method: 0, 1, 2.
                                 Allowed values are:
-                                        0 = No RF merge (reference frames can be produced with any frequency)
+                                        0 = No RF merge (reference frames can be produced with any frequency) (default)
                                         1 = RF-Merge VeryLow (reference frames are merged with weight=0.3)
                                         2 = RF-Merge Low (reference frames are merged with weight=0.4)
                                         3 = RF-Merge Med (reference frames are merged with weight=0.5)
@@ -240,6 +253,211 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: str = 'Vid
                                     min=4, max=50
                                 If = 0 will be filled with the value of 20.
     :param ScFrameDir:          if set, define the directory where are stored the reference frames that will be used
+                                by "Exemplar-based" Video Colorization models. With DeepExMethod 5,6 this parameter
+                                can be the path to a video clip.
+    :param ScThreshold:         Scene change threshold used to generate the reference frames to be used by
+                                "Exemplar-based" Video Colorization. It is a percentage of the luma change between
+                                the previous and the current frame. range [0-1], default 0.10. If =0 are not generate
+                                reference frames.
+    :param ScThtOffset:         Offset index used for the Scene change detection. The comparison will be performed,
+                                between frame[n] and frame[n-offset]. An offset > 1 is useful to detect blended scene
+                                change, range[1, 25]. Default = 1.
+    :param ScMinInt:            Minimum number of frame interval between scene changes, range[1, 25]. Default = 1.
+    :param ScMinFreq:           if > 0 will be generated at least a reference frame every "ScMinFreq" frames.
+                                range [0-1500], default: 0.
+    :param ScThtSSIM:           Threshold used by the SSIM (Structural Similarity Index Metric) selection filter.
+                                If > 0, will be activated a filter that will improve the scene-change detection,
+                                by discarding images that are similar.
+                                Suggested values are between 0.35 and 0.65, range [0-1], default 0.0 (deactivated)
+    :param ScNormalize:         If true the B&W frames are normalized before use misc.SCDetect(), the normalization will
+                                increase the sensitivity to smooth scene changes, range [True, False], default: False
+    :param RefRange:            Parameter used only with DeepExMethod in (5, 6). With this parameter it is possible to
+                                provide the frame number of clip start and end. For example RefRange=(100, 500)
+                                will return the clip's slice: clip[100:500], if RefRange=(0, 0) will be considered all
+                                clip's frames.
+    :param enable_fp16:         Enable/disable FP16 in ddcolor inference, range [True, False]
+    :param sc_debug:            Print debug messages regarding the scene change detection process.
+    """
+    # disable packages warnings
+    disable_warnings()
+
+    clip_colored = HAVC_main_colorizer(clip, Preset, ColorModel, CombMethod,  VideoTune, ColorFix,
+              ColorTune, ColorMap,  BlackWhiteTune,  BlackWhiteMode, BlackWhiteBlend, EnableDeepEx, DeepExMethod, DeepExPreset,
+              DeepExRefMerge, DeepExOnlyRefFrames, ScFrameDir, ScThreshold, ScThtOffset, ScMinFreq, ScMinInt, ScThtSSIM,
+              ScNormalize, DeepExModel, DeepExVivid, DeepExEncMode, DeepExMaxMemFrames, FrameInterp, RefRange,
+              enable_fp16, sc_debug)
+
+    return clip_colored
+
+def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: str = 'Video+Artistic',
+              CombMethod: str = 'Simple',  VideoTune: str = 'Stable', ColorFix: str = 'Magenta/Violet',
+              ColorTune: str = 'Medium', ColorMap: str = 'None',  BlackWhiteTune: str = 'None', BlackWhiteMode: int = 0,
+              BlackWhiteBlend: bool = True, EnableDeepEx: bool = False, DeepExMethod: int = 0, DeepExPreset: str = 'Medium',
+              DeepExRefMerge: int = 0, DeepExOnlyRefFrames: bool = False, ScFrameDir: str = None,
+              ScThreshold: float = DEF_THRESHOLD, ScThtOffset: int = 1, ScMinFreq: int = 0, ScMinInt: int = 1,
+              ScThtSSIM: float = 0.0, ScNormalize: bool = False, DeepExModel: int = 0, DeepExVivid: bool = True,
+              DeepExEncMode: int = 0, DeepExMaxMemFrames=0, FrameInterp: int = 0, RefRange: tuple[int, int] = (0, 0),
+              enable_fp16: bool = True, sc_debug: bool = False) -> vs.VideoNode:
+    """Main HAVC coloring function supporting the Presets
+
+    :param clip:                clip to process, only RGB24 format is supported.
+    :param Preset:              Preset to control the encoding speed/quality.
+                                Allowed values are:
+                                    'Placebo',
+                                    'VerySlow',
+                                    'Slower',
+                                    'Slow',
+                                    'Medium', (default)
+                                    'Fast',  
+                                    'Faster',
+                                    'VeryFast'
+    :param ColorModel:          Preset to control the Color Models to be used for the color inference
+                                Allowed values are:
+                                    'Video+Artistic'  (default)
+                                    'Stable+Artistic'
+                                    'Video+ModelScope'
+                                    'Stable+ModelScope'
+                                    'Artistic+Modelscope'
+                                    'Video+Siggraph17'
+                                    'Video+ECCV16'
+                                    'DeOldify(Video)'
+                                    'DeOldify(Stable)'
+                                    'DeOldify(Artistic)'
+                                    'DDColor(Artistic)'
+                                    'DDColor(ModelScope)'
+                                    'Zhang(Siggraph17)'
+                                    'Zhang(ECCV16)'
+    :param CombMethod:          Method used to combine coloring models with (+):
+                                Allowed values are:
+                                    'Simple' (default)
+                                    'Constrained-Chroma'
+                                    'Luma-Masked'
+                                    'Adaptive-Luma'
+    :param VideoTune:           Preset to control the output video color stability
+                                Allowed values are:
+                                    'VeryStable',
+                                    'MoreStable'
+                                    'Stable',  (default)
+                                    'Balanced',
+                                    'Vivid',
+                                    'MoreVivid',
+                                    'VeryVivid',
+    :param ColorFix:            This parameter allows to reduce color noise on specific chroma ranges.
+                                Allowed values are:
+                                    'None',
+                                    'Magenta',
+                                    'Magenta/Violet',   (default)
+                                    'Violet',
+                                    'Violet/Red',
+                                    'Blue/Magenta',
+                                    'Yellow',
+                                    'Yellow/Orange',
+                                    'Yellow/Green'
+    :param ColorTune:           This parameter allows to define the intensity of noise reduction applied by ColorFix.
+                                Allowed values are:
+                                    'None'
+                                    'Light',
+                                    'Medium',  (default)
+                                    'Strong',
+    :param ColorMap:            This parameter allows to change a given color range to another color.
+                                Allowed values are:
+                                    'None', (default)
+                                    'Blue->Brown',
+                                    'Blue->Red',
+                                    'Blue->Green',
+                                    'Green->Brown',
+                                    'Green->Red',
+                                    'Green->Blue',
+                                    'Red->Brown',
+                                    'Red->Blue'
+                                    'Yellow->Rose'
+    :param BlackWhiteTune:      This parameter allows to improve contrast and luminosity of Black & White input clip to
+                                be colored with HAVC. Allowed values are:
+                                    'None' (default)
+                                    'Light',
+                                    'Medium',
+                                    'Strong'
+    :param BlackWhiteMode:      Method used by BlackWhiteTune to perform colors adjustments.
+                                Allowed values are:
+                                      0 : Apply Contrast Limited Adaptive Histogram Equalization on Luma (default)
+                                      1 : Apply Simple Histogram Equalization on all RGB channels
+                                      2 : Apply CLAHE on all RGB channels
+                                      3 : method=0 and method=1 are merged
+                                      4 : Automatic brightness and contrast optimization with ScaleAbs
+                                      5 : Automatic brightness and contrast optimization with saturation arithmetic.
+    :param BlackWhiteBlend:     If enabled the frames adjusted with BlackWhiteTune will be blended with the original frames.
+    :param EnableDeepEx:        Enable coloring using "Exemplar-based" Video Colorization models
+    :param DeepExMethod:        Method to use to generate reference frames.
+                                        0 = HAVC same as video (default)
+                                        1 = HAVC + RF same as video
+                                        2 = HAVC + RF different from video
+                                        3 = external RF same as video
+                                        4 = external RF different from video
+                                        5 = external ClipRef same as video
+                                        6 = external ClipRef different from video
+    :param DeepExPreset:        Preset to control the render method and speed:
+                                Allowed values are:
+                                        'Fast'   (colors are more washed out)
+                                        'Medium' (colors are a little washed out)
+                                        'Slow'   (colors are a little more vivid)
+    :param DeepExRefMerge:      Method used by DeepEx to merge the reference frames with the frames propagated by DeepEx.
+                                It is applicable only with DeepEx method: 0, 1, 2.
+                                Allowed values are:
+                                        0 = No RF merge (reference frames can be produced with any frequency) (default)
+                                        1 = RF-Merge VeryLow (reference frames are merged with weight=0.3)
+                                        2 = RF-Merge Low (reference frames are merged with weight=0.4)
+                                        3 = RF-Merge Med (reference frames are merged with weight=0.5)
+                                        4 = RF-Merge High (reference frames are merged with weight=0.6)
+                                        5 = RF-Merge VeryHigh (reference frames are merged with weight=0.7)
+    :param DeepExOnlyRefFrames: If enabled the filter will output in "ScFrameDir" the reference frames. Useful to check
+                                and eventually correct the frames with wrong colors
+                                (can be used only if DeepExMethod = 0)
+    :param DeepExModel:         Exemplar Model used by DeepEx to propagate color frames.
+                                        0 : ColorMNet (default)
+                                        1 : Deep-Exemplar
+                                        2 : Deep-Remaster
+    :param DeepExVivid:         Depending on selected DeepExModel, if enabled (True):
+                                    0) ColorMNet: the frames memory is reset at every reference frame update
+                                    1) Deep-Exemplar: the saturation will be increased by about 25%.
+                                    2) Deep-Remaster: the saturation will be increased by about 20% and Hue by +10.
+                                range [True, False]
+    :param DeepExEncMode:       Parameter used by ColorMNet to define the encode mode strategy.
+                                Available values are:
+                                     0: remote encoding. The frames will be colored by a thread outside Vapoursynth.
+                                                         This option don't have any GPU memory limitation and will allow
+                                                         to fully use the long term frame memory.
+                                                         It is the faster encode method (default)
+                                     1: local encoding.  The frames will be colored inside the Vapoursynth environment.
+                                                         In this case the max_memory will be limited by the size of GPU
+                                                         memory (max 15 frames for 24GB GPU).
+                                                         Useful for coloring clips with a lot of smooth transitions,
+                                                         since in this case is better to use a short frame memory or
+                                                         the Deep-Exemplar model, which is faster.
+                                     2: remote all-ref   Same as "remote encoding" but all the available reference frames
+                                                         will be used for the inference at the beginning of encoding.
+    :param DeepExMaxMemFrames:  Parameter used by ColorMNet/DeepRemaster models.
+                                For ColorMNet specify the max number of encoded frames to keep in memory.
+                                Its value depend on encode mode and must be defined manually following the suggested values.
+                                DeepExEncMode=0: there is no memory limit (it could be all the frames in the clip).
+                                Suggested values are:
+                                    min=150, max=10000
+                                If = 0 will be filled with the value of 10000 or the clip length if lower.
+                                DeepExEncMode=1: the max memory frames is limited by available GPU memory.
+                                Suggested values are:
+                                    min=1, max=4      : for 8GB GPU
+                                    min=1, max=8      : for 12GB GPU
+                                    min=1, max=15     : for 24GB GPU
+                                If = 0 will be filled with the max value (depending on total GPU RAM available)
+                                For DeepRemaster represent the number to reference frames to keep in memory.
+                                Suggested values are:
+                                    min=4, max=50
+                                If = 0 will be filled with the value of 20.
+    :param FrameInterp:         This parameter will allow to enable the frame interpolation. This method will use
+                                Deep-Exemplar to interpolate the colored frames. If = 0, the interpolation is disabled,
+                                if > 0 represent the number of frames used for interpolation. The quality of
+                                interpolation will decrease with the number of frames, suggested value is 5.
+                                Range [0-10], Default = 0
+    :param ScFrameDir:          if set, define the directory where are stored the reference frames that will be used
                                 by "Exemplar-based" Video Colorization models. With DeepExMethod 5,6 this parameter 
                                 can be the path to a video clip.
     :param ScThreshold:         Scene change threshold used to generate the reference frames to be used by
@@ -283,8 +501,9 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: str = 'Vid
     dd_tweak, hue_range, hue_range2, chroma_adjust, chroma_adjust2 = havc_utils._get_color_tune(ColorTune, ColorFix,
                                                                                                 ColorMap, dd_model)
 
+    # stabilization is not applicable where are colored only the ref frames or when Denoise is 'None'
+    stab_enabled = not DeepExOnlyRefFrames and ColorTune.lower() != 'none'
     # ---------------------- START COLORING ------------------------------------
-    clip = HAVC_bw_tune(clip, BlackWhiteTune, action='on')
 
     if EnableDeepEx and DeepExMethod in (0, 1, 2, 5, 6):
 
@@ -318,25 +537,32 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: str = 'Vid
                                               encode_mode=DeepExEncMode, ref_norm=ScNormalize)
 
         else:
-            clip_ref = HAVC_colorizer(clip, method=dd_method, mweight=ddcolor_weight,
+
+            if FrameInterp == 0 :
+                clip_ref = HAVC_colorizer(clip, method=dd_method, mweight=ddcolor_weight,
                                       deoldify_p=[do_model, deoldify_rf, 1.0, 0.0],
                                       ddcolor_p=[dd_model, ddcolor_rf, 1.0, 0.0, enable_fp16],
                                       ddtweak=dd_tweak, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range],
                                       sc_threshold=ScThreshold, sc_tht_offset=ScThtOffset, sc_min_freq=ScMinFreq,
                                       sc_min_int=ScMinInt, sc_tht_ssim=ScThtSSIM, sc_normalize=ScNormalize,
                                       sc_debug=sc_debug)
+            else:
+                clip_ref = HAVC_colorizer_fast(clip, method=dd_method, mweight=ddcolor_weight,
+                                    deoldify_p=[do_model, deoldify_rf, 1.0, 0.0],
+                                    ddcolor_p=[dd_model, ddcolor_rf, 1.0, 0.0, enable_fp16],
+                                    ddtweak=dd_tweak, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range],
+                                    frame_interp=FrameInterp, chroma_adjust=chroma_adjust, sc_debug=sc_debug)
+
             clip_colored = HAVC_deepex(clip=clip, clip_ref=clip_ref, method=DeepExMethod, render_speed=DeepExPreset,
                                        render_vivid=DeepExVivid, ref_merge=DeepExRefMerge, sc_framedir=ScFrameDir,
                                        only_ref_frames=DeepExOnlyRefFrames, dark=True, dark_p=[0.2, 0.8],
                                        ref_thresh=ref_tresh, ex_model=DeepExModel, encode_mode=DeepExEncMode,
-                                       max_memory_frames=DeepExMaxMemFrames, ref_freq=ref_freq, ref_norm=ScNormalize,
+                                       max_memory_frames=DeepExMaxMemFrames, ref_freq=ScMinFreq, ref_norm=ScNormalize,
                                        smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"], colormap=chroma_adjust)
 
-        # depending on the frequency of reference frames are adopted the faster stabilization settings
-        if ScMinFreq in range(1, 20):
-            clip_colored = HAVC_stabilizer(clip_colored, stab_p=[5, 'A', 1, 15, 0.2, 0.8], colormap=chroma_adjust2)
-        else:
-            clip_colored = HAVC_stabilizer(clip_colored, stab_p=[3, 'A', 1, 0, 0, 0], colormap=chroma_adjust2)
+        # are applied the faster stabilization settings
+        clip_colored = HAVC_stabilizer(clip_colored, stab=stab_enabled, stab_p=[3, 'A', 1, 0, 0, 0],
+                                       colormap=chroma_adjust2)
 
     elif EnableDeepEx and DeepExMethod in (3, 4):
 
@@ -355,25 +581,262 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: str = 'Vid
                                        colormap=chroma_adjust)
 
     else:  # No DeepEx -> HAVC classic
-        clip_colored = HAVC_colorizer(clip, method=dd_method, mweight=ddcolor_weight,
+
+        if FrameInterp == 0:
+            clip_colored = HAVC_colorizer(clip, method=dd_method, mweight=ddcolor_weight,
                                       deoldify_p=[do_model, deoldify_rf, 1.0, 0.0],
                                       ddcolor_p=[dd_model, ddcolor_rf, 1.0, 0.0, enable_fp16],
                                       ddtweak=dd_tweak, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range])
+        else:
+            clip_colored = HAVC_colorizer_fast(clip, method=dd_method, mweight=ddcolor_weight,
+                                      deoldify_p=[do_model, deoldify_rf, 1.0, 0.0],
+                                      ddcolor_p=[dd_model, ddcolor_rf, 1.0, 0.0, enable_fp16],
+                                      ddtweak=dd_tweak, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range],
+                                      frame_interp=FrameInterp, chroma_adjust=chroma_adjust, sc_debug=sc_debug)
 
         if speed_id > 5:  # 'faster', 'veryfast' -> is used only colormap
             clip_colored = HAVC_stabilizer(clip_colored, colormap=chroma_adjust)
-        elif speed_id > 3:  # 'medium', 'fast' -> are used all the filters except hue_range2
-            clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8], colormap=chroma_adjust,
-                                           smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
-                                           stab=True, stab_p=[5, 'A', 1, 15, 0.2, 0.8])
+        elif speed_id > 3:  # 'medium', 'fast' -> are used all the filters except hue_range2 and stab (deoldify only)
+            if dd_method == 0:
+                clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8], colormap=chroma_adjust,
+                                               smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
+                                               stab=False)
+            else:
+                clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8], colormap=chroma_adjust,
+                                               smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
+                                               stab=stab_enabled, stab_p=[5, 'A', 1, 15, 0.2, 0.8])
         else:  # 'placebo', 'veryslow', 'slower', 'slow' -> are used all the filters
             clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8], colormap=chroma_adjust,
                                            smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
-                                           stab=True, stab_p=[5, 'A', 1, 15, 0.2, 0.8, hue_range2])
+                                           stab=stab_enabled, stab_p=[5, 'A', 1, 15, 0.2, 0.8, hue_range2])
 
-    clip_colored = HAVC_bw_tune(clip_colored, BlackWhiteTune, action='off')
+    if BlackWhiteTune.lower() != 'none':
+        clip_colored = HAVC_bw_tune(clip_colored, BlackWhiteTune, BlackWhiteMode, BlackWhiteBlend)
 
     return clip_colored
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+Color post process  filter for restoring the color of clip previously colored 
+with HAVC by improving contrast and luminosity of colored frames. 
+It is a wrapper to HAVC_main_restore() 
+"""
+
+def HAVC_ColorAdjust(clip: vs.VideoNode, BlackWhiteTune: str = 'Light', BlackWhiteMode: int = 0,
+                        BlackWhiteBlend: bool = True, ReColor: bool = False, Strength: int = 0, ScThreshold: float = 0.10,
+                        ScNormalize: bool = True, DeepExVivid: bool = True,  ScMinFreq: int = 0) -> vs.VideoNode:
+    """HAVC Color Post Processing function
+
+        :param clip:               clip to process, only RGB24 format is supported.
+        :param BlackWhiteTune:     This parameter allows to improve contrast and luminosity of frames colored with HAVC.
+                                   Allowed values are:
+                                        'None',
+                                        'Light', (default)
+                                        'Medium', 
+                                        'Strong'
+        :param BlackWhiteMode:     Method used by BlackWhiteTune to perform colors adjustments.
+                                   Allowed values are:
+                                          0 : Apply Contrast Limited Adaptive Histogram Equalization on Luma (default)
+                                          1 : Apply Simple Histogram Equalization on all RGB channels
+                                          2 : Apply CLAHE on all RGB channels
+                                          3 : method=0 and method=1 are merged
+                                          4 : Automatic brightness and contrast optimization with ScaleAbs
+                                          5 : Automatic brightness and contrast optimization with saturation arithmetic.
+        :param BlackWhiteBlend:    If enabled the frames adjusted with BlackWhiteTune will be blended with the original frames.
+        :param ReColor:            If True the clip will be re-colored with ColorMNet to enforce color temporal
+                                   stabilization. To be used if the clip was colored using an AI automatic video
+                                   colorizer like HAVC. Default = False
+        :param Strength:           Color temporal stabilization strength, using high level the colors will be more
+                                   stable but will be also more washed.
+                                   Allowed values are:
+                                        0 = VeryLow (default)
+                                        1 = Low
+                                        2 = Med
+                                        3 = High
+                                        4 = VeryHigh
+        :param ScThreshold:        Scene change threshold used to generate the reference frames to be used by
+                                   ColorMNet. It is a percentage of the luma change between the previous and the
+                                   current frame. range [0-1], default 0.10. If =0 are not generate reference frames.
+                                   default = 0.10
+        :param ScNormalize:        If true the frames are normalized before using misc.SCDetect(), the normalization
+                                   will increase the sensitivity to smooth scene changes, range [True, False],
+                                   default: True
+        :param DeepExVivid:        if enabled (True) the ColorMNet memory is reset at every reference frame update
+                                   range [True, False], default: True
+        :param ScMinFreq:          if > 0 will be generated at least a reference frame every "ScMinFreq" frames.
+                                   range [0-1500], default: 0.
+    """
+    DeepExModel: int = 0
+    DeepExRefMerge: int = 1 + min(max(4 - Strength, 0), 4)
+    DeepExPreset: str = 'medium'
+    DeepExMaxMemFrames: int = 0
+    DeepExMethod: int = 5
+    DeepExEncMode: int = 0
+
+    if BlackWhiteTune.lower() == 'none' and not ReColor:
+        return clip
+
+    if not isinstance(clip, vs.VideoNode):
+        HAVC_LogMessage(MessageType.EXCEPTION, "ColorPostProcessing: this is not a clip")
+
+    if clip.format.id != vs.RGB24:
+        HAVC_LogMessage(MessageType.WARNING, "ColorPostProcessing: clip not in RGB24 format, it will be converted")
+        # clip not in RGB24 format, it will be converted
+        if clip.format.color_family == "YUV":
+            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
+                                       dither_type="error_diffusion")
+        else:
+            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
+
+    if ReColor:
+        clip_colored = clip
+        clip_colored = clip_colored.std.SetFrameProp(prop="sc_threshold", floatval=0.1)
+        clip_colored = clip_colored.std.SetFrameProp(prop="sc_frequency", intval=1)
+    else:
+        clip_colored = None
+
+    clip_restored = HAVC_main_restore(clip, clip_colored, DeepExPreset, DeepExModel, DeepExRefMerge,
+                                      ScThreshold, ScMinFreq, ScNormalize, DeepExMaxMemFrames, DeepExMethod,
+                                      DeepExVivid, DeepExEncMode, BlackWhiteTune=BlackWhiteTune,
+                                      BlackWhiteMode=BlackWhiteMode, BlackWhiteBlend=BlackWhiteBlend)
+
+    return clip_restored
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+Post process  filter for restoring the color of clip previously colored with HAVC
+by improving contrast and luminosity of colored frames
+with HAVC.
+"""
+
+def HAVC_main_restore(clip: vs.VideoNode, clip_colored: vs.VideoNode, DeepExPreset: str = 'medium',
+                      DeepExModel: int = 0, DeepExRefMerge: int = 0, ScThreshold: float = DEF_THRESHOLD,
+                      ScMinFreq: int = 0, ScNormalize: bool = False, DeepExMaxMemFrames: int = 0, DeepExMethod: int = 5,
+                      DeepExVivid: bool = True, DeepExEncMode: int = 0, BlackWhiteTune: str = 'Medium',
+                      BlackWhiteMode: int = 0, BlackWhiteBlend: bool = True) -> vs.VideoNode:
+    """Main HAVC restoring function
+
+        :param clip:               clip to process, only RGB24 format is supported.
+        :param clip_colored:       Clip containing the colored frames to be restored
+        :param BlackWhiteTune:     This parameter allows to improve contrast and luminosity of frames colored with HAVC.
+                                   Allowed values are:
+                                        'None' (default)
+                                        'Light',
+                                        'Medium',
+                                        'Strong'
+        :param BlackWhiteMode:     Method used by BlackWhiteTune to perform colors adjustments.
+                                   Allowed values are:
+                                          0 : Apply Contrast Limited Adaptive Histogram Equalization on Luma (default)
+                                          1 : Apply Simple Histogram Equalization on all RGB channels
+                                          2 : Apply CLAHE on all RGB channels
+                                          3 : method=0 and method=1 are merged
+                                          4 : Automatic brightness and contrast optimization with ScaleAbs
+                                          5 : Automatic brightness and contrast optimization with saturation arithmetic
+        :param BlackWhiteBlend:    If enabled the frames adjusted with BlackWhiteTune will be blended with the original frames.
+        :param DeepExMethod:       Method to use to generate reference frames.
+                                            0 = HAVC same as video (default)
+                                            1 = HAVC + RF same as video
+                                            2 = HAVC + RF different from video
+                                            3 = external RF same as video
+                                            4 = external RF different from video
+                                            5 = external ClipRef same as video
+                                            6 = external ClipRef different from video
+        :param DeepExPreset:       Preset to control the render method and speed:
+                                   Allowed values are:
+                                            'Fast'   (colors are more washed out)
+                                            'Medium' (colors are a little washed out)
+                                            'Slow'   (colors are a little more vivid)
+        :param DeepExRefMerge:     Method used by DeepEx to merge the reference frames with the frames propagated by DeepEx.
+                                   It is applicable only with DeepEx method: 0, 1, 2.
+                                   Allowed values are:
+                                            0 = No RF merge (reference frames can be produced with any frequency) (default)
+                                            1 = RF-Merge VeryLow (reference frames are merged with weight=0.3)
+                                            2 = RF-Merge Low (reference frames are merged with weight=0.4)
+                                            3 = RF-Merge Med (reference frames are merged with weight=0.5)
+                                            4 = RF-Merge High (reference frames are merged with weight=0.6)
+                                            5 = RF-Merge VeryHigh (reference frames are merged with weight=0.7)
+        :param DeepExModel:        Exemplar Model used by DeepEx to propagate color frames.
+                                            0 : ColorMNet (default)
+                                            1 : Deep-Exemplar
+                                            2 : Deep-Remaster
+        :param DeepExVivid:        Depending on selected DeepExModel, if enabled (True):
+                                        0) ColorMNet: the frames memory is reset at every reference frame update
+                                        1) Deep-Exemplar: the saturation will be increased by about 25%.
+                                        2) Deep-Remaster: the saturation will be increased by about 20% and Hue by +10.
+                                    range [True, False]
+        :param DeepExEncMode:      Parameter used by ColorMNet to define the encode mode strategy.
+                                   Available values are:
+                                         0: remote encoding. The frames will be colored by a thread outside Vapoursynth.
+                                                             This option don't have any GPU memory limitation and will allow
+                                                             to fully use the long term frame memory.
+                                                             It is the faster encode method (default)
+                                         1: local encoding.  The frames will be colored inside the Vapoursynth environment.
+                                                             In this case the max_memory will be limited by the size of GPU
+                                                             memory (max 15 frames for 24GB GPU).
+                                                             Useful for coloring clips with a lot of smooth transitions,
+                                                             since in this case is better to use a short frame memory or
+                                                             the Deep-Exemplar model, which is faster.
+                                         2: remote all-ref   Same as "remote encoding" but all the available reference frames
+                                                             will be used for the inference at the beginning of encoding.
+        :param DeepExMaxMemFrames: Parameter used by ColorMNet/DeepRemaster models.
+                                   For ColorMNet specify the max number of encoded frames to keep in memory.
+                                   Its value depend on encode mode and must be defined manually following the suggested values.
+                                   DeepExEncMode=0: there is no memory limit (it could be all the frames in the clip).
+                                   Suggested values are:
+                                        min=150, max=10000
+                                   If = 0 will be filled with the value of 10000 or the clip length if lower.
+                                   DeepExEncMode=1: the max memory frames is limited by available GPU memory.
+                                   Suggested values are:
+                                        min=1, max=4      : for 8GB GPU
+                                        min=1, max=8      : for 12GB GPU
+                                        min=1, max=15     : for 24GB GPU
+                                   If = 0 will be filled with the max value (depending on total GPU RAM available)
+                                   For DeepRemaster represent the number to reference frames to keep in memory.
+                                   Suggested values are:
+                                        min=4, max=50
+                                   If = 0 will be filled with the value of 20.
+        :param ScThreshold:        Scene change threshold used to generate the reference frames to be used by
+                                   "Exemplar-based" Video Colorization. It is a percentage of the luma change between
+                                   the previous and the current frame. range [0-1], default 0.10. If =0 are not generate
+                                   reference frames.
+        :param ScMinFreq:          if > 0 will be generated at least a reference frame every "ScMinFreq" frames.
+                                   range [0-1500], default: 0.
+        :param ScNormalize:        If true the B&W frames are normalized before use misc.SCDetect(), the normalization will
+                                   increase the sensitivity to smooth scene changes, range [True, False], default: False
+    """
+
+    if not clip_colored == None:
+        clip = HAVC_restore_video(clip, clip_colored, method=DeepExMethod, render_speed=DeepExPreset, ex_model=DeepExModel,
+                       ref_merge=DeepExRefMerge, ref_thresh=ScThreshold, ref_freq=ScMinFreq,
+                       max_memory_frames=DeepExMaxMemFrames, render_vivid=DeepExVivid,
+                       encode_mode=DeepExEncMode, ref_norm=ScNormalize)
+        clip = HAVC_adjust_rgb(clip, strength=0.5, gamma=[1.0, 1.0, 0.85])
+        clip = HAVC_tweak(clip, hue=5, sat=1.05, bright=0, cont=1.0)
+        if BlackWhiteTune.lower() == 'none':
+            return clip
+    # ------------------------------------------------------------------------
+    i = BlackWhiteMode
+    cont = [1.0, 0.95, 1.0, 0.95, 0.95, 1.0]
+    hue = [-10.0, -10.0, -10.0, -10.0, -10.0, -10.0]
+    sat = [1.10, 1.05, 1.10, 1.10, 1.05, 1.10]
+    bright = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    if BlackWhiteTune.lower() == 'light':
+        gamma = [1.0, 0.95, 0.95, 0.95, 0.95, 0.95]
+    else:
+        gamma = [1.0, 0.90, 0.90, 0.90, 0.90, 0.90]
+
+    clip = HAVC_bw_tune(clip, BlackWhiteTune, i, BlackWhiteBlend)
+    clip = HAVC_tweak(clip, hue[i], sat[i], bright[i], cont[i], gamma[i])
+
+    return clip
 
 
 """
@@ -382,29 +845,119 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
-Pre/post - process  filter for improving contrast and luminosity of clips to be
-colored with HAVC.
+Post process  filter for improving colors and contrast/luminosity of clips colored
+with HAVC.
 """
 
 
-def HAVC_bw_tune(clip: vs.VideoNode = None, bw_tune: str = 'none', action: str = None,
-                 hue: float = 0, sat: float = 1, bright: float = 0, cont: float = 1) -> vs.VideoNode:
-    """Pre/post - process filter for improving contrast and luminosity of B&W/Colored clips
+def HAVC_bw_tune(clip: vs.VideoNode = None, bw_tune: str = 'Light', bw_method: int = 0,
+                 luma_blend: bool = True, range_tv: bool = True) -> vs.VideoNode:
+    """Post process filter for improving colors and contrast/luminosity of colored clips with HAVC
+
+    :param clip:       Clip to process. Only RGB24 format is supported.
+    :param bw_tune:    This parameter allows to improve contrast and luminosity of input clip colored with HAVC.
+                       Allowed values are:
+                              'None'
+                              'Light', (default)
+                              'Medium', 
+                              'Strong'
+    :param bw_method:  Method used to perform color adjustments.
+                       Allowed values are:
+                               0 : Apply Contrast Limited Adaptive Histogram Equalization on Luma [41.5 fps] (default)
+                               1 : Apply Simple Histogram Equalization on all RGB channels [54.5 fps]
+                               2 : Apply CLAHE on all RGB channels [38.5 fps]
+                               3 : method=1 and method=4 are merged [34.5]
+                               4 : Automatic brightness and contrast optimization with ScaleAbs [51.5 fps]
+                               5 : Automatic brightness and contrast optimization with saturation arithmetic [22.5 fps]
+    :param luma_blend: If enabled the equalized image is blended with the original image, darker is the image and more
+                       weight will be assigned to the original image. default = True
+    :param range_tv:   If True, perform the color adjustments on limited TV range (the filter works better in TV range).
+    """
+
+    if not isinstance(clip, vs.VideoNode):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_bw_tune: this is not a clip")
+
+    bw_tune_p = bw_tune.lower()
+    bw_tune = ['none', 'light', 'medium', 'strong']
+    b_strength = [0.0, 0.30, 0.40, 0.50]
+    w_strength = [0.0, 0.40, 0.50, 0.60]
+    r_factor = [1.0, 0.95, 0.92, 0.90]
+    g_factor = [1.0, 1.05, 1.08, 1.10]
+    b_factor = [1.0, 1.0, 1.0, 1.0]
+
+    bw_id = 0
+    try:
+        bw_id = bw_tune.index(bw_tune_p)
+    except ValueError:
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_bw_tune: B&W tune choice is invalid: ", bw_tune_p)
+
+    if bw_id == 0:
+        return clip
+
+    r =  r_factor[bw_id]
+    g = g_factor[bw_id]
+    b = b_factor[bw_id]
+
+    if range_tv:
+        clip = clip.std.Levels(min_in=0, max_in=255, min_out=16, max_out=235)
+        clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_in_s="full", range_s="limited")
+
+    # step #1 : rgb colors are normalized and changed using rgb factors (this will change also the contrast/luminosity)
+    clip = rgb_balance(clip=clip, strength=w_strength[bw_id], rgb_factor=[r, g, b])
+    # step #2 : the contrast/luminosity previously changed are adjusted/fixed using histogram equalization
+    clip = rgb_equalizer(clip=clip, method=bw_method, strength=b_strength[bw_id], luma_blend=luma_blend, range_tv=range_tv)
+
+    if range_tv:
+        clip = clip.std.Levels(min_in=16, max_in=235, min_out=0, max_out=255)
+        clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_in_s="limited", range_s="full")
+
+    return clip
+
+
+def HAVC_adjust_rgb(clip: vs.VideoNode = None, strength: float = 0.0, factor: list = (1.0, 1.0, 1.0),
+                    bias: list = (0, 0, 0), gamma: list = (1.0, 1.0, 1.0)) -> vs.VideoNode:
+    """Utility function to change the color and luminance of RGB clip.
+       Gain, bias (offset) and gamma can be set independently on each channel.
+
+       :param clip:         Clip to process. Only RGB24 format is supported.
+                            RGB adjustments.
+       :param strength:     This parameter allows to control the strength of the RGB normalization, strength=0 is
+                            equivalent to no normalization, while with strength=1 will be applied 100% normalization.
+                            The RGB normalization is applied before the other RGB adjustments. Range [0, 1], default=0
+       :param factor:       List of Red, green and blue scaling factor, in the list format: (r, g, b).
+                            Range 0.0 to 255.0, default = (1, 1, 1).
+                            For example, r=1.3 multiplies the red channel pixel values by 1.3.
+       :param bias:         List of Red, green and blue bias adjustments, in the list format: (rb, gb, bb).
+                            Bias adjustment—add a fixed positive or negative value to a channel's pixel values.
+                            For example, rb=16 will add 16 to all red pixel values and rb=-32 will subtract 32 from all
+                            red pixel values, default = (0, 0, 0).
+       :param gamma:        List of Red, green and blue gamma adjustments, in the list format: (rg, gg, bg).
+                            Gamma adjustment—an exponential gain factor. For example, rg=1.2 will brighten the red
+                            pixel values and gg=0.8 will darken the green pixel values.
+    """
+
+    if not isinstance(clip, vs.VideoNode):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_adjust_rgb: this is not a clip")
+
+    if clip.format.id != vs.RGB24:
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_adjust_rgb: clip not in RGB24 format.")
+
+    if strength == 1:
+        clip = vs_rgb_normalize(clip)
+    elif 0 < strength < 1:
+        rgb = vs_rgb_normalize(clip)
+        clip = vs_simple_merge(clip, rgb, weight=strength)
+
+    clip_new = havc_utils.adjust_rgb(clip, factor, bias, gamma)
+
+    return clip_new
+
+
+def HAVC_tweak(clip: vs.VideoNode = None, hue: float = 0, sat: float = 1, bright: float = 0,
+               cont: float = 1, gamma: float = 1) -> vs.VideoNode:
+    """Pre/post - process filter for adjust: hue, saturation, brightness, contrast and gamma of a video clip
 
         :param clip:        Clip to process. Only RGB24 format is supported.
-        :param bw_tune:     This parameter allows to improve contrast and luminosity of input clip to
-                            be colored with HAVC. Allowed values are:
-                                 'None' (default)
-                                 'Light',
-                                 'Medium',
-                                 'Strong'
-                                 'Custom' (allow to adjust: hue, saturation, brightness, contrast)
-        :param action:      This parameter allows to apply the improvement to Black & White clips and to revert
-                            the adjustments.
-                            Allowed values are:
-                                 'ON': the adjustments are applied on the input clip
-                                 'OFF', the adjustments previous applied are almost reverted
-                                 None, allowed only for bw_tune = 'Custom'
         :param hue:         Adjust the color hue of the image.
                                  hue>0.0 shifts the image towards red.
                                  hue<0.0 shifts the image towards green.
@@ -422,35 +975,15 @@ def HAVC_bw_tune(clip: vs.VideoNode = None, bw_tune: str = 'none', action: str =
                                  cont>1.0 increase the contrast (the luma range will be stretched).
                                  cont<1.0 decrease the contrast (the luma range will be contracted).
                             Range 0.0 to 10.0, default = 1.0
-
+        :param gamma:       Change the gamma of image which controls the degree of non-linearity in the luma
+                            correction. Higher gamma brightens the output; lower gamma darkens the output.
+                            Range -10.0 to 10.0, default = 1.0
     """
-    bw_tune_p = bw_tune.lower()
-    bw_tune = ['none', 'light', 'medium', 'strong', 'custom']
-    bw_cont_on = [1.0, 0.95, 0.90, 0.80, 1.0]
-    bw_cont_off = [1.0, 1.03, 1.08, 1.15, 1.0]
-    bw_bright_on = [0.0, -1, -2, -4, 0.0]
-    bw_bright_off = [0.0, +1, +2, +4, 0.0]
 
-    bw_id = 0
-    try:
-        bw_id = bw_tune.index(bw_tune_p)
-    except ValueError:
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_bw_tune: B&W tune choice is invalid: ", bw_tune_p)
+    if not isinstance(clip, vs.VideoNode):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_Tweak: this is not a clip")
 
-    if bw_id == 4:
-        return vs_tweak(clip, hue=hue, sat=sat, bright=bright, cont=cont)
-
-    if bw_id == 0 or action is None:
-        return clip
-
-    action = action.lower()
-
-    if action == 'on':
-        clip_new = vs_tweak(clip, cont=bw_cont_on[bw_id], bright=bw_bright_on[bw_id])
-    elif action == 'off':
-        clip_new = vs_tweak(clip, cont=bw_cont_off[bw_id], bright=bw_bright_off[bw_id])
-    else:
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_bw_tune: B&W tune invalid action: ", action)
+    clip_new = vs_tweak(clip, hue=hue, sat=sat, bright=bright, cont=cont, gamma=gamma)
 
     return clip_new
 
@@ -960,7 +1493,115 @@ Description:
 ------------------------------------------------------------------------------- 
 coloring function with additional pre-process and post-process filters 
 """
+def HAVC_colorizer_fast(
+        clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = (0, 24, 1.0, 0.0),
+        ddcolor_p: list = (1, 24, 1.0, 0.0, True), ddtweak: bool = False,
+        ddtweak_p: list = (0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.8,0.1"),
+        frame_interp: int = 5, chroma_adjust: str = "none", sc_debug: bool = False) -> vs.VideoNode:
+    """A Deep Learning based project for colorizing and restoring old images and video using Deoldify and DDColor
 
+    :param clip:                clip to process, only RGB24 format is supported
+    :param method:              method used to combine deoldify() with ddcolor() (default = 2):
+                                    0 : deoldify only (no merge)
+                                    1 : ddcolor only (no merge)
+                                    2 : Simple Merge (default):
+                                        the frames are combined using a weighted merge, where the parameter "mweight"
+                                        represent the weight assigned to the colors provided by the ddcolor() frames.
+                                        With this method is suggested a starting weight < 50% (ex. = 40%).
+                                    3 : Constrained Chroma Merge:
+                                        given that the colors provided by deoldify() are more conservative and stable
+                                        than the colors obtained with ddcolor(). The frames are combined by assigning
+                                        a limit to the amount of difference in chroma values between deoldify() and
+                                        ddcolor() this limit is defined by the threshold parameter "cmc_tresh".
+                                        The limit is applied to the image converted to "YUV". For example when
+                                        cmc_tresh=0.2, the chroma values "U","V" of ddcolor() frame will be constrained
+                                        to have an absolute percentage difference respect to "U","V" provided by deoldify()
+                                        not higher than 20%. The final limited frame will be merged again with the deoldify()
+                                        frame. With this method is suggested a starting weight > 50% (ex. = 60%).
+                                    4 : Luma Masked Merge:
+                                        the frames are combined using a masked merge, the pixels of ddcolor() with luma < "luma_mask_limit"
+                                        will be filled with the pixels of deoldify(). If "luma_white_limit" > "luma_mask_limit" the mask will
+                                        apply a gradient till "luma_white_limit". If the parameter "mweight" > 0 the final masked frame will
+                                        be merged again with the deoldify() frame. With this method is suggested a starting weight > 60%
+                                        (ex. = 70%).
+                                    5 : Adaptive Luma Merge:
+                                        given that the ddcolor() perfomance is quite bad on dark scenes, the images are
+                                        combined by decreasing the weight assigned to ddcolor() when the luma is
+                                        below a given threshold given by: luma_threshold. The weight is calculated using
+                                        the formula: merge_weight = max(mweight * (luma/luma_threshold)^alpha, min_weight).
+                                        For example with: luma_threshold = 0.6 and alpha = 1, the weight assigned to
+                                        ddcolor() will start to decrease linearly when the luma < 60% till "min_weight".
+                                        For alpha=2, begins to decrease quadratically (because luma/luma_threshold < 1).
+                                        With this method is suggested a starting weight > 70% (ex. = 80%).
+                                    The methods 3 and 4 are similar to Simple Merge, but before the merge with deoldify()
+                                    the ddcolor() frame is limited in the chroma changes (method 3) or limited based on the luma
+                                    (method 4). The method 5 is a Simple Merge where the weight decrease with luma.
+    :param mweight:             weight given to ddcolor's clip in all merge methods, range [0-1] (0.01=1%)
+    :param deoldify_p:          parameters for deoldify():
+                                   [0] deoldify model to use (default = 0):
+                                       0 = ColorizeVideo_gen
+                                       1 = ColorizeStable_gen
+                                       2 = ColorizeArtistic_gen
+                                   [1] render factor for the model, range: 10-44 (default = 24).
+                                   [2] saturation parameter to apply to deoldify color model (default = 1)
+                                   [3] hue parameter to apply to deoldify color model (default = 0)
+    :param ddcolor_p:           parameters for ddcolor():
+                                   [0] ddcolor model (default = 1):
+                                       0 = ddcolor_modelscope,
+                                       1 = ddcolor_artistic
+                                       2 = colorization_siggraph17
+                                       3 = colorization_eccv16
+                                   [1] render factor for the model, if=0 will be auto selected
+                                       (default = 24), range: [0, 10-64]
+                                   [2] saturation parameter to apply to ddcolor color model (default = 1)
+                                   [3] hue parameter to apply to ddcolor color model (default = 0)
+                                   [4] enable/disable FP16 in ddcolor inference
+    :param ddtweak:             enabled/disable tweak parameters for ddcolor(), range [True,False]
+    :param ddtweak_p:           tweak parameters for ddcolor():
+                                   [0] : ddcolor tweak's bright (default = 0)
+                                   [1] : ddcolor tweak's contrast (default = 1), if < 1 ddcolor provides de-saturated frames
+                                   [2] : ddcolor tweak's gamma (default = 1)
+                                   [3] : luma constrained gamma -> luma constrained gamma correction enabled (default = False), range: [True, False]
+                                            When enabled the average luma of a video clip will be forced to don't be below the value
+                                            defined by the parameter "luma_min". The function allow to modify the gamma
+                                            of the clip if the average luma is below the parameter "gamma_luma_min". A gamma value > 2.0 improves
+                                            the ddcolor stability on bright scenes, while a gamma < 1 improves the ddcolor stability on
+                                            dark scenes. The decrease of the gamma with luma is activated using a gamma_alpha != 0.
+                                   [4] : luma_min: luma (%) min value for tweak activation (default = 0.2), if=0 is not activated, range [0-1]
+                                   [5] : gamma_luma_min: luma (%) min value for gamma tweak activation (default = 0.5), if=0 is not activated, range [0-1]
+                                   [6] : gamma_alpha: the gamma will decrease with the luma g = max(gamma * pow(luma/gamma_luma_min, gamma_alpha), gamma_min),
+                                         for a movie with a lot of dark scenes is suggested alpha > 1, if=0 is not activated, range [>=0]
+                                   [7] : gamma_min: minimum value for gamma, range (default=0.5) [>0.1]
+                                   [8] : "chroma adjustment" parameter (optional), if="none" is disabled (see the README)
+    :param frame_interp:        This parameter will allow to enable the frame interpolation. This method will use
+                                Deep-Exemplar to interpolate the colored frames. If = 0, the interpolation is disabled,
+                                if > 0 represent the number of frames used for interpolation. The quality of
+                                interpolation will decrease with the number of frames, suggested value is 5.
+                                Range [0-10], Default = 0
+    :param chroma_adjust:       Direct hue/color mapping (only on ref-frames), without luma filtering, using the "chroma adjustment"
+                                parameter, if="none" is disabled.
+    :param sc_debug:            Print debug messages regarding the scene change detection process.
+    """
+    # disable packages warnings
+    disable_warnings()
+
+    if frame_interp not in range(11):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_colorizer_fast: frame_interp must be in range [1-10]")
+
+    clip_ref = HAVC_colorizer(clip, method=method, mweight=mweight, deoldify_p=deoldify_p, ddcolor_p=ddcolor_p,
+                              ddtweak=ddtweak, ddtweak_p=ddtweak_p, sc_threshold=0.1, sc_tht_offset=1,
+                              sc_min_freq=frame_interp, sc_min_int=1, sc_tht_ssim=0.0, sc_normalize=False,
+                              sc_debug=sc_debug)
+
+    clip_colored = HAVC_deepex(clip=clip, clip_ref=clip_ref, method=0, render_speed='Medium', render_vivid=True,
+                               ref_merge=0, sc_framedir=None, only_ref_frames=False, dark=True, dark_p=[0.2, 0.8],
+                               ref_thresh=0.10, ex_model=1, encode_mode=0, max_memory_frames=0, ref_freq=frame_interp,
+                               ref_norm=False, smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"], colormap=chroma_adjust)
+
+    clip_colored = clip_colored.std.SetFrameProp(prop="sc_threshold", floatval=0.1)
+    clip_colored = clip_colored.std.SetFrameProp(prop="sc_frequency", intval=1)
+
+    return clip_colored
 
 def HAVC_colorizer(
         clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = (0, 24, 1.0, 0.0),
@@ -1162,9 +1803,9 @@ def HAVC_colorizer(
                           device_index=device_index)
 
     if scenechange:
-        clip_colored = vs_sc_combine_models(clipa, clipb, method=method, sat=[deoldify_sat, ddcolor_sat],
-                                            hue=[deoldify_hue, ddcolor_hue], clipb_weight=merge_weight,
-                                            scenechange=True)
+        clip_colored = vs_sc_combine_models(clip_a=clipa, clip_b=clipb, method=method, sat=[deoldify_sat, ddcolor_sat],
+                                         hue=[deoldify_hue, ddcolor_hue], clipb_weight=merge_weight, CMC_p=cmc_tresh,
+                                         LMM_p=lmm_p, ALM_p=alm_p, invert_clips=cmb_sw, scenechange=True)
     else:
         clip_colored = vs_combine_models(clip_a=clipa, clip_b=clipb, method=method, sat=[deoldify_sat, ddcolor_sat],
                                          hue=[deoldify_hue, ddcolor_hue], clipb_weight=merge_weight, CMC_p=cmc_tresh,
@@ -1507,7 +2148,7 @@ Utility function to restore the colors of gray pixels.
 
 
 def HAVC_recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = None, sat: float = 0.8, tht: int = 30,
-                            weight: float = 0.0, alpha: float = 2.0, chroma_resize: bool = True,
+                            strength: float = 1.0, alpha: float = 2.0, chroma_resize: bool = True,
                             return_mask: bool = False, binary_mask: bool = False) -> vs.VideoNode:
     """Utility function to restore the colors of gray pixels in the input clip by using the colors provided in the clip:
        clip_color. Useful to repair the clips colored with DeepRemaster
@@ -1516,7 +2157,7 @@ def HAVC_recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode 
         :param clip_color:    clip with the colors to restore, only RGB24 format is supported
         :param sat:           this parameter allows to change the saturation of colored clip (default = 0.8)
         :param tht:           threshold to identify gray pixels, range[0, 255] (default = 30)
-        :param weight:        if > 0, the restored frame will be merged with clip_color's frame. (default = 0.0)
+        :param strength:      represent the strength of the filter. Range[0,1] (default = 1.0)
         :param alpha:         parameter used to control the steepness of gradient curve, values above the default value
                               will preserve more pixels, but could introduce some artifacts, range[1, 10] (default = 2)
         :param chroma_resize: if True, the frames will be resized to improve the filter speed (default = True)
@@ -1558,11 +2199,18 @@ def HAVC_recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode 
         clip_color = clip_color.resize.Spline64(width=frame_size, height=frame_size)
 
     if binary_mask:
-        clip_restored = vs_recover_clip_color(clip=clip, clip_color=clip_color, sat=sat, tht=tht, weight=-weight,
+        clip_restored = vs_recover_clip_color(clip=clip, clip_color=clip_color, sat=sat, tht=tht, weight=0,
                                               tht_scen=1.0, hue_adjust='none', return_mask=return_mask)
     else:
-        clip_restored = vs_recover_gradient_color(clip=clip, clip_color=clip_color, sat=sat, tht=tht, weight=weight,
+        clip_restored = vs_recover_gradient_color(clip=clip, clip_color=clip_color, sat=sat, tht=tht, weight=0,
                                                   alpha=alpha, return_mask=return_mask)
+
+    # Restore the original size, necessary for merge and chroma_resize
+    if chroma_resize and not return_mask:
+        clip_restored = clip_restored.resize.Spline64(width=clip_luma.width, height=clip_luma.height)
+
+    clip_restored = vs_simple_merge(clip, clip_restored, weight=strength)
+
     if chroma_resize and not return_mask:
         clip_restored = _clip_chroma_resize(clip_luma, clip_restored)
 
