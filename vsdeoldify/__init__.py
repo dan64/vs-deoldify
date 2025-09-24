@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-09-17
+LastEditTime: 2025-09-24
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -47,7 +47,7 @@ from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDe
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
 from vsdeoldify.havc_utils import *
 
-__version__ = "5.5.0"
+__version__ = "5.5.1"
 
 import warnings
 import logging
@@ -614,6 +614,50 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
         clip_colored = HAVC_bw_tune(clip_colored, BlackWhiteTune, BlackWhiteMode, BlackWhiteBlend)
 
     return clip_colored
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+Color post process  filter for restoring the correct colors for clip previously colored 
+using: DDColor & Zhang's models. 
+"""
+
+def HAVC_rgb_denoise(clip: vs.VideoNode, denoise_levels: list[float] = (0.4, 0.3),
+                     rgb_factors: list[float] = (0.95, 1.05, 1.01)) -> vs.VideoNode:
+    """HAVC Color Post Processing function for restoring the correct colors for clip previously colored
+       using: DDColor & Zhang's models.
+
+       :param clip:                clip to process, only RGB24 format is supported.
+       :param denoise_levels:      denoise level for colors and contrast
+                                       [0] color denoise, range[0,1] (default = 0.4)
+                                       [1] contrast denoise, range[0,1] (default = 0.3)
+       :param rgb_factors:         rgb adjustment factors
+                                       [0] RED adjustment factor, range[0,1] (default = 0.95)
+                                       [1] GREEN adjustment factor, range[0,1] (default = 1.05)
+                                       [2] BLUE adjustment factor, range[0,1] (default = 1.01)
+
+    """
+
+    orig_fmt_id = clip.format.id
+    orig_fmt_family = clip.format.color_family
+
+    if clip.format.id != vs.RGB24:
+        # clip not in RGB24 format, it will be converted
+        if clip.format.color_family == vs.YUV:
+            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
+                                       dither_type="error_diffusion")
+        else:
+            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
+
+    clip = rgb_denoise(clip, denoise_levels, rgb_factors)
+
+    if orig_fmt_id != vs.RGB24 and orig_fmt_family == vs.YUV:
+        clip = core.resize.Bicubic(clip=clip, format=orig_fmt_id, matrix_s="709", range_in_s="full", range_s="limited")
+
+    return clip
 
 """
 ------------------------------------------------------------------------------- 
@@ -2345,6 +2389,42 @@ def HAVC_export_reference_frames(clip: vs.VideoNode, sc_framedir: str = "./", re
     pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
     clip = vs_sc_export_frames(clip, sc_framedir=sc_framedir, ref_offset=ref_offset, ref_ext=ref_ext,
                                ref_jpg_quality=ref_jpg_quality, ref_override=ref_override)
+    return clip
+
+def HAVC_export_list_frames(clip: vs.VideoNode, sc_framedir: str = "./", ref_list: list[int] = None,
+                                 ref_ext: str = DEF_EXPORT_FORMAT, ref_jpg_quality: int = DEF_JPG_QUALITY,
+                                 ref_override: bool = True) -> vs.VideoNode:
+    """Utility function to export reference frames
+
+    :param clip:                clip to process, only RGB24 format is supported.
+    :param sc_framedir:         If set, define the directory where are stored the reference frames.
+                                The reference frames are named as: ref_nnnnnn.[jpg|png].
+    :param ref_list:            List of frame numbers to export. default: None.
+    :param ref_ext:             File extension and format of saved frames, range ["jpg", "png"] . default: "jpg"
+    :param ref_jpg_quality:     Quality of "jpg" compression, range[0,100]. default: 95
+    :param ref_override:        If True, the reference frames with the same name will be overridden, otherwise will
+                                be discarded. default: True
+    """
+    if ref_list is None:
+        return clip
+
+    orig_fmt_id = clip.format.id
+    orig_fmt_family = clip.format.color_family
+    if clip.format.id != vs.RGB24:
+        # clip not in RGB24 format, it will be converted
+        if clip.format.color_family == vs.YUV:
+            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
+                                       dither_type="error_diffusion")
+        else:
+            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
+
+    pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
+    clip = vs_list_export_frames(clip, sc_framedir=sc_framedir, ref_list=ref_list, ref_ext=ref_ext,
+                               ref_jpg_quality=ref_jpg_quality, ref_override=ref_override)
+
+    if orig_fmt_id != vs.RGB24 and orig_fmt_family == vs.YUV:
+        clip = core.resize.Bicubic(clip=clip, format=orig_fmt_id, matrix_s="709", range_in_s="full", range_s="limited")
+
     return clip
 
 

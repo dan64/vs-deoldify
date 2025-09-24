@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2025-02-06
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-09-17
+LastEditTime: 2025-09-24
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -222,10 +222,14 @@ def _get_color_tune(ColorTune: str, ColorFix: str, ColorMap: str, dd_model: int)
     except ValueError:
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: ColorFix choice is invalid for '" + ColorFix + "'")
 
-    if co_id == 0 or tn_id == 0:
+    if tn_id == 0:
         hue_range = "none"
         hue_range2 = "none"
         dd_tweak = False  # in this case the Tweaks for DDcolor are disabled
+    elif tn_id != 0 and co_id == 0:
+        hue_range = "none"
+        hue_range2 = "none"
+        dd_tweak = True  # in this case the Tweaks for DDcolor are enabled but hue adjust is disabled
     else:
         hue_range = hue_fix[co_id] + "|" + hue_tune[tn_id]
         hue_range2 = hue_fix[co_id] + "|" + hue_tune2[tn_id]
@@ -406,6 +410,30 @@ def adjust_rgb(clip: vs.VideoNode, factor: list = (1.0, 1.0, 1.0), bias: list = 
     planes = [core.std.Levels(planes[p], gamma=g) if not g == 1 else planes[p] for p, g in enumerate([rg, gg, bg])]
     rgb_adjusted = core.std.ShufflePlanes(planes, planes=[0, 0, 0], colorfamily=vs.RGB)
     return rgb_adjusted
+
+
+def rgb_denoise(clip: vs.VideoNode, denoise_levels: list[float] = (0.3, 0.2),
+                 rgb_factors: list[float] = (0.98, 1.02, 1.0)) -> vs.VideoNode:
+
+    w_strength = denoise_levels[0]
+    b_strength = denoise_levels[1]
+
+    r = rgb_factors[0]
+    g = rgb_factors[1]
+    b = rgb_factors[2]
+
+    clip = clip.std.Levels(min_in=0, max_in=255, min_out=16, max_out=235)
+    clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_in_s="full", range_s="limited")
+
+    # step #1 : rgb colors are normalized and changed using rgb factors (this will change also the contrast/luminosity)
+    clip = rgb_balance(clip=clip, strength=w_strength, rgb_factor=[r, g, b])
+    # step #2 : the contrast/luminosity previously changed are adjusted/fixed using histogram equalization
+    clip = rgb_equalizer(clip=clip, method=0, strength=b_strength, luma_blend=False, range_tv=True)
+
+    clip = clip.std.Levels(min_in=16, max_in=235, min_out=0, max_out=255)
+    clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_in_s="limited", range_s="full")
+
+    return clip
 
 """
 ------------------------------------------------------------------------------- 

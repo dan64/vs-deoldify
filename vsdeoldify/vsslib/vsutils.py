@@ -167,6 +167,35 @@ def vs_sc_export_frames(clip: vs.VideoNode = None, sc_framedir: str = None, ref_
     return clip
 
 
+def vs_list_export_frames(clip: vs.VideoNode = None, sc_framedir: str = None, ref_list: list[int] = None,
+                          ref_ext: str = 'png', ref_jpg_quality: int = 95, ref_override: bool = True) -> vs.VideoNode:
+    pil_ext = ref_ext.lower()
+
+    def save_sc_frame(n, f, sc_framedir: str = None, ref_list: list[int] = None, ref_ext: str = 'png',
+                      ref_jpg_quality: int = 95, ref_override: bool = True):
+        global _sc_counter
+
+        is_scenechange = (n in ref_list)
+        if is_scenechange:
+            img = frame_to_image(f)
+            img_path = os.path.join(sc_framedir, f"ref_{n:06d}.{ref_ext}")
+            if not ref_override and os.path.exists(img_path):
+                return f.copy()  # do nothing
+            if ref_ext == "jpg":
+                img.save(img_path, subsampling=0, quality=ref_jpg_quality)
+            else:
+                img.save(img_path)
+
+        return f.copy()
+
+    clip = clip.std.ModifyFrame(clips=[clip], selector=partial(save_sc_frame, sc_framedir=sc_framedir,
+                                                               ref_list=ref_list, ref_ext=pil_ext,
+                                                               ref_jpg_quality=ref_jpg_quality,
+                                                               ref_override=ref_override))
+
+    return clip
+
+
 def vs_get_video_ref(clip: vs.VideoNode = None, prop_name: str = "_SceneChangePrev") -> vs.VideoNode:
     global _sc_list, _sc_counter
     _sc_list = []

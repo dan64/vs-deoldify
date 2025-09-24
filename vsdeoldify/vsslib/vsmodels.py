@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-02-08
+LastEditTime: 2025-09-24
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -25,7 +25,7 @@ from vsdeoldify.colormnet import vs_colormnet_remote, vs_colormnet_local
 from vsdeoldify.deepex import deepex_colorizer, ModelColorizer
 from vsdeoldify.colorization import ModelColorization
 from vsdeoldify.remaster import *
-
+from vsdeoldify.havc_utils import rgb_balance, rgb_equalizer, rgb_denoise
 
 #from vsdeoldify.remaster.remaster_utils import *
 
@@ -247,7 +247,6 @@ Description:
 wrapper to function ddcolor() with tweak pre-process.
 """
 
-
 def vs_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 1, render_factor: int = 24,
                tweaks_enabled: bool = False, tweaks: list = [0.0, 1.0, 1.0, False, 0.3, 0.6, 1.5, 0.5],
                enable_fp16: bool = True, device_index: int = 0, num_streams: int = 1) -> vs.VideoNode:
@@ -282,6 +281,12 @@ def vs_sc_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 1, render_fa
     else:
         hue_adjust = 'none'
 
+    if tweaks_enabled and hue_adjust == 'none':
+        tweaks_enabled = False
+        denoise_enabled = True
+    else:
+        denoise_enabled = False
+
     if tweaks_enabled:
         if luma_constrained_tweak:
             clipb = vs_sc_tweak(clip, bright=bright, cont=cont,
@@ -312,10 +317,12 @@ def vs_sc_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 1, render_fa
         # adjusting color space to RGB24 for deoldify
         clipb_rgb = clipb.resize.Bicubic(format=vs.RGB24, range_s="full")
 
-    if tweaks_enabled and hue_adjust != 'none':
-        clipb_rgb = vs_sc_adjust_clip_hue(clipb_rgb, hue_adjust, scenechange=scenechange)
-
     if tweaks_enabled:
-        return vs_recover_clip_luma(clip, clipb_rgb)
-    else:
-        return clipb_rgb
+        if hue_adjust != 'none':
+            clipb_rgb = vs_sc_adjust_clip_hue(clipb_rgb, hue_adjust, scenechange=scenechange)
+        clipb_rgb = vs_recover_clip_luma(clip, clipb_rgb)
+
+    if denoise_enabled:  # no tweaks enabled -> removed rgb noise
+        clipb_rgb = rgb_denoise(clipb_rgb, denoise_levels=[0.3, 0.2], rgb_factors=[0.98, 1.02, 1.0])
+
+    return clipb_rgb
