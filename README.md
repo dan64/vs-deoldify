@@ -14,7 +14,7 @@ The filter (_HAVC_ in short) can be considered the _Swiss Army knife_ for colori
 
 ## Quick Start
 
-This filter is distributed with the torch package provided with the **Hybrid Windows Addons**. To use it on Desktop (Windows) it is necessary install [Hybrid](https://www.selur.de/downloads) and the related [Addons](https://drive.google.com/drive/folders/1vC_pxwxL0o8fjmg8Okn0RA5rsodTcv9G?usp=drive_link). **Hybrid** is a Qt-based frontend for a lot video filters  (including this one) which can convert most input formats to common audio & video formats and containers. Hybrid represents one of the most comprehensive solutions for implementing A.I. video filters and offers the most user-friendly approach to image colorization using the HAVC filter via  [VapourSynth](https://www.vapoursynth.com/).  In the folder _documentation_ is available a [User Guide](https://github.com/dan64/vs-deoldify/blob/main/documentation/HAVC%20User%20Guide.pdf) that provides detailed information on how to install Hybrid and use it to colorize videos. The Guide also provides tips on how to improve the final quality of colored movies.     
+To use the HAVC filter is necessary a GPU supporting CUDA, a NVIDIA RTX3060 is the minimum requirement to use this filter satisfactorily. The filter is distributed with the torch package provided with the **Hybrid Windows Addons**. To use it on Desktop (Windows) it is necessary install [Hybrid](https://www.selur.de/downloads) and the related [Addons](https://drive.google.com/drive/folders/1vC_pxwxL0o8fjmg8Okn0RA5rsodTcv9G?usp=drive_link). **Hybrid** is a Qt-based frontend for a lot video filters  (including this one) which can convert most input formats to common audio & video formats and containers. Hybrid represents one of the most comprehensive solutions for implementing A.I. video filters and offers the most user-friendly approach to image colorization using the HAVC filter via  [VapourSynth](https://www.vapoursynth.com/).  In the folder _documentation_ is available a [User Guide](https://github.com/dan64/vs-deoldify/blob/main/documentation/HAVC%20User%20Guide.pdf) that provides detailed information on how to install Hybrid and use it to colorize videos. The Guide also provides tips on how to improve the final quality of colored movies.     
 
 
 ## Dependencies
@@ -145,7 +145,7 @@ As explained previously the stabilization is performed by averaging the past/fut
 
 **DDColor Tweaks**: This filter is available only for DDColor and has been added because has been observed that the DDcolor's _inference_ is quite poor on dark/bright scenes depending on the luma value. This filter will force the luma of input image to don't be below the threshold defined by the parameter _luma_min_.  Moreover this filter allows to apply a dynamic gamma correction. The gamma adjustment will be applied when the average luma is below the parameter _gamma_luma_min_. A _gamma_ value > 2.0 improves the DDColor stability on bright scenes, while a _gamma_ < 1 improves the DDColor stability on  dark scenes. 
 
-**B&W tune**: Starting with HAVC version 5.5.0, a new post-processing filter called B&W Tune was introduced, which can automatically correct most color allocation errors. Unfortunately, forcing color stability has the side effect of producing washed-out colors with a slight pink cast (similar to skin tone). This new post-processing filter can automatically correct this problem and restore image colors to a more natural color. With B&W Tune, HAVC has evolved beyond basic colorization, it now delivers vivid, natural colors while ensuring consistent color stability throughout films. 
+**B&W tune**: Starting with HAVC version 5.5.0, a new post-processing filter called B&W Tune was introduced, which can automatically correct most color allocation errors. The color adjustment capability has been  further improved with the version 5.6.0 where the Retinex filter and LUTs have been included to improve the overall output color quality. Unfortunately, forcing color stability has the side effect of producing washed-out colors with a slight pink cast (similar to skin tone). This new post-processing filter can automatically correct this problem and restore image colors to a more natural color. With the version 5.6.0, HAVC has evolved beyond basic colorization, it now delivers vivid, natural colors while ensuring consistent color stability throughout films. 
 
 ### Chroma Adjustment
 
@@ -193,7 +193,7 @@ In the [HAVC User Guide](https://github.com/dan64/vs-deoldify/blob/main/document
 
 ### Merging the models
 
-As explained previously, this filter is able to combine the results provided by DeOldify and DDColor, to perform this combination has been implemented 6 methods:
+As explained previously, this filter is able to combine the results provided by DeOldify and DDColor, to perform this combination has been implemented 8 methods:
 
 0. _DeOldify_ only coloring model.
 
@@ -205,9 +205,14 @@ As explained previously, this filter is able to combine the results provided by 
 
  4. _Luma Masked Merge_: the behaviour is similar to the method _Adaptive Luma Merge_. With this method the frames are combined using a _masked merge_. The pixels of DDColor's frame with luma < _luma_limit_  will be filled with the (de-saturated) pixels of DeOldify, while the pixels above the _white_limit_ threshold will be left untouched. All the pixels in the middle will be gradually replaced depending on the luma value. If the parameter  _merge_weight_ is < 1.0, the resulting masked frames will be merged again with the non de-saturated frames of DeOldify using the _Simple Merge_.
 
-5. _Adaptive Luma Merge_: given that the DDcolor performance is quite bad on dark scenes, with this method the images are combined by decreasing the weight assigned to DDcolor frames when the luma is below the _luma_threshold_. For example with: luma_threshold = 0.6 and alpha = 1, the weight assigned to DDcolor frames will start to decrease linearly when the luma < 60% till _min_weight_. For _alpha_=2, the weight begins to decrease quadratically.      
+5. _Adaptive Luma Merge_: given that the DDcolor performance is quite bad on dark scenes, with this method the images are combined by decreasing the weight assigned to DDcolor frames when the luma is below the _luma_threshold_. For example with: luma_threshold = 0.6 and alpha = 1, the weight assigned to DDcolor frames will start to decrease linearly when the luma < 60% till _min_weight_. For _alpha_=2, the weight begins to decrease quadratically.  
+6. _Chroma Retention Merge_: Given that the colors provided by deoldify() are more conservative and stable than the colors obtained with ddcolor(). This function try to restore the colors of gray pixels provide by deoldify() by using the colors provided by ddcolor(). The gray pixels are identified by the parameter "tht". Once are identified the gray pixels are substituted with the desaturated colors in deoldify(), the level of desaturation is identified by the parameter "sat". It is performed a "gradient" substitution, i.e. the gray pixels are gradually substituted depending on the level of gray gradient. The steepness of gradient curve is controlled by the parameter "alpha". Optionally is possible to resize the frame before the filter application to speed up the filter by setting True the parameter ?chroma_resize?.
+7. _ChromaBound Adaptive_: Adaptive version of Constrained-Chroma. In this version the chroma tolerance is adaptive, i.e., it is applied an approach that will allow more color variation in textured/complex regions and less in smooth areas. The texture strength is computed via Laplacian and chroma tolerance is controlled by the following parameters:  
+	- base_tol: int = 20,  Base chroma tolerance (smooth areas)  
+	- max_extra: int = 24,  Extra tolerance for textured areas
+  
 
-The merging methods 2-5 are leveraging on the fact that usually the DeOldify _Video_ model provides frames which are more stable, this feature is exploited to stabilize also DDColor. The methods 3 and 4 are similar to _Simple Merge_, but before the merge with _DeOldify_ the _DDColor_ frame is limited in the chroma changes (method 3) or limited based on the luma (method 4). The method 5 is a _Simple Merge_ where the weight decrease with luma. 
+The merging methods 2-7 are leveraging on the fact that usually the DeOldify _Video_ model provides frames which are more stable, this feature is exploited to stabilize also DDColor. The methods 3, 4 and 7 are similar to _Simple Merge_, but before the merge with _DeOldify_ the _DDColor_ frame is limited in the chroma changes (method 3) or limited based on the luma (method 4). The method 5 is a _Simple Merge_ where the weight decrease with luma and the method 7 is an hybrid model that combines the approach of methods 4 and 5. 
 
 ## Comparison of Models
 
@@ -365,26 +370,32 @@ Finally the flag **Reference frames only** can be used to export the reference f
 
 As stated previously the simplest way to colorize images with the HAVC filter it to use [Hybrid](https://www.selur.de/downloads). To simplify the usage has been introduced standard Presets that automatically apply all the filter's settings. A set of parameters that are able to provide a satisfactory colorization are the following:
 
-- **Speed:** medium or fast (_fast_ will increase the speed with a little decrease in color accuracy)
-- **Color map:** none
-- **Color tweaks:**  violet/red
-- **Denoise:** light
-- **Stabilize:** stable or morestable
+- **Speed:** slower
+- **Color map:** red->brown
+- **Color tweaks:**  retinex/red
+- **Denoise:** medium
+- **Stabilize:** balanced
+- **B&W tune:** light
+- **B&W mode:** CLAHE (luma)
+- **Interpolation:** 3
 
 then enable the _Exemplar Models_ check box and set
 - **Method:** HAVC
 - **SC thresh:** 0.10
 - **SC SSIM thresh:** 0.0
-- **SC min freq:** 15 (5 if is used the _local_ mode)  
+- **SC min freq:** 0
 - **normalize:** checked
 - **Mode:** remote
 - **Frames:** 0 
-- **Preset:** medium (_slow_ will increase the color accuracy but the speed will decrease of 40%)
+- **Preset:** medium 
 - **Vivid:** checked 
+- **Ref merge:** high
 
 In the following picture are shown the suggested parameters: 
 
 ![Hybrid Preset](https://github.com/dan64/vs-deoldify/blob/main/hybrid_setup/Model_Presets.JPG)   
+
+The suggested settings are appropriate for a medium powered GPU (RTX4070 or above). In the [HAVC User Guide](https://github.com/dan64/vs-deoldify/blob/main/documentation/HAVC%20User%20Guide.pdf) are provided more settings depending on the available hardware.  
 
 ## Conclusions
 

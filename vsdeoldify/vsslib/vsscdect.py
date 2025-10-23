@@ -12,16 +12,15 @@ Library of Vapoursynth utility functions.
 """
 
 import vapoursynth as vs
-import os
-import math
 import numpy as np
 import cv2
-from PIL import Image
 from functools import partial
 from skimage.metrics import structural_similarity
-from enum import IntEnum
-from vsdeoldify.vsslib.constants import *
+
 import vsdeoldify.vsslib.vsutils as vsutil
+import vsdeoldify.vsslib.vsplugins as vsplugins
+
+from vsdeoldify.vsslib.constants import *
 
 """
 ------------------------------------------------------------------------------- 
@@ -215,11 +214,12 @@ class SceneDetection:
                     sc = self.SceneDetectCustom(sc, threshold=threshold, offset=tht_offset,
                                                 min_length=DEF_SC_MIN_DISTANCE)
             else:
+                vsplugins.load_SCDetect_plugin()
                 sc = sc.misc.SCDetect(threshold=threshold)
                 sc = self.filter_black_white(clip, sc)
 
         except Exception as error:
-            raise vs.Error("HAVC_colorizer: plugin 'MiscFilters.dll' not properly loaded/installed: -> " + str(error))
+            raise vs.Error("HAVC_colorizer: plugin 'MiscFilters.dll' not properly loaded/installed -> " + str(error))
 
         if 0.0 < sc_tht_filter < 1.0 or min_length > 1:
             clip = clip.std.CopyFrameProps(prop_src=sc, props=['_SceneChangePrev', '_SceneChangeNext',

@@ -14,20 +14,23 @@ URL: https://github.com/satoshiiizuka/siggraphasia2019_remastering
 """
 
 from __future__ import annotations
-import math
-import os
-from PIL import Image
-import numpy as np
+#import math
+#import os
+#from PIL import Image
+#import numpy as np
 import torch
-import vapoursynth as vs
-from vsdeoldify.vsslib.vsutils import debug_ModifyFrame
 from functools import partial
-from vsdeoldify.vsslib.constants import *
-from vsdeoldify.remaster.remaster_render import RemasterColorizer, RemasterEngine
-from vsdeoldify.remaster.remaster_utils import *
-from vsdeoldify.vsslib.imfilters import *
+
+from vsdeoldify.vsslib.imfilters import image_weighted_merge
+from vsdeoldify.vsslib.vsutils import debug_ModifyFrame
 from vsdeoldify.vsslib.vsfilters import vs_tweak
 from vsdeoldify.vsslib.vsscdect import BuildSCDetect
+
+from vsdeoldify.vsslib.constants import *
+
+from vsdeoldify.remaster.remaster_render import RemasterColorizer, RemasterEngine
+from vsdeoldify.remaster.remaster_utils import *
+
 
 os.environ["CUDA_MODULE_LOADING"] = "LAZY"
 

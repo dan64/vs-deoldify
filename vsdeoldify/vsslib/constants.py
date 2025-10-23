@@ -4,20 +4,45 @@ Author: Dan64
 Date: 2024-11-20
 version:
 LastEditors: Dan64
-LastEditTime: 2025-09-17
+LastEditTime: 2025-10-19
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
 Constants for vs-deoldify functions.
 """
-
+DEF_LEVEL_NONE: int = 0
+DEF_LEVEL_INFO: int = 1
+DEF_LEVEL_DEBUG: int = 2
+DEF_DEBUG_LEVEL: int = 0
+DEF_MAX_RESIZE: int = 512
+DEF_CMC_p: list = [0.15, True, 20, 24]
+DEF_LMM_p: list = [0.15, 0.65, 1.0]
+DEF_ALM_p: list = [0.8, 1.0, 0.15]
+DEF_CRT_p: list = [0.8, 30, 2, False, 0, 0]
+DEF_TWEAK_p: list = [0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5]
 DEF_THT_WHITE: float = 0.85
 DEF_THT_BLACK: float = 0.05
+DEF_RETINEX_DARK = 0.20
+DEF_RETINEX_BRIGHT = 0.80
+DEF_STANDARD_DARK = 0.22
+DEF_STANDARD_BRIGHT = 0.78
+DEF_LUT_Forest_Film: int = 0
+DEF_LUT_City_Skyline: int = 1
+DEF_LUT_Exploration: int = 2
+DEF_LUT_FUJ_Film: int = 3
+DEF_LUT_Hollywood: int = 4
+DEF_LUT_Classic_Film: int = 5
+DEF_LUT_Warm_Haze: int = 6
+DEF_LUT_HDR_Color: int = 7
+DEF_LUT_Amber_Light: int = 8
+DEF_LUT_Blue_Mist: int = 9
+DEF_LUT_Vintage_Fox: int = 10
+DEF_LUT_Flat_Pop: int = 11
 DEF_THT_BLACK_FREQ: float = 0.14
 DEF_THT_BLACK_MIN: float = 0.19
 DEF_THT_WHITE_MIN: float = 0.81
-DEF_THT_DARK_BLACK: float = 0.12
-DEF_THT_BRIGHT_WHITE: float = 0.88
+DEF_THT_DARK_BLACK: float = 0.15
+DEF_THT_BRIGHT_WHITE: float = 0.85
 DEF_ADAPTIVE_RATIO_LO: float = 1.02
 DEF_ADAPTIVE_RATIO_MED: float = 1.12
 DEF_ADAPTIVE_RATIO_HI: float = 1.20

@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-09-17
+LastEditTime: 2025-09-30
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -13,17 +13,15 @@ Library of Vapoursynth filter functions.
 import vapoursynth as vs
 import os
 import math
-import numpy as np
-import cv2
-from PIL import Image
 from functools import partial
 
-from .imfilters import _chroma_temporal_limiter
-from .imfilters import _color_temporal_stabilizer
-from .vsutils import *
-from .imfilters import *
-from .restcolor import *
-from .constants import *
+from vsdeoldify.vsslib.imfilters import _color_temporal_stabilizer, _chroma_temporal_limiter, get_image_luma
+from vsdeoldify.vsslib.imfilters import image_chroma_tweak, image_luma_merge, w_image_luma_merge, image_tweak
+from vsdeoldify.vsslib.imfilters import luma_adjusted_levels, chroma_post_process
+from vsdeoldify.vsslib.restcolor import restore_color, restore_color_gradient, adjust_hue_range
+from vsdeoldify.vsslib.vsutils import frame_to_image, image_to_frame
+
+from vsdeoldify.vsslib.constants import *
 
 """
 ------------------------------------------------------------------------------- 
@@ -218,7 +216,7 @@ the colors of current frame will be averaged with the ones of previous frames.
 def _average_clips_ex(clip: vs.VideoNode = None, weight_list: list = None, sat: float = 1.0, tht: int = 0,
                       weight: float = 0.2, tht_scen: float = 0.8, hue_adjust: str = 'none') -> vs.VideoNode:
     max_frames = len(weight_list)
-    clips = list()
+    clips: list[vs.VideoNode] = list()
     clip_yuv = clip.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full", dither_type="error_diffusion")
     Nh = round((max_frames - 1) / 2)
     for i in range(0, Nh):
@@ -302,35 +300,120 @@ wrapper to function restore_color() to restore gray frames.
 def vs_recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = None, sat: float = 1.0, tht: int = 0,
                           weight: float = 0.2, tht_scen: float = 0.8, hue_adjust: str = 'none',
                           return_mask: bool = False) -> vs.VideoNode:
+
+    return vs_sc_recover_clip_color(clip, clip_color, sat, tht, weight, tht_scen, hue_adjust, return_mask, scenechange=False)
+
+def vs_sc_recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = None, sat: float = 1.0, tht: int = 0,
+                          weight: float = 0.2, tht_scen: float = 0.8, hue_adjust: str = 'none',
+                          return_mask: bool = False, scenechange: bool = False) -> vs.VideoNode:
+    """Utility function to recover the colors of gray pixels in clip by using the colors provided in clip_color by
+       using a simple binary merge.
+
+        Args:
+            clip:          clip to repair the colors, only RGB24 format is supported
+            clip_color:    clip with the colors to restore, only RGB24 format is supported
+            sat:           this parameter allows to change the saturation of colored clip (default = 0.8)
+            tht:           threshold to identify gray pixels, range[0, 255] (default = 30)
+            weight:        represent the weight for merging the masked colored clip with clip_a/clip_b:
+                                         if weight > 0: merge(clip_restored, clip, weight)
+                                         if weight < 0: merge(clip_restored, clip_colored, weight)
+                                     Range[0,1], default = 0 (is returned clip_restored without additional merge)
+            hue_adjust:    parameter used to control the steepness of gradient curve, values above the default value
+                           will preserve more pixels, but could introduce some artifacts, range[1, 10] (default = 2)
+            return_mask:   if True, will be returned the mask used to identify the gray pixels (white region), could
+                           be useful to visualize the gradient mask for debugging, (default = false).
+            scenechange:   if True, the filter will be applied only on the scene-change frames, (default = false)
+    """
     def color_frame(n, f, sat: float = 1.0, tht: int = 0, weight: float = 0.2, tht_scen: float = 0.8,
-                    hue_adjust: str = 'none', return_mask: bool = False):
+                    hue_adjust: str = 'none', return_mask: bool = False, scenechange: bool = False):
+
+        if scenechange:
+            is_scenechange = (n == 0) or (f[0].props.get('_SceneChangePrev', 0) == 1)
+            if not is_scenechange:
+                return f[0].copy()
+
         f_out = f[0].copy()
+
         if n < 15:
             return f_out
+
         img_gray = frame_to_image(f[0])
         img_color = frame_to_image(f[1])
+
+        f_luma = get_image_luma(img_gray, 255)
+
+        f_luma_standard = DEF_STANDARD_DARK <= f_luma <= DEF_STANDARD_BRIGHT
+
+        if not f_luma_standard:
+            weight = min(weight, -0.8)
+
         img_restored = restore_color(img_color, img_gray, sat, tht, weight, tht_scen, hue_adjust, return_mask)
         return image_to_frame(img_restored, f_out)
 
     clip = clip.std.ModifyFrame(clips=[clip, clip_color],
                                 selector=partial(color_frame, sat=sat, tht=tht, weight=weight, tht_scen=tht_scen,
-                                                 hue_adjust=hue_adjust, return_mask=return_mask))
+                                                 hue_adjust=hue_adjust, return_mask=return_mask, scenechange=scenechange))
     return clip
 
 
 def vs_recover_gradient_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = None, sat: float = 1.0,
                               tht: int = 15, weight: float = 0.0, alpha: float = 2.0,
                               return_mask: bool = False) -> vs.VideoNode:
-    def color_grad_frame(n, f, sat: float, tht: int, weight: float, alpha: float, return_mask: bool):
+
+    return vs_sc_recover_gradient_color(clip, clip_color, sat, tht, weight, alpha, return_mask, scenechange=False)
+
+
+def vs_sc_recover_gradient_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = None, sat: float = 1.0,
+                              tht: int = 15, weight: float = 0.0, alpha: float = 2.0,
+                              return_mask: bool = False, scenechange: bool = False, algo: int = 0) -> vs.VideoNode:
+    """Utility function to recover the colors of gray pixels in clip by using the colors provided in clip_color by
+       using a gradient merge.
+
+    Args:
+        clip:          clip to repair the colors, only RGB24 format is supported
+        clip_color:    clip with the colors to restore, only RGB24 format is supported
+        sat:           this parameter allows to change the saturation of colored clip (default = 0.8)
+        tht:           threshold to identify gray pixels, range[0, 255] (default = 30)
+        weight:        represent the weight for merging the masked colored clip with clip_a/clip_b:
+                                     if weight > 0: merge(clip_restored, clip, weight)
+                                     if weight < 0: merge(clip_restored, clip_colored, weight)
+                                 Range[0,1], default = 0 (is returned clip_restored without additional merge)
+        alpha:         parameter used to control the steepness of gradient curve, values above the default value
+                       will preserve more pixels, but could introduce some artifacts, range[1, 10] (default = 2)
+        return_mask:   if True, will be returned the mask used to identify the gray pixels (white region), could
+                       be useful to visualize the gradient mask for debugging, (default = false).
+        scenechange:   if True, the filter will be applied only on the scene-change frames, (default = false)
+        algo:          algorithm to build the mask, allowed values are:
+                            [0] = Linear decay with steep gradient, (default)
+                            [1] = Linear decay
+                            [2] = Exponential decay
+       """
+    def color_grad_frame(n, f, sat: float, tht: int, weight: float, alpha: float, return_mask: bool,
+                         scenechange: bool, algo: int):
+
+        if scenechange:
+            is_scenechange = (n == 0) or (f[0].props.get('_SceneChangePrev', 0) == 1)
+            if not is_scenechange:
+                return f[0].copy()
+
         f_out = f[0].copy()
         img_gray = frame_to_image(f[0])
         img_color = frame_to_image(f[1])
-        img_restored = restore_color_gradient(img_color, img_gray, sat, tht, weight, alpha, return_mask)
+
+        f_luma = get_image_luma(img_gray, 255)
+
+        f_luma_standard = DEF_STANDARD_DARK <= f_luma <= DEF_STANDARD_BRIGHT
+
+        if not f_luma_standard:
+            weight = min(weight, -0.5)
+            alpha = max(alpha, 4.0)
+
+        img_restored = restore_color_gradient(img_color, img_gray, sat, tht, weight, alpha, return_mask, algo)
         return image_to_frame(img_restored, f_out)
 
     clip = clip.std.ModifyFrame(clips=[clip, clip_color],
                                 selector=partial(color_grad_frame, sat=sat, tht=tht, weight=weight, alpha=alpha,
-                                                 return_mask=return_mask))
+                                                 return_mask=return_mask, scenechange=scenechange, algo=algo))
 
     #clip = debug_ModifyFrame(f_start=33162, f_end=33175, clip=clip, clips=[clip, clip_color],
     #                         selector=partial(color_grad_frame, sat=sat, tht=tht, weight=weight, alpha=alpha,
@@ -357,9 +440,12 @@ def vs_sc_adjust_clip_hue(clip: vs.VideoNode = None, hue_adjust: str = 'none',
     def color_frame(n, f, hue_adjust: str = 'none', scenechange: bool = True):
 
         if scenechange:
-            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
-            if not is_scenechange:
-                return f.copy()
+            is_scenechange = (n == 0) or (f.props.get('_SceneChangePrev', 0) == 1)
+        else:
+            is_scenechange = False
+
+        if not is_scenechange:
+            return f.copy()
 
         img_color = frame_to_image(f)
         img_restored = adjust_hue_range(img_color, hue_adjust=hue_adjust)
@@ -446,9 +532,12 @@ def vs_sc_chroma_bright_tweak(clip: vs.VideoNode = None, black_threshold: float 
                     dark_sat: float = 0.8, scenechange: bool = True, chroma_adjust: str = 'none'):
 
         if scenechange:
-            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
-            if not is_scenechange:
-                return f.copy()
+            is_scenechange = (n == 0) or (f.props.get('_SceneChangePrev', 0) == 1)
+        else:
+            is_scenechange = False
+
+        if not is_scenechange:
+            return f.copy()
 
         img1 = frame_to_image(f)
         img2 = image_chroma_tweak(img1, bright=dark_bright, sat=dark_sat, hue_adjust=chroma_adjust)
@@ -495,9 +584,12 @@ def _vs_sc_colormap(clip: vs.VideoNode = None, colormap: str = 'none', scenechan
     def merge_frame(n, f, chroma_adjust: str = 'none', scenechange: bool = True):
 
         if scenechange:
-            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
-            if not is_scenechange:
-                return f.copy()
+            is_scenechange = (n == 0) or (f.props.get('_SceneChangePrev', 0) == 1)
+        else:
+            is_scenechange = False
+
+        if not is_scenechange:
+            return f.copy()
 
         img = frame_to_image(f)
         img_m = image_chroma_tweak(img, hue_adjust=chroma_adjust)
@@ -518,7 +610,7 @@ Author: Dan64
 Description:
 ------------------------------------------------------------------------------- 
 Filter used to dark more the dark scenes. The amount of darkness is controlled 
-by the parameter dark_amount, while the selected are is controlled by the parameter
+by the parameter dark_amount, while the selected area is controlled by the parameter
 dark_threshold.
 """
 
@@ -535,9 +627,12 @@ def vs_sc_dark_tweak(clip: vs.VideoNode = None, dark_threshold: float = 0.3, dar
                     dark_sat: float = 0.8, scenechange: bool = True, dark_hue_adjust: str = 'none'):
 
         if scenechange:
-            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
-            if not is_scenechange:
-                return f.copy()
+            is_scenechange = (n == 0) or (f.props.get('_SceneChangePrev', 0) == 1)
+        else:
+            is_scenechange = False
+
+        if not is_scenechange:
+            return f.copy()
 
         img1 = frame_to_image(f)
         img2 = image_tweak(img1, bright=dark_bright, sat=dark_sat, hue_range=dark_hue_adjust)
@@ -576,9 +671,12 @@ def sc_constrained_tweak(clip: vs.VideoNode = None, luma_min: float = 0.1, gamma
                      gamma_alpha: float = 0, gamma_min: float = 0.5, scenechange: bool = True):
 
         if scenechange:
-            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
-            if not is_scenechange:
-                return f.copy()
+            is_scenechange = (n == 0) or (f.props.get('_SceneChangePrev', 0) == 1)
+        else:
+            is_scenechange = False
+
+        if not is_scenechange:
+            return f.copy()
 
         img = frame_to_image(f)
         img_m = luma_adjusted_levels(img, luma_min, gamma, gamma_luma_min, gamma_alpha, gamma_min)
@@ -620,7 +718,7 @@ def vs_sc_tweak(clip: vs.VideoNode = None, hue: float = 0, sat: float = 1, cont:
                     scenechange: bool = True):
 
         if scenechange:
-            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
+            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1)
             if not is_scenechange:
                 return f.copy()
 
@@ -653,16 +751,7 @@ def vs_simple_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, weight: float = 0.
     if weight == 1:
         return clipb
 
-    clipa = clipa.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
-    clipb = clipb.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
-
-    clip = vs.core.std.Merge(clipa=clipa, clipb=clipb, weight=weight)
-
-    # convert the clip format for HAVC to RGB24
-    clip_rgb = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion")
-
-    return clip_rgb
-
+    return vs.core.std.Merge(clipa=clipa, clipb=clipb, weight=weight)
 
 """
 ------------------------------------------------------------------------------- 
@@ -796,7 +885,7 @@ def vs_sc_recover_clip_luma(orig: vs.VideoNode = None, clip: vs.VideoNode = None
         img_m = chroma_post_process(img_clip, img_orig)
 
         if scenechange:
-            is_scenechange = (n == 0) or (f[0].props['_SceneChangePrev'] == 1 and f[0].props['_SceneChangeNext'] == 0)
+            is_scenechange = (n == 0) or (f.props.get('_SceneChangePrev', 0) == 1)
         else:
             is_scenechange = False
 

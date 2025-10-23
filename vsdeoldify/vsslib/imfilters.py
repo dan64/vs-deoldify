@@ -4,21 +4,18 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-09-17
+LastEditTime: 2025-10-04
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
 Library of filter functions working on images.
 """
-import math
 import numpy as np
 import cv2
-from PIL import Image, ImageMath
-
-
-from .constants import *
-from .nputils import *
-from .restcolor import np_adjust_chroma2, restore_color_gradient, np_image_chroma_tweak
+from PIL import Image, ImageMath, ImageEnhance
+from vsdeoldify.vsslib.nputils import np_rgb_to_gray, np_image_mask_merge, w_np_rgb_to_gray, w_np_image_mask_merge
+from vsdeoldify.vsslib.nputils import  array_clip, np_image_gamma_contrast, np_hue_add
+from vsdeoldify.vsslib.restcolor import np_adjust_chroma2, np_image_chroma_tweak
 
 """
 ------------------------------------------------------------------------------- 
@@ -82,6 +79,10 @@ def image_luma_merge(img_dark: Image, img_white: Image, luma: float = 0, return_
 
 def w_image_luma_merge(img_dark: Image, img_white: Image, dark_luma: float = 0.3, white_luma=0.9,
                        return_mask: bool = False) -> Image:
+
+    if dark_luma >= white_luma:
+        return img_dark
+
     img1_np = np.array(img_dark)
     img2_np = np.array(img_white)
     # the mask is built using the second image
@@ -112,18 +113,23 @@ numpy implementation of image merge on 3 planes, faster than vs.core.std.Merge()
 def image_weighted_merge(img1: Image, img2: Image, weight: float = 0.5) -> Image:
 
     if weight == 0.0:
-        return Image.fromarray(img1)
+        return img1
 
     if weight == 1.0:
-        return Image.fromarray(img2)
+        return img2
 
+    # img_m = img1 * (1.0 - w) + img2 * w
+    img_m = Image.blend(img1, img2, weight)  # faster
+
+    return img_m
+"""
     img1_np = np.asarray(img1)
     img2_np = np.asarray(img2)
 
     img_new = np_image_weighted_merge(img1_np, img2_np, weight)
 
     return Image.fromarray(img_new)
-
+"""
 
 def np_image_weighted_merge(img1_np: np.ndarray, img2_np: np.ndarray, weight: float = 0.5) -> np.ndarray:
     img_new = np.copy(img1_np)
@@ -151,18 +157,22 @@ difference respect to "U","V" provided by "img_stable" not higher than "alpha"
 """
 
 
-def chroma_stabilizer(img_stable: Image, img_new: Image, alpha: float = 0.2, weight: float = 1.0) -> Image:
+def chroma_stabilizer(img_stable: Image, img_new: Image, alpha: float = 0.15, weight: float = 1.0) -> Image:
+    """
+    Function to limit the chroma of "img_new" to have an absolute percentage
+    difference respect to "U","V" provided by "img_stable" not higher than "alpha"
+    """
     img1_np = np.asarray(img_stable)
     yuv1 = cv2.cvtColor(img1_np, cv2.COLOR_RGB2YUV)
     y1 = yuv1[:, :, 0]
     u1 = yuv1[:, :, 1]
     v1 = yuv1[:, :, 2]
 
-    u1_up = np.multiply(u1, 1 + alpha).clip(0, 255).astype(int)
-    v1_up = np.multiply(v1, 1 + alpha).clip(0, 255).astype(int)
+    u1_up = np.multiply(u1, 1 + alpha).clip(0, 255).astype(np.uint8)
+    v1_up = np.multiply(v1, 1 + alpha).clip(0, 255).astype(np.uint8)
 
-    u1_dn = np.multiply(u1, 1 - alpha).clip(0, 255).astype(int)
-    v1_dn = np.multiply(v1, 1 - alpha).clip(0, 255).astype(int)
+    u1_dn = np.multiply(u1, 1 - alpha).clip(0, 255).astype(np.uint8)
+    v1_dn = np.multiply(v1, 1 - alpha).clip(0, 255).astype(np.uint8)
 
     img2_np = np.asarray(img_new)
     yuv2 = cv2.cvtColor(img2_np, cv2.COLOR_RGB2YUV)
@@ -172,24 +182,91 @@ def chroma_stabilizer(img_stable: Image, img_new: Image, alpha: float = 0.2, wei
     u2 = yuv2[:, :, 1]
     v2 = yuv2[:, :, 2]
 
-    u2_m = array_max_min(u2, u1_up, u1_dn)
-    v2_m = array_max_min(v2, v1_up, v1_dn)
+    u2_m = array_clip(u2, u1_dn, u1_up, np.uint8)
+    v2_m = array_clip(v2, v1_dn, v1_up, np.uint8)
 
     v2_new[:, :, 0] = y1
     v2_new[:, :, 1] = u2_m
     v2_new[:, :, 2] = v2_m
 
+    # Convert back to RGB
+    rgb_out = cv2.cvtColor(v2_new, cv2.COLOR_YUV2RGB)
+    img_out = Image.fromarray(rgb_out)
+
+    # Optional blending
     if weight < 1.0:
-        v2_m = np.multiply(yuv1, 1 - weight).clip(0, 255).astype(int) + np.multiply(v2_new, weight).clip(0, 255).astype(
-            int)
-        v2_new[:, :, 0] = v2_m[:, :, 0]
-        v2_new[:, :, 1] = v2_m[:, :, 1]
-        v2_new[:, :, 2] = v2_m[:, :, 2]
+        return Image.blend(img_stable, img_out, weight)
+    else:
+        return img_out
 
-    v2_rgb = cv2.cvtColor(v2_new, cv2.COLOR_YUV2RGB)
+def chroma_stabilizer_adaptive(
+    img_stable: Image.Image,
+    img_new: Image.Image,
+    base_tol: int = 18,
+    max_extra: int = 22,
+    weight: float = 1.0
+) -> Image.Image:
+    """
+        In OpenCV’s 8-bit YUV (aka YCrCb):
 
-    return Image.fromarray(v2_rgb)
+        Y (luma): 0–255 (0 = black, 255 = white)
+        U (Cb): 0–255, but neutral gray is at 128
+        V (Cr): 0–255, neutral gray is at 128
+    So:
+        (U, V) = (128, 128) → achromatic (gray)
+        (U, V) = (80, 160) → reddish
+        (U, V) = (160, 80) → greenish
 
+    The meaningful chroma signal is actually (U − 128, V − 128), which ranges from −128 to +127.
+    """
+    # Convert to YUV
+    img1_np = np.asarray(img_stable).astype(np.uint8)
+
+    yuv1 = cv2.cvtColor(img1_np, cv2.COLOR_RGB2YUV)
+
+    y1 = yuv1[:, :, 0].astype(np.float32)
+    u1 = yuv1[:, :, 1].astype(np.int16) - 128
+    v1 = yuv1[:, :, 2].astype(np.int16) - 128
+
+    img2_np = np.asarray(img_new).astype(np.uint8)
+    yuv2 = cv2.cvtColor(img2_np, cv2.COLOR_RGB2YUV)
+    u2 = yuv2[:, :, 1].astype(np.int16) - 128
+    v2 = yuv2[:, :, 2].astype(np.int16) - 128
+
+    # Compute texture strength via Laplacian
+    lap = cv2.Laplacian(y1, cv2.CV_32F)
+    texture = np.abs(lap) / 255.0
+    texture = np.clip(texture, 0.0, 1.0)
+
+    # Adaptive tolerance per pixel
+    chroma_tol = base_tol + max_extra * texture
+
+    # Compute bounds
+    u_low = np.clip(u1 - chroma_tol, -128, 127)
+    u_high = np.clip(u1 + chroma_tol, -128, 127)
+    v_low = np.clip(v1 - chroma_tol, -128, 127)
+    v_high = np.clip(v1 + chroma_tol, -128, 127)
+
+    # Constrain new chroma
+    u2_m = np.clip(u2, u_low, u_high)
+    v2_m = np.clip(v2, v_low, v_high)
+
+    # Reconstruct YUV
+    yuv_out = np.stack([
+        yuv1[:, :, 0],
+        (u2_m + 128).astype(np.uint8),
+        (v2_m + 128).astype(np.uint8)
+    ], axis=2)
+
+    # Convert back to RGB
+    rgb_out = cv2.cvtColor(yuv_out, cv2.COLOR_YUV2RGB)
+    img_out = Image.fromarray(rgb_out)
+
+    # Optional blending
+    if weight < 1.0:
+        return Image.blend(img_stable, img_out, weight)
+    else:
+        return img_out
 
 """
 ------------------------------------------------------------------------------- 
@@ -212,8 +289,8 @@ def chroma_smoother(img_prv: Image, img: Image) -> Image:
     r1_dn, g1_dn, b1_dn = img1_dn.split()
 
     r_m = ImageMath.eval("convert(max(min(a, c), b), 'L')", a=r1_up, b=r1_dn, c=r2)
-    g_m = ImageMath.eval("convert(max(min(a, c), b), 'L')", a=g1_up, b=g1_dn, c=r2)
-    b_m = ImageMath.eval("convert(max(min(a, c), b), 'L')", a=b1_up, b=b1_dn, c=r2)
+    g_m = ImageMath.eval("convert(max(min(a, c), b), 'L')", a=g1_up, b=g1_dn, c=g2)
+    b_m = ImageMath.eval("convert(max(min(a, c), b), 'L')", a=b1_up, b=b1_dn, c=b2)
 
     img_m = Image.merge('RGB', (r_m, g_m, b_m))
 
@@ -275,7 +352,7 @@ def luma_adjusted_levels(img: Image, luma_min: float = 0, gamma: float = 1.0, ga
     yuv_new = np.copy(yuv).clip(i_min, i_max)
 
     if i_alpha > 1:
-        y_new = np.add(y, i_alpha).clip(i_min, i_max).astype(int)
+        y_new = np.add(y, i_alpha).clip(i_min, i_max).astype(np.uint8)
     else:
         y_new = y
 
@@ -285,7 +362,7 @@ def luma_adjusted_levels(img: Image, luma_min: float = 0, gamma: float = 1.0, ga
         else:
             g_new = gamma
         y_new = np.power(y_new / 255, 1 / g_new)
-        y_new = np.multiply(y_new, 255).clip(i_min, i_max).astype(int)
+        y_new = np.multiply(y_new, 255).clip(i_min, i_max).astype(np.uint8)
 
     yuv_new[:, :, 0] = y_new
     yuv_new[:, :, 1] = u
@@ -305,7 +382,7 @@ adjust the contrast of an image, color-space: YUV
 """
 
 
-def image_gamma_contrast(img: Image, gamma: float = 1.0, cont: float = 1.0, perc: float = 5):
+def image_gamma_contrast(img: Image, gamma: float = 1.0, cont: float = 1.0):
     if cont == 1 and gamma == 1:
         return img
 
@@ -316,11 +393,11 @@ def image_gamma_contrast(img: Image, gamma: float = 1.0, cont: float = 1.0, perc
     return Image.fromarray(np_img_rgb)
 
 
-def image_contrast(img: Image, cont: float = 1.0, perc: float = 5):
+def image_contrast(img: Image, cont: float = 1.0):
     if cont == 1:
         return img
 
-    return image_gamma_contrast(img, cont, perc)
+    return image_gamma_contrast(img, cont)
 
 
 """
@@ -344,11 +421,11 @@ def image_brightness(img: Image, bright: float = 0.0):
 
     y_cont = y / 255 + bright
 
-    y_cont = array_min_max(y_cont, 0, 1, np.float64) * 255
+    y_cont = array_clip(y_cont, 0, 1, np.float32) * 255
 
     yuv_new = np.copy(yuv)
 
-    yuv_new[:, :, 0] = y_cont.clip(0, 255).astype(int)
+    yuv_new[:, :, 0] = y_cont.clip(0, 255).astype(np.uint8)
 
     img_rgb = cv2.cvtColor(yuv_new, cv2.COLOR_YUV2RGB)
 
@@ -370,7 +447,7 @@ For the 8-bit images, H is converted to H/2 to fit to the [0,255] range.
 So the range of hue in the HSV color space of OpenCV is [-90,+90]
 """
 
-
+"""
 def image_tweak(img: Image, sat: float = 1, cont: float = 1.0, bright: float = 0, hue: float = 0, gamma: float = 1.0,
                 hue_range: str = 'none') -> Image:
     if sat == 1 and bright == 0 and hue == 0 and gamma == 1 and cont == 1:
@@ -381,7 +458,84 @@ def image_tweak(img: Image, sat: float = 1, cont: float = 1.0, bright: float = 0
     img_rgb = np_image_tweak(img_np, sat, cont, bright, hue, gamma, hue_range)
 
     return Image.fromarray(img_rgb, 'RGB').convert('RGB')
+"""
 
+def image_tweak(img: Image, sat: float = 1, cont: float = 1.0, bright: float = 0, hue: float = 0, gamma: float = 1.0,
+                hue_range: str = 'none') -> Image.Image:
+    """
+    Adjust brightness, contrast, saturation, hue, and gamma of a PIL RGB image.
+
+    Args:
+        img: PIL Image (must be RGB)
+        bright: 0.0 = original (-128 = 50% darker, +128 = 50% brighter)
+        cont:   1.0 = original
+        sat: 1.0 = original (0 = grayscale)
+        hue:   degrees to rotate hue (-180 to 180)
+        gamma:  1.0 = original (<1 = brighter, >1 = darker)
+        hue_range: if not 'none' the adjustments will be applied only on the hue range specified
+
+    Returns:
+        Adjusted PIL Image (RGB)
+    """
+    img_np = np.asarray(img)
+
+    # Step 1: Apply gamma correction (pixel-wise, before color adjustments)
+    if gamma != 1.0:
+        img = _apply_gamma(img, gamma)
+
+    # Step 2: Apply hue shift (requires HSV conversion)
+    if hue != 0.0:
+        img = _apply_hue_shift(img, hue)
+
+    # Step 3: Apply PIL enhancements (order matters: brightness → contrast → saturation)
+    if bright != 0.0:
+        brightness = 1 + bright/255
+        img = ImageEnhance.Brightness(img).enhance(brightness)
+    if cont != 1.0:
+        img = ImageEnhance.Contrast(img).enhance(cont)
+    if sat != 1.0:
+        img = ImageEnhance.Color(img).enhance(sat)
+
+    if hue_range == 'none' or hue_range == '':
+        return img
+
+    img_new_np = np_adjust_chroma2(img_np, np.asarray(img), hue_range)
+
+    return Image.fromarray(img_new_np, mode='RGB')
+
+
+def _apply_gamma(img: Image.Image, gamma: float) -> Image.Image:
+    """Apply gamma correction using lookup table (fast)."""
+    # Build gamma lookup table
+    inv_gamma = 1.0 / gamma
+    table = np.array([
+        ((i / 255.0) ** inv_gamma) * 255
+        for i in range(256)
+    ]).astype("uint8")
+
+    # Apply to all channels
+    return img.point(table * 3)
+
+
+def _apply_hue_shift(img: Image.Image, hue_deg: float) -> Image.Image:
+    """Shift hue by hue_deg degrees using HSV conversion."""
+    # Convert to HSV
+    img_hsv = img.convert('HSV')
+    h, s, v = img_hsv.split()
+
+    # Convert hue to numpy array
+    h_np = np.array(h, dtype=np.int16)  # use int16 to avoid overflow
+
+    # Shift hue (HSV hue is 0-255, not 0-360!)
+    # PIL's HSV: H ∈ [0, 255] ≈ [0°, 360°]
+    hue_offset = int((hue_deg / 360.0) * 255)
+    h_np = (h_np + hue_offset) % 256
+
+    # Convert back to uint8 and image
+    h_new = Image.fromarray(h_np.astype('uint8'), mode='L')
+    img_hsv_shifted = Image.merge('HSV', (h_new, s, v))
+
+    return img_hsv_shifted.convert('RGB')
 
 def image_chroma_tweak(img: Image, sat: float = 1, bright: float = 0, hue: int = 0, hue_adjust: str = 'none') -> Image:
     if sat == 1 and bright == 0 and hue == 0 and hue_adjust == "none":
@@ -501,8 +655,8 @@ def _chroma_temporal_limiter(cur_img: Image, prv_img: Image, alpha: float = 0.05
     u2 = yuv2[:, :, 1]
     v2 = yuv2[:, :, 2]
 
-    u2_m = array_max_min(u2, u1_up, u1_dn)
-    v2_m = array_max_min(v2, v1_up, v1_dn)
+    u2_m = array_clip(u2, u1_dn, u1_up)
+    v2_m = array_clip(v2, v1_dn, v1_up)
 
     yuv_new[:, :, 1] = u2_m
     yuv_new[:, :, 2] = v2_m

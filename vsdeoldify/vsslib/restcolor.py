@@ -10,13 +10,11 @@ Description:
 ------------------------------------------------------------------------------- 
 Library of functions used by "HAVC" to restore color and change the hue of frames.
 """
-import vapoursynth as vs
-import math
+
 import numpy as np
 import cv2
 from PIL import Image
-
-from .nputils import *
+from vsdeoldify.vsslib.nputils import np_image_mask_merge, np_weighted_merge, np_hue_add, w_np_image_mask_merge, isfloat
 
 """
 ------------------------------------------------------------------------------- 
@@ -97,7 +95,7 @@ The vector order is: H = 0, S = 1, V = 2
 
 
 def restore_color_gradient(img_color: Image = None, img_gray: Image = None, sat: float = 1.0, tht: int = 50,
-                           weight: float = 0, alpha: float = 2.0, return_mask: bool = False) -> Image:
+                           weight: float = 0, alpha: float = 2.0, return_mask: bool = False, algo: int = 0) -> Image:
     np_color = np.asarray(img_color)
     np_gray = np.asarray(img_gray)
 
@@ -112,7 +110,7 @@ def restore_color_gradient(img_color: Image = None, img_gray: Image = None, sat:
 
     hsv_s = hsv_gray[:, :, 1]
 
-    hsv_mask = w_np_gradient_mask(hsv_s, tht, alpha)  # white only gray pixels
+    hsv_mask = w_np_gradient_mask(hsv_s, tht, alpha, algo)  # white only gray pixels
 
     mask_rgb = np_gray.copy()
 
@@ -135,7 +133,7 @@ def restore_color_gradient(img_color: Image = None, img_gray: Image = None, sat:
     return img_restored
 
 
-def w_np_gradient_mask(img_np: np.ndarray, tht: int = 15, alpha: float = 2.0, steep: float = 2.0) -> np.ndarray:
+def w_np_gradient_mask_steep(img_np: np.ndarray, tht: int = 15, alpha: float = 2.0, steep: float = 2.0) -> np.ndarray:
 
     luma_np = img_np.clip(0, 255)
 
@@ -146,6 +144,61 @@ def w_np_gradient_mask(img_np: np.ndarray, tht: int = 15, alpha: float = 2.0, st
     luma_grad = (255.0 - tht - grad).clip(0, 255).astype(int)
 
     return luma_grad
+
+
+def w_np_gradient_mask(saturation: np.ndarray, tht: int = 15, alpha: float = 2.0, algo: int = 0) -> np.ndarray:
+    """
+    Create a mask that is WHITE where saturation is LOW (gray areas).
+    Mask is 255 at S=0, 128 at S=tht, 0 at S=2*tht.
+
+    Args:
+        saturation: HSV S channel (0-255)
+        tht: threshold — pixels with S <= tht are considered "gray"
+        alpha: smoothness (higher = softer transition)
+        algo: algorithm to build the mask, allowed values are:
+                [0] = Linear decay with steep gradient,
+                [1] = Linear decay
+                [2] = Exponential decay
+
+    Returns:
+        mask: 0-255, where 255 = fully gray (needs colorization)
+    """
+
+    if algo == 0:
+        return w_np_gradient_mask_steep(saturation, tht, alpha)
+
+    s = saturation.astype(np.float32)
+
+    # Ensure tht is in valid range
+    tht = int(np.clip(tht, 0, 255))
+
+    if tht == 0:
+        return np.zeros_like(saturation, dtype=np.uint8)
+
+    if algo == 1:
+        # Define max saturation for full falloff
+        # We want falloff from S=0 to S=max_s, where max_s = min(2*tht, 255)
+        max_s = min(2 * tht, 200)  # safe bound to 200
+        s_clipped = np.clip(s, 0, max_s)
+
+        # Linear mapping: S=0 → 1.0, S=max_s → 0.0
+        # Apply power law for nonlinear falloff
+        mask_norm = (1.0 - (s_clipped / max_s)) ** alpha
+    else:
+        # Normalize S to [0, 1] relative to tht
+        s_rel = np.clip(s / tht, 0, 2)  # cap at 2x tht
+
+        # Exponential decay: mask = exp(-alpha * s_rel * ln(2))
+        # So that at s_rel = 1 (S = tht), mask = exp(-ln(2)) = 0.5
+        mask_norm = np.exp(-alpha * s_rel * np.log(2))
+
+        # Cap at S = 2*tht (optional)
+        mask_norm = np.where(s >= 2 * tht, 0.0, mask_norm)
+
+    # Scale to [0, 255]
+    mask =  (np.clip(mask_norm * 255, 0, 255)).astype(np.uint8)
+
+    return mask
 
 """
 ------------------------------------------------------------------------------- 
@@ -298,8 +351,9 @@ def np_image_chroma_tweak(img_color_rgb: np.ndarray, sat: float = 1, bright: flo
 
 def np_adjust_chroma2(np_color_rgb: np.ndarray, np_gray_rgb: np.ndarray, hue_range: str = 'none',
                       return_mask: bool = False) -> np.ndarray:
+
     if hue_range == 'none' or hue_range == '':
-        return np_color_rgb
+        return np_gray_rgb
 
     hsv_color = cv2.cvtColor(np_color_rgb, cv2.COLOR_RGB2HSV)
     hsv_s = hsv_color[:, :, 0]
@@ -314,7 +368,7 @@ def np_adjust_chroma2(np_color_rgb: np.ndarray, np_gray_rgb: np.ndarray, hue_ran
         mask_rgb[:, :, i] = hsv_mask
 
     if return_mask:
-        return Image.fromarray(mask_rgb, 'RGB').convert('RGB')
+        return mask_rgb  # Image.fromarray(mask_rgb, 'RGB').convert('RGB')
 
     np_restored = np_image_mask_merge(np_color_rgb, np_gray_rgb, mask_rgb)
 

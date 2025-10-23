@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-09-24
+LastEditTime: 2025-09-28
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -12,23 +12,23 @@ module containing the main functions to colorize the frames with deoldify() and 
 """
 import vapoursynth as vs
 import math
-import numpy as np
-import cv2
-import os
-from PIL import Image
+import torch
 from functools import partial
 
-from vsdeoldify.deoldify.visualize import *
+from vsdeoldify.deoldify.visualize import ModelImageInitializer, ModelImageVisualizer
+#from vsdeoldify.deoldify.visualize import *
+from vsdeoldify.remaster import vs_sc_remaster_colorize
+from vsdeoldify.vsslib.imfilters import image_weighted_merge
+from vsdeoldify.vsslib.vsfilters import vs_sc_tweak, sc_constrained_tweak, vs_sc_adjust_clip_hue, vs_recover_clip_luma
+from vsdeoldify.vsslib.vsutils import frame_to_image, image_to_frame, frame_to_np_array, np_array_to_frame
 from vsdeoldify.vsslib.vsutils import debug_ModifyFrame
-from vsdeoldify.vsslib.vsfilters import *
 from vsdeoldify.colormnet import vs_colormnet_remote, vs_colormnet_local
+from vsdeoldify.colormnet2 import vs_colormnet2_remote, vs_colormnet2_local
 from vsdeoldify.deepex import deepex_colorizer, ModelColorizer
 from vsdeoldify.colorization import ModelColorization
-from vsdeoldify.remaster import *
-from vsdeoldify.havc_utils import rgb_balance, rgb_equalizer, rgb_denoise
+from vsdeoldify.havc_utils import bw_retinex, rgb_denoise
 
-#from vsdeoldify.remaster.remaster_utils import *
-
+from vsdeoldify.vsslib.constants import *
 
 def vs_colormnet(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode, image_size: int = -1,
                  enable_resize: bool = False, frame_propagate: bool = True, render_vivid: bool = True,
@@ -55,6 +55,33 @@ def vs_colormnet(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNo
                                       render_vivid, max_memory_frames, ref_weight, use_all_refs=(encode_mode == 3))
         case _:
             raise vs.Error("HAVC_deepex: unknown encode mode: " + str(encode_mode))
+
+
+def vs_colormnet2(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode, image_size: int = -1,
+                 enable_resize: bool = False, frame_propagate: bool = True, render_vivid: bool = True,
+                 max_memory_frames: int = 0, encode_mode: int = 0, ref_weight: float = 1.0) -> vs.VideoNode:
+    if encode_mode == 1:
+        if max_memory_frames is None or max_memory_frames == 0:
+            gpu_mem_free, gpu_mem_total = torch.cuda.mem_get_info()
+            mem_tot_k = round(gpu_mem_total / 1024 / 1024 / 1024, 0)
+            if mem_tot_k < 8.5:
+                max_memory_frames = 4
+            elif mem_tot_k < 12.5:
+                max_memory_frames = 8
+            elif mem_tot_k < 16.5:
+                max_memory_frames = 18
+            else:
+                max_memory_frames = 25
+
+    match encode_mode:
+        case 0 | 2:
+            return vs_colormnet2_remote(clip, clip_ref, clip_sc, image_size, enable_resize, frame_propagate,
+                                       render_vivid, max_memory_frames, ref_weight, use_all_refs=(encode_mode == 2))
+        case 1 | 3:  # encode_mode = 3 is supported only for testing, given the memory limitation of this method
+            return vs_colormnet2_local(clip, clip_ref, clip_sc, image_size, enable_resize, frame_propagate,
+                                      render_vivid, max_memory_frames, ref_weight, use_all_refs=(encode_mode == 3))
+        case _:
+            raise vs.Error("HAVC_cmnet2: unknown encode mode: " + str(encode_mode))
 
 
 def vs_deepex(clip: vs.VideoNode, clip_ref: vs.VideoNode, clip_sc: vs.VideoNode, image_size: list = [432, 768],
@@ -167,7 +194,7 @@ def vs_deoldify(clip: vs.VideoNode, method: int = 2, model: int = 0, render_fact
 
 
 def vs_sc_deoldify(clip: vs.VideoNode, method: int = 2, model: int = 0, render_factor: int = 24,
-                   scenechange: bool = True, package_dir: str = "") -> vs.VideoNode:
+                   scenechange: bool = True, package_dir: str = "") -> vs.VideoNode | None:
     if method == 1:
         return None
 
@@ -192,7 +219,7 @@ def _deoldify(clip: vs.VideoNode, colorizer: ModelImageVisualizer = None, render
                           render_factor: int = 24, scenechange: bool = True) -> vs.VideoFrame:
 
         if scenechange:
-            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
+            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1)
             if not is_scenechange:
                 return f.copy()
 
@@ -218,14 +245,15 @@ wrapper to Colorization.
 
 
 def vs_sc_colorization(clip: vs.VideoNode, colorizer_model: str = 'siggraph17',
-                       scenechange: bool = True) -> vs.VideoNode:
+                       scenechange: bool = True, frame_size:int = 256) -> vs.VideoNode:
     m_colorizer = ModelColorization(model=colorizer_model, use_gpu=True)
+    f_size = frame_size # min(frame_size, 512)
 
     def colorization(n: int, f: vs.VideoFrame, colorizer: ModelColorization = None,
-                     scflag: bool = True) -> vs.VideoFrame:
+                     scflag: bool = True, f_size: int = 256) -> vs.VideoFrame:
 
         if scflag:
-            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1 and f.props['_SceneChangeNext'] == 0)
+            is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1)
             if not is_scenechange:
                 return f.copy()
 
@@ -235,7 +263,12 @@ def vs_sc_colorization(clip: vs.VideoNode, colorizer_model: str = 'siggraph17',
 
         return np_array_to_frame(np_frame_colored, f.copy())
 
-    return clip.std.ModifyFrame(clips=[clip], selector=partial(colorization, colorizer=m_colorizer, scflag=scenechange))
+    #clip_new = debug_ModifyFrame(f_start=0, f_end=500, clip=clip, clips=[clip],
+    #                             selector=partial(colorization, colorizer=m_colorizer, scflag=scenechange))
+    clip_new = clip.std.ModifyFrame(clips=[clip], selector=partial(colorization, colorizer=m_colorizer,
+                                    scflag=scenechange, f_size=f_size))
+
+    return clip_new
 
 
 """
@@ -248,16 +281,18 @@ wrapper to function ddcolor() with tweak pre-process.
 """
 
 def vs_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 1, render_factor: int = 24,
-               tweaks_enabled: bool = False, tweaks: list = [0.0, 1.0, 1.0, False, 0.3, 0.6, 1.5, 0.5],
+               tweaks_flags: list[bool] = (False, False, False),
+               tweaks: list = (DEF_TWEAK_p, "none"),
                enable_fp16: bool = True, device_index: int = 0, num_streams: int = 1) -> vs.VideoNode:
-    return vs_sc_ddcolor(clip, method, model, render_factor, tweaks_enabled, tweaks, enable_fp16, scenechange=False,
+    return vs_sc_ddcolor(clip, method, model, render_factor, tweaks_flags, tweaks, enable_fp16, scenechange=False,
                          device_index=device_index, num_streams=num_streams)
 
 
 def vs_sc_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 1, render_factor: int = 24,
-                  tweaks_enabled: bool = False, tweaks: list = [0.0, 1.0, 1.0, False, 0.3, 0.6, 1.5, 0.5],
+                  tweaks_flags: list[bool] = (False, False, False),
+                  tweaks: list = (DEF_TWEAK_p, "none"),
                   enable_fp16: bool = True, scenechange: bool = True, device_index: int = 0,
-                  num_streams: int = 1) -> vs.VideoNode:
+                  num_streams: int = 1) -> vs.VideoNode | None:
     if method == 0:
         return None
 
@@ -268,27 +303,35 @@ def vs_sc_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 1, render_fa
     input_size = math.trunc(render_factor / 2) * 32
 
     # unpack tweaks
-    bright = tweaks[0]
-    cont = tweaks[1]
-    gamma = tweaks[2]
-    luma_constrained_tweak = tweaks[3]
-    luma_min = tweaks[4]
-    gamma_luma_min = tweaks[5]
-    gamma_alpha = tweaks[6]
-    gamma_min = tweaks[7]
-    if len(tweaks) > 8:
-        hue_adjust = tweaks[8].lower()
+    tweaks_enabled = tweaks_flags[0]
+    denoise_enabled = tweaks_flags[1]
+    retinex_enabled = tweaks_flags[2]
+
+    if len(tweaks) == 2:
+        bright = tweaks[0][0]
+        cont = tweaks[0][1]
+        gamma = tweaks[0][2]
+        luma_constrained_tweak = tweaks[0][3]
+        luma_min = tweaks[0][4]
+        gamma_luma_min = tweaks[0][5]
+        gamma_alpha = tweaks[0][6]
+        gamma_min = tweaks[0][7]
+        hue_adjust = tweaks[1].lower()
     else:
+        bright = tweaks[0]
+        cont = tweaks[1]
+        gamma = tweaks[2]
+        luma_constrained_tweak = tweaks[3]
+        luma_min = tweaks[4]
+        gamma_luma_min = tweaks[5]
+        gamma_alpha = tweaks[6]
+        gamma_min = tweaks[7]
         hue_adjust = 'none'
 
-    if tweaks_enabled and hue_adjust == 'none':
-        tweaks_enabled = False
-        denoise_enabled = True
-    else:
-        denoise_enabled = False
-
     if tweaks_enabled:
-        if luma_constrained_tweak:
+        if retinex_enabled:
+            clipb = bw_retinex(clip, mode='strong', luma_blend=True, range_tv=True)
+        elif luma_constrained_tweak:
             clipb = vs_sc_tweak(clip, bright=bright, cont=cont,
                                 scenechange=scenechange)  # contrast and bright are adjusted before the constrainded luma and gamma
             clipb = sc_constrained_tweak(clipb, luma_min=luma_min, gamma=gamma, gamma_luma_min=gamma_luma_min,
@@ -300,9 +343,9 @@ def vs_sc_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 1, render_fa
 
     if model > 1:
         if model == 2:
-            clipb_rgb = vs_sc_colorization(clipb, colorizer_model='siggraph17', scenechange=scenechange)
+            clipb_rgb = vs_sc_colorization(clipb, colorizer_model='siggraph17', scenechange=scenechange, frame_size=input_size)
         else:
-            clipb_rgb = vs_sc_colorization(clipb, colorizer_model='eccv16', scenechange=scenechange)
+            clipb_rgb = vs_sc_colorization(clipb, colorizer_model='eccv16', scenechange=scenechange, frame_size=input_size)
     else:
         # adjusting clip's color space to RGBH for vsDDColor
         if enable_fp16:
@@ -317,12 +360,13 @@ def vs_sc_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 1, render_fa
         # adjusting color space to RGB24 for deoldify
         clipb_rgb = clipb.resize.Bicubic(format=vs.RGB24, range_s="full")
 
-    if tweaks_enabled:
-        if hue_adjust != 'none':
-            clipb_rgb = vs_sc_adjust_clip_hue(clipb_rgb, hue_adjust, scenechange=scenechange)
-        clipb_rgb = vs_recover_clip_luma(clip, clipb_rgb)
+    if hue_adjust != 'none':
+        clipb_rgb = vs_sc_adjust_clip_hue(clipb_rgb, hue_adjust, scenechange=scenechange)
 
-    if denoise_enabled:  # no tweaks enabled -> removed rgb noise
+    if denoise_enabled:  # remove rgb noise
         clipb_rgb = rgb_denoise(clipb_rgb, denoise_levels=[0.3, 0.2], rgb_factors=[0.98, 1.02, 1.0])
 
-    return clipb_rgb
+    if tweaks_enabled:
+        return vs_recover_clip_luma(clip, clipb_rgb)
+    else:
+        return clipb_rgb

@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2025-01-03
 version:
 LastEditors: Dan64
-LastEditTime: 2025-01-04
+LastEditTime: 2025-09-28
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
@@ -17,9 +17,9 @@ from __future__ import annotations, print_function
 
 import os
 
-import numpy as np
-import torch
-import torch.backends.cudnn as cudnn
+#import numpy as np
+#import torch
+#import torch.backends.cudnn as cudnn
 
 from vsdeoldify.colorization.colorizers import *
 
@@ -52,6 +52,26 @@ class ModelColorization:
             if self.colorizer_model != model:
                 self.colorizer_model = model
                 self._colorize_init()
+
+    def colorize_frame_ext(self, frame_i: np.ndarray = None, f_size: int = 256) -> np.ndarray:
+
+        img = load_img_rgb(frame_i)
+        # grab L channel in both original ("orig") and resized ("rs") resolutions
+        (tens_l_orig, tens_l_rs) = preprocess_img(img, HW=(f_size, f_size))
+        if self.use_gpu:
+            tens_l_rs = tens_l_rs.cuda()
+
+        # colorizer outputs ab map
+        # resize and concatenate to original L channel
+
+        if self.colorizer_model == 'siggraph17':
+            np_img_float = postprocess_tens(tens_l_orig, self.colorizer_siggraph17(tens_l_rs).cpu())
+        else:
+            np_img_float = postprocess_tens(tens_l_orig, self.colorizer_eccv16(tens_l_rs).cpu())
+
+        # return the frame converted in np.ndarray(uint8)
+        np_img_rgb = np.uint8(np.clip(np_img_float * 255, 0, 255))
+        return np_img_rgb
 
     def colorize_frame(self, frame_i: np.ndarray = None) -> np.ndarray:
 

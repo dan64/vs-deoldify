@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-02-09
+LastEditTime: 2025-10-19
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -13,12 +13,8 @@ Library of Vapoursynth utility functions.
 
 import vapoursynth as vs
 import os
-import math
 import numpy as np
-import cv2
 from PIL import Image
-from functools import partial
-from skimage.metrics import structural_similarity
 from enum import IntEnum
 from functools import partial
 
@@ -49,7 +45,6 @@ def HAVC_LogMessage(message_type: MessageType = MessageType.INFORMATION, *args):
         raise vs.Error(message_text)
     else:
         vs.core.log_message(int(message_type), message_text)
-
 
 """
 ------------------------------------------------------------------------------- 
@@ -121,8 +116,28 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
-Function to save the reference frames of a clip 
+Functions to save the reference frames of a clip 
 """
+
+def _select_frames_by_list(clip: vs.VideoNode, frame_list: list[int]) -> vs.VideoNode:
+    """
+    Returns a new clip containing only the frames whose indices are in `frame_list`.
+    The frames are output in the order they appear in `frame_list`.
+    Frame indices must be within [0, clip.num_frames].
+    """
+    if not frame_list:
+        raise ValueError("frame_list is empty")
+
+    # Validate frame numbers
+    max_frame = clip.num_frames - 1
+    if any(n < 0 or n > max_frame for n in frame_list):
+        raise ValueError("Frame numbers in list must be in range [0, clip.num_frames - 1]")
+
+    # Create a list of single-frame clips
+    selected_clips = [clip[n] for n in frame_list]
+
+    # Splice them into a single clip
+    return vs.core.std.Splice(selected_clips)
 
 # global variable for sc counting
 _sc_counter: int
@@ -168,17 +183,31 @@ def vs_sc_export_frames(clip: vs.VideoNode = None, sc_framedir: str = None, ref_
 
 
 def vs_list_export_frames(clip: vs.VideoNode = None, sc_framedir: str = None, ref_list: list[int] = None,
-                          ref_ext: str = 'png', ref_jpg_quality: int = 95, ref_override: bool = True) -> vs.VideoNode:
+                          offset: int = 0, ref_ext: str = 'png', ref_jpg_quality: int = 95, ref_override: bool = True,
+                          fast_extract: bool = True) -> vs.VideoNode:
     pil_ext = ref_ext.lower()
 
+    if len(ref_list) == 1: # the list is automatically generated
+        sorted_list = list(range(0, clip.num_frames, ref_list[0]))
+    else: # the list is sorted and duplicate frames are removed
+        sorted_list = sorted(set(ref_list))
+
+    if offset > 0:
+        sorted_list = [num + offset for num in sorted_list]
+    
     def save_sc_frame(n, f, sc_framedir: str = None, ref_list: list[int] = None, ref_ext: str = 'png',
-                      ref_jpg_quality: int = 95, ref_override: bool = True):
+                      ref_jpg_quality: int = 95, ref_override: bool = True, fast_extract: bool = True):
         global _sc_counter
 
-        is_scenechange = (n in ref_list)
+        if fast_extract:
+            is_scenechange = True
+            f_num = ref_list[n]
+        else:
+            is_scenechange = (n in ref_list)
+            f_num = n
         if is_scenechange:
             img = frame_to_image(f)
-            img_path = os.path.join(sc_framedir, f"ref_{n:06d}.{ref_ext}")
+            img_path = os.path.join(sc_framedir, f"ref_{f_num:06d}.{ref_ext}")
             if not ref_override and os.path.exists(img_path):
                 return f.copy()  # do nothing
             if ref_ext == "jpg":
@@ -188,12 +217,20 @@ def vs_list_export_frames(clip: vs.VideoNode = None, sc_framedir: str = None, re
 
         return f.copy()
 
-    clip = clip.std.ModifyFrame(clips=[clip], selector=partial(save_sc_frame, sc_framedir=sc_framedir,
-                                                               ref_list=ref_list, ref_ext=pil_ext,
-                                                               ref_jpg_quality=ref_jpg_quality,
-                                                               ref_override=ref_override))
+    if fast_extract:
+        clip_ref = _select_frames_by_list(clip, sorted_list)
+    else:
+        clip_ref = clip
 
-    return clip
+    clip_new = clip_ref.std.ModifyFrame(clips=[clip_ref], selector=partial(save_sc_frame, sc_framedir=sc_framedir,
+                                        ref_list=sorted_list, ref_ext=pil_ext, ref_jpg_quality=ref_jpg_quality,
+                                        ref_override=ref_override, fast_extract=fast_extract))
+
+    #clip_new = debug_ModifyFrame(f_start=0, f_end=147, clip=clip_ref, clips=[clip_ref],
+    #                             selector=partial(save_sc_frame, sc_framedir=sc_framedir,
+    #                                    ref_list=sorted_list, ref_ext=pil_ext, ref_jpg_quality=ref_jpg_quality,
+    #                                    ref_override=ref_override, fast_extract=fast_extract), silent=True)
+    return clip_new
 
 
 def vs_get_video_ref(clip: vs.VideoNode = None, prop_name: str = "_SceneChangePrev") -> vs.VideoNode:
@@ -245,18 +282,18 @@ def get_ref_num(filename: str = ""):
     return fnum
 
 
-def get_ref_images(dir="./") -> list:
-    img_ref_file = [os.path.join(dir, f) for f in os.listdir(dir) if is_ref_file(dir, f)]
+def get_ref_images(in_dir="./") -> list:
+    img_ref_file = [os.path.join(in_dir, f) for f in os.listdir(in_dir) if is_ref_file(in_dir, f)]
     return img_ref_file
 
 
-def get_ref_names(dir="./") -> list:
-    img_ref_list = [f for f in os.listdir(dir) if is_ref_file(dir, f)]
+def get_ref_names(in_dir="./") -> list:
+    img_ref_list = [f for f in os.listdir(in_dir) if is_ref_file(in_dir, f)]
     return img_ref_list
 
 
-def is_ref_file(dir="./", fname: str = "") -> bool:
-    filename = os.path.join(dir, fname)
+def is_ref_file(in_dir="./", fname: str = "") -> bool:
+    filename = os.path.join(in_dir, fname)
 
     if not os.path.isfile(filename):
         return False
@@ -301,6 +338,7 @@ def mean_pixel_distance(y_left: np.ndarray, y_right: np.ndarray, normalize: bool
 
 def debug_ModifyFrame(f_start: int = 0, f_end: int = 1, clip: vs.VideoNode = None,
                       clips: list[vs.VideoNode] = None, selector: partial = None, silent: bool = True) -> vs.VideoNode:
+    f_end = min(f_end, clip.num_frames - 1)
     if len(clips) == 1:
         if f_start > 0:
             frame = clips[0].get_frame(0)

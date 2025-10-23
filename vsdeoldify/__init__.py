@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-09-24
+LastEditTime: 2025-10-19
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -18,12 +18,8 @@ ColorMNet: https://github.com/yyang181/colormnet
 Deep-Remaster: https://github.com/satoshiiizuka/siggraphasia2019_remastering
 """
 from __future__ import annotations
-from functools import partial
 
 import os
-import pathlib
-
-import vsdeoldify.remaster
 
 os.environ["CUDA_MODULE_LOADING"] = "LAZY"
 os.environ["NUMEXPR_MAX_THREADS"] = "8"
@@ -31,23 +27,32 @@ os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["TORCH_LOGS"] = "-all"
 
+import pathlib
 import math
-import cv2
-import numpy as np
-from PIL import Image
+
+from vsdeoldify.havc_utils import _get_tune_id, convert_format_RGB24, restore_format, HAVC_read_video, rgb_denoise
+from vsdeoldify.havc_utils import  rgb_balance, rgb_equalizer
+from vsdeoldify.vsslib.mcomb import vs_sc_combine_models, vs_combine_models, vs_ext_reference_clip, ChromaRetentionMerge
+from vsdeoldify.vsslib.vsfilters import vs_rgb_normalize, vs_simple_merge, vs_tweak, vs_sc_colormap, vs_sc_dark_tweak
+from vsdeoldify.vsslib.vsfilters import  vs_sc_chroma_bright_tweak, vs_sc_recover_clip_luma, vs_recover_clip_luma
+from vsdeoldify.vsslib.vsfilters import vs_dark_tweak, vs_chroma_bright_tweak, vs_colormap, vs_chroma_stabilizer_ex
+from vsdeoldify.vsslib.vsfilters import vs_get_clip_frame
+from vsdeoldify.vsslib.vsmodels import vs_sc_deoldify, vs_sc_ddcolor, vs_colormnet, vs_deepex, vs_deepremaster
+from vsdeoldify.vsslib.vsmodels import vs_colormnet2
+from vsdeoldify.vsslib.vsplugins import vs_reduce_flicker, vs_timecube
+from vsdeoldify.vsslib.vsretinex import vs_retinex
+from vsdeoldify.vsslib.vsutils import vs_sc_export_frames, vs_list_export_frames, HAVC_LogMessage, MessageType
+from vsdeoldify.vsslib.vsresize import SmartResizeColorizer, SmartResizeReference
+from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDetect, get_sc_props
 
 from vsdeoldify.deoldify import device
 from vsdeoldify.deoldify.device_id import DeviceId
-from vsdeoldify.vsslib.constants import *
-from vsdeoldify.vsslib.vsfilters import *
-from vsdeoldify.vsslib.mcomb import *
-from vsdeoldify.vsslib.vsmodels import *
-from vsdeoldify.vsslib.vsresize import SmartResizeColorizer, SmartResizeReference
-from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDetect, get_sc_props
 from vsdeoldify.deepex import deepex_colorizer, get_deepex_size, ModelColorizer
-from vsdeoldify.havc_utils import *
+import vsdeoldify.remaster
 
-__version__ = "5.5.1"
+import vsdeoldify.vsslib.constants as constants
+
+__version__ = "5.6.0"
 
 import warnings
 import logging
@@ -71,6 +76,7 @@ package_dir = os.path.dirname(os.path.realpath(__file__))
 model_dir = os.path.join(package_dir, "models")
 
 # configuring torch
+import torch
 torch.backends.cudnn.benchmark = True
 
 import vapoursynth as vs
@@ -86,16 +92,16 @@ wrapper to HAVC filter with "presets" management
 
 def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0,  ColorModel: str = 'Video+Artistic',
               CombMethod: str = 'Simple',  VideoTune: str = 'Stable', ColorFix: str = 'Magenta/Violet',
-              ColorTune: str = 'Light', ColorMap: str = 'None',  BlackWhiteTune: str = 'None', BlackWhiteMode: int = 0,
-              BlackWhiteBlend: bool = True, EnableDeepEx: bool = False, DeepExMethod: int = 0,
+              ColorTune: str = 'Light', ColorMap: str = 'None', ColorTemp: str = "None", BlackWhiteTune: str = 'None',
+              BlackWhiteMode: int = 0, BlackWhiteBlend: bool = True, EnableDeepEx: bool = False, DeepExMethod: int = 0,
               DeepExPreset: str = 'Medium', DeepExRefMerge: int = 0, DeepExOnlyRefFrames: bool = False,
-              ScFrameDir: str = None, ScThreshold: float = DEF_THRESHOLD, ScThtOffset: int = 1, ScMinFreq: int = 0,
+              ScFrameDir: str = None, ScThreshold: float = constants.DEF_THRESHOLD, ScThtOffset: int = 1, ScMinFreq: int = 0,
               ScMinInt: int = 1, ScThtSSIM: float = 0.0, ScNormalize: bool = False, DeepExModel: int = 0,
               DeepExVivid: bool = True, DeepExEncMode: int = 0, DeepExMaxMemFrames=0, RefRange: tuple[int, int] = (0, 0),
-              enable_fp16: bool = True, sc_debug: bool = False) -> vs.VideoNode:
+              enable_fp16: bool = True, debug_level: int = 0) -> vs.VideoNode:
     """Main HAVC function supporting the Presets
 
-    :param clip:                clip to process, only RGB24 format is supported.
+    :param clip:                clip to process, any format is supported.
     :param Preset:              Preset to control the encoding speed/quality.
                                 Allowed values are:
                                     'Placebo',
@@ -133,6 +139,8 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
                                     'Constrained-Chroma'
                                     'Luma-Masked'
                                     'Adaptive-Luma'
+                                    'Chroma-Retention'
+                                    'ChromaBound Adaptive'
     :param VideoTune:           Preset to control the output video color stability
                                 Allowed values are:
                                     'VeryStable',
@@ -145,6 +153,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
     :param ColorFix:            This parameter allows to reduce color noise on specific chroma ranges.
                                 Allowed values are:
                                     'None',
+                                    'Retinex/Red'
                                     'Magenta',
                                     'Magenta/Violet',   (default)
                                     'Violet',
@@ -156,8 +165,8 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
     :param ColorTune:           This parameter allows to define the intensity of noise reduction applied by ColorFix.
                                 Allowed values are:
                                     'None'
-                                    'Light',
-                                    'Medium',  (default)
+                                    'Light',  (default)
+                                    'Medium',  
                                     'Strong',
     :param ColorMap:            This parameter allows to change a given color range to another color.
                                 Allowed values are:
@@ -171,6 +180,15 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
                                     'Red->Brown',
                                     'Red->Blue'
                                     'Yellow->Rose'
+    :param ColorTemp:           Strength of the color temporal stabilization filter. This post process filter will be
+                                applied only to the DDColor family color models: DDColor(Artistic), DDColor(ModelScope),
+                                Zhang(Siggraph17), Zhang(ECCV16). Allowed values are:
+                                        "None" (default)
+                                        "Very High"
+                                        "High"
+                                        "Medium"
+                                        "Low"
+                                        "Very Low"
     :param BlackWhiteTune:      This parameter allows to improve contrast and luminosity of frames colored with HAVC.
                                 Allowed values are:
                                     'None' (default)
@@ -179,14 +197,17 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
                                     'Strong'
     :param BlackWhiteMode:      Method used by BlackWhiteTune to perform colors adjustments.
                                 Allowed values are:
-                                      0 : Apply Contrast Limited Adaptive Histogram Equalization on Luma (default)
-                                      1 : Apply Simple Histogram Equalization on all RGB channels
-                                      2 : Apply CLAHE on all RGB channels
-                                      3 : method=0 and method=1 are merged
-                                      4 : Automatic brightness and contrast optimization with ScaleAbs
-                                      5 : Auto bright and contrast optim. with saturation arithmetic
+                                        0 : CLAHE (luma) (default)
+                                        1 : Simple (RGB)
+                                        2 : CLAHE (RGB)
+                                        3 : CLAHE (luma) + Simple (RGB)
+                                        4 : ScaleAbs – LUT
+                                        5 : Multi-Scale Retinex (HAVC)
+                                        6 : Multi-Scale Retinex (B&W)
     :param BlackWhiteBlend:     If enabled the frames adjusted with BlackWhiteTune will be blended with the original frames.
-    :param EnableDeepEx:        Enable coloring using "Exemplar-based" Video Colorization models
+                                Default = True 
+    :param EnableDeepEx:        Enable coloring using "Exemplar-based" Video Colorization models.
+                                Default = False 
     :param DeepExMethod:        Method to use to generate reference frames.
                                         0 = HAVC same as video (default)
                                         1 = HAVC + RF same as video
@@ -198,7 +219,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
     :param DeepExPreset:        Preset to control the render method and speed:
                                 Allowed values are:
                                         'Fast'   (colors are more washed out)
-                                        'Medium' (colors are a little washed out)
+                                        'Medium' (colors are a little washed out) (default)
                                         'Slow'   (colors are a little more vivid)
     :param DeepExRefMerge:      Method used by DeepEx to merge the reference frames with the frames propagated by DeepEx.
                                 It is applicable only with DeepEx method: 0, 1, 2.
@@ -210,8 +231,8 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
                                         4 = RF-Merge High (reference frames are merged with weight=0.6)
                                         5 = RF-Merge VeryHigh (reference frames are merged with weight=0.7)
     :param DeepExOnlyRefFrames: If enabled the filter will output in "ScFrameDir" the reference frames. Useful to check
-                                and eventually correct the frames with wrong colors
-                                (can be used only if DeepExMethod = 0)
+                                and eventually correct the frames with wrong colors (can be used only if DeepExMethod = 0).
+                                Default = False
     :param DeepExModel:         Exemplar Model used by DeepEx to propagate color frames.
                                         0 : ColorMNet (default)
                                         1 : Deep-Exemplar
@@ -220,7 +241,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
                                     0) ColorMNet: the frames memory is reset at every reference frame update
                                     1) Deep-Exemplar: the saturation will be increased by about 25%.
                                     2) Deep-Remaster: the saturation will be increased by about 20% and Hue by +10.
-                                range [True, False]
+                                range [True, False]. Default = True
     :param DeepExEncMode:       Parameter used by ColorMNet to define the encode mode strategy.
                                 Available values are:
                                      0: remote encoding. The frames will be colored by a thread outside Vapoursynth.
@@ -236,7 +257,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
                                      2: remote all-ref   Same as "remote encoding" but all the available reference frames
                                                          will be used for the inference at the beginning of encoding.
     :param DeepExMaxMemFrames:  Parameter used by ColorMNet/DeepRemaster models.
-                                For ColorMNet specify the max number of encoded frames to keep in memory.
+                                For ColorMNet specify the max number of encoded frames to keep in memory. Default = 0
                                 Its value depend on encode mode and must be defined manually following the suggested values.
                                 DeepExEncMode=0: there is no memory limit (it could be all the frames in the clip).
                                 Suggested values are:
@@ -254,7 +275,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
                                 If = 0 will be filled with the value of 20.
     :param ScFrameDir:          if set, define the directory where are stored the reference frames that will be used
                                 by "Exemplar-based" Video Colorization models. With DeepExMethod 5,6 this parameter
-                                can be the path to a video clip.
+                                can be the path to a video clip. Default = None
     :param ScThreshold:         Scene change threshold used to generate the reference frames to be used by
                                 "Exemplar-based" Video Colorization. It is a percentage of the luma change between
                                 the previous and the current frame. range [0-1], default 0.10. If =0 are not generate
@@ -275,32 +296,83 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
                                 provide the frame number of clip start and end. For example RefRange=(100, 500)
                                 will return the clip's slice: clip[100:500], if RefRange=(0, 0) will be considered all
                                 clip's frames.
-    :param enable_fp16:         Enable/disable FP16 in ddcolor inference, range [True, False]
-    :param sc_debug:            Print debug messages regarding the scene change detection process.
+    :param enable_fp16:         Enable/disable FP16 in ddcolor inference, range [True, False]. Default = True
+    :param debug_level:         Set the level of HAVC debug messages. Default = 0 (no messages)
     """
     # disable packages warnings
     disable_warnings()
 
-    clip_colored = HAVC_main_colorizer(clip, Preset, ColorModel, CombMethod,  VideoTune, ColorFix,
-              ColorTune, ColorMap,  BlackWhiteTune,  BlackWhiteMode, BlackWhiteBlend, EnableDeepEx, DeepExMethod, DeepExPreset,
-              DeepExRefMerge, DeepExOnlyRefFrames, ScFrameDir, ScThreshold, ScThtOffset, ScMinFreq, ScMinInt, ScThtSSIM,
-              ScNormalize, DeepExModel, DeepExVivid, DeepExEncMode, DeepExMaxMemFrames, FrameInterp, RefRange,
-              enable_fp16, sc_debug)
+    HAVC_set_debug_level(debug_level)
 
-    return clip_colored
+    # Select presets / tuning
+    speed_id, deoldify_rf, ddcolor_rf = havc_utils._get_render_factors(Preset)
+
+    chroma_resize: bool = (speed_id > 2)   # 'placebo', 'veryslow' and 'slower' will not be downsized
+
+    clip, orig_fmt = convert_format_RGB24(clip, chroma_resize=chroma_resize)
+
+    EnableRetinex: bool = ColorTune.lower() != "none" and ColorFix == "retinex/red"
+    BWTuneRetinex: bool = BlackWhiteTune.lower() != "none" and BlackWhiteMode == 6
+    DeFlicker: bool = EnableDeepEx or ColorTemp.lower() != "none" or EnableRetinex or BWTuneRetinex
+
+    if BWTuneRetinex:
+        clip = HAVC_bw_tune(clip, bw_tune=BlackWhiteTune, bw_method=5, luma_blend=BlackWhiteBlend)
+        BlackWhiteTune = "light"
+        BlackWhiteMode = 0
+        BlackWhiteBlend = True
+
+    clip_colored = HAVC_main_colorizer(clip, Preset, ColorModel, CombMethod,  VideoTune, ColorFix, ColorTemp,
+              ColorTune, ColorMap, EnableDeepEx, DeepExMethod, DeepExPreset, DeepExRefMerge, DeepExOnlyRefFrames,
+              ScFrameDir, ScThreshold, ScThtOffset, ScMinFreq, ScMinInt, ScThtSSIM, ScNormalize, DeepExModel,
+              DeepExVivid, DeepExEncMode, DeepExMaxMemFrames, FrameInterp, RefRange, enable_fp16, debug_level)
+
+    if BWTuneRetinex:
+        clip_colored = HAVC_tweak(clip_colored, hue=5.0, sat=0.95, bright=0, cont=0.95, gamma=0.95)
+
+    if BlackWhiteTune.lower() != "none":
+        clip_colored = HAVC_bw_tune(clip_colored, BlackWhiteTune, BlackWhiteMode, BlackWhiteBlend)
+
+    clip_final = clip_colored
+    if speed_id > 3:  # 'medium', 'fast', 'faster', 'veryfast'
+        if EnableRetinex:
+            match ColorTune.lower():
+                case 'medium':
+                    clip_final = vs_timecube(clip_colored, 0.6, constants.DEF_LUT_City_Skyline)
+                case 'strong':
+                    if ColorMap.lower() == "red->brown":
+                        clip_final = vs_timecube(clip_colored, 0.8, constants.DEF_LUT_Exploration)
+                    else:
+                        clip_final = vs_timecube(clip_colored, 0.6, constants.DEF_LUT_FUJ_Film)
+    else:  # 'placebo', 'veryslow', 'slower', 'slow'
+        if EnableRetinex:
+            match ColorTune.lower():
+                case 'light':
+                    clip_final = vs_timecube(clip_colored, 0.8, constants.DEF_LUT_Exploration)
+                case 'medium':
+                    clip_final = vs_timecube(clip_colored, 0.6, constants.DEF_LUT_City_Skyline)
+                case 'strong':
+                    if ColorMap.lower() == "red->brown":
+                        clip_final = vs_timecube(clip_colored, 0.4, constants.DEF_LUT_Amber_Light)
+                    else:
+                        clip_final = vs_timecube(clip_colored, 0.6, constants.DEF_LUT_FUJ_Film)
+
+    if DeFlicker:
+        clip_final = vs_reduce_flicker(clip_final)
+
+    return restore_format(clip_final, orig_fmt)
 
 def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: str = 'Video+Artistic',
               CombMethod: str = 'Simple',  VideoTune: str = 'Stable', ColorFix: str = 'Magenta/Violet',
-              ColorTune: str = 'Medium', ColorMap: str = 'None',  BlackWhiteTune: str = 'None', BlackWhiteMode: int = 0,
-              BlackWhiteBlend: bool = True, EnableDeepEx: bool = False, DeepExMethod: int = 0, DeepExPreset: str = 'Medium',
-              DeepExRefMerge: int = 0, DeepExOnlyRefFrames: bool = False, ScFrameDir: str = None,
-              ScThreshold: float = DEF_THRESHOLD, ScThtOffset: int = 1, ScMinFreq: int = 0, ScMinInt: int = 1,
-              ScThtSSIM: float = 0.0, ScNormalize: bool = False, DeepExModel: int = 0, DeepExVivid: bool = True,
-              DeepExEncMode: int = 0, DeepExMaxMemFrames=0, FrameInterp: int = 0, RefRange: tuple[int, int] = (0, 0),
-              enable_fp16: bool = True, sc_debug: bool = False) -> vs.VideoNode:
+              ColorTemp: str = "None", ColorTune: str = 'Medium', ColorMap: str = 'None',  EnableDeepEx: bool = False,
+              DeepExMethod: int = 0, DeepExPreset: str = 'Medium', DeepExRefMerge: int = 0,
+              DeepExOnlyRefFrames: bool = False, ScFrameDir: str = None, ScThreshold: float = constants.DEF_THRESHOLD,
+              ScThtOffset: int = 1, ScMinFreq: int = 0, ScMinInt: int = 1, ScThtSSIM: float = 0.0,
+              ScNormalize: bool = False, DeepExModel: int = 0, DeepExVivid: bool = True, DeepExEncMode: int = 0,
+              DeepExMaxMemFrames=0, FrameInterp: int = 0, RefRange: tuple[int, int] = (0, 0), enable_fp16: bool = True,
+              debug_level: int = 0) -> vs.VideoNode:
     """Main HAVC coloring function supporting the Presets
 
-    :param clip:                clip to process, only RGB24 format is supported.
+    :param clip:                clip to process, any format is supported.
     :param Preset:              Preset to control the encoding speed/quality.
                                 Allowed values are:
                                     'Placebo',
@@ -333,6 +405,8 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
                                     'Constrained-Chroma'
                                     'Luma-Masked'
                                     'Adaptive-Luma'
+                                    'Chroma-Retention'
+                                    'ChromaBound Adaptive'
     :param VideoTune:           Preset to control the output video color stability
                                 Allowed values are:
                                     'VeryStable',
@@ -345,6 +419,7 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
     :param ColorFix:            This parameter allows to reduce color noise on specific chroma ranges.
                                 Allowed values are:
                                     'None',
+                                    'Retinex/Red'
                                     'Magenta',
                                     'Magenta/Violet',   (default)
                                     'Violet',
@@ -371,21 +446,15 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
                                     'Red->Brown',
                                     'Red->Blue'
                                     'Yellow->Rose'
-    :param BlackWhiteTune:      This parameter allows to improve contrast and luminosity of Black & White input clip to
-                                be colored with HAVC. Allowed values are:
-                                    'None' (default)
-                                    'Light',
-                                    'Medium',
-                                    'Strong'
-    :param BlackWhiteMode:      Method used by BlackWhiteTune to perform colors adjustments.
-                                Allowed values are:
-                                      0 : Apply Contrast Limited Adaptive Histogram Equalization on Luma (default)
-                                      1 : Apply Simple Histogram Equalization on all RGB channels
-                                      2 : Apply CLAHE on all RGB channels
-                                      3 : method=0 and method=1 are merged
-                                      4 : Automatic brightness and contrast optimization with ScaleAbs
-                                      5 : Automatic brightness and contrast optimization with saturation arithmetic.
-    :param BlackWhiteBlend:     If enabled the frames adjusted with BlackWhiteTune will be blended with the original frames.
+    :param ColorTemp:           Strength of the color temporal stabilization filter. This post process filter will be
+                                applied only to the DDColor family color models: DDColor(Artistic), DDColor(ModelScope),
+                                Zhang(Siggraph17), Zhang(ECCV16). Allowed values are:
+                                        "None" (default)
+                                        "Very High"
+                                        "High"
+                                        "Medium"
+                                        "Low"
+                                        "Very Low"
     :param EnableDeepEx:        Enable coloring using "Exemplar-based" Video Colorization models
     :param DeepExMethod:        Method to use to generate reference frames.
                                         0 = HAVC same as video (default)
@@ -481,10 +550,14 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
                                 will return the clip's slice: clip[100:500], if RefRange=(0, 0) will be considered all
                                 clip's frames.
     :param enable_fp16:         Enable/disable FP16 in ddcolor inference, range [True, False]
-    :param sc_debug:            Print debug messages regarding the scene change detection process.
+    :param debug_level:         Set the level of HAVC debug messages. Default = 0 (no messages)
     """
     # disable packages warnings
     disable_warnings()
+
+    HAVC_set_debug_level(debug_level)
+
+    clip, orig_fmt = convert_format_RGB24(clip)
 
     # Select presets / tuning
     speed_id, deoldify_rf, ddcolor_rf = havc_utils._get_render_factors(Preset)
@@ -503,8 +576,13 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
 
     # stabilization is not applicable where are colored only the ref frames or when Denoise is 'None'
     stab_enabled = not DeepExOnlyRefFrames and ColorTune.lower() != 'none'
-    # ---------------------- START COLORING ------------------------------------
 
+    # ---------------------- SET ColorTemp & FrameInterp ------------------------------------
+    color_temp = havc_utils._get_temp_color(ColorTemp)
+    if color_temp > 0:
+        ScMinFreq = 1 # Forced to 1
+        DeepExVivid = EnableDeepEx  # if EnableDeepEx is true, DeepExVivid is forced to True
+    # ---------------------- START COLORING ------------------------------------
     if EnableDeepEx and DeepExMethod in (0, 1, 2, 5, 6):
 
         havc_utils._check_input(DeepExOnlyRefFrames, ScFrameDir, DeepExMethod, ScThreshold, ScMinFreq, DeepExRefMerge)
@@ -520,7 +598,7 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
         if ScThreshold is not None and 0 < ScThreshold < 1:
             ref_tresh = ScThreshold
         else:
-            ref_tresh = DEF_THRESHOLD
+            ref_tresh = constants.DEF_THRESHOLD
 
         if DeepExMethod in (5, 6):
             clip_ref = HAVC_read_video(source=ScFrameDir, fpsnum=clip.fps_num, fpsden=clip.fps_den)
@@ -542,16 +620,21 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
                 clip_ref = HAVC_colorizer(clip, method=dd_method, mweight=ddcolor_weight,
                                       deoldify_p=[do_model, deoldify_rf, 1.0, 0.0],
                                       ddcolor_p=[dd_model, ddcolor_rf, 1.0, 0.0, enable_fp16],
-                                      ddtweak=dd_tweak, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range],
+                                      ddtweak=dd_tweak, ddtweak_p=[constants.DEF_TWEAK_p, hue_range],
                                       sc_threshold=ScThreshold, sc_tht_offset=ScThtOffset, sc_min_freq=ScMinFreq,
                                       sc_min_int=ScMinInt, sc_tht_ssim=ScThtSSIM, sc_normalize=ScNormalize,
-                                      sc_debug=sc_debug)
+                                      debug_level=debug_level)
             else:
                 clip_ref = HAVC_colorizer_fast(clip, method=dd_method, mweight=ddcolor_weight,
                                     deoldify_p=[do_model, deoldify_rf, 1.0, 0.0],
                                     ddcolor_p=[dd_model, ddcolor_rf, 1.0, 0.0, enable_fp16],
-                                    ddtweak=dd_tweak, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range],
-                                    frame_interp=FrameInterp, chroma_adjust=chroma_adjust, sc_debug=sc_debug)
+                                    ddtweak=dd_tweak, ddtweak_p=[constants.DEF_TWEAK_p, hue_range],
+                                    frame_interp=FrameInterp, chroma_adjust=chroma_adjust, debug_level=debug_level)
+            if color_temp > 0:
+                clip_ref = HAVC_cmnet2(clip=clip, clip_ref=clip_ref, render_speed='Medium', render_vivid=True,
+                                       ref_merge=color_temp, dark=True, dark_p=[0.2, 0.8], ref_thresh=0.10,
+                                       encode_mode=0, max_memory_frames=0, ref_freq=0, ref_norm=True, smooth=True,
+                                       smooth_p=[0.3, 0.7, 0.9, 0.0, "none"], colormap=chroma_adjust)
 
             clip_colored = HAVC_deepex(clip=clip, clip_ref=clip_ref, method=DeepExMethod, render_speed=DeepExPreset,
                                        render_vivid=DeepExVivid, ref_merge=DeepExRefMerge, sc_framedir=ScFrameDir,
@@ -586,17 +669,24 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
             clip_colored = HAVC_colorizer(clip, method=dd_method, mweight=ddcolor_weight,
                                       deoldify_p=[do_model, deoldify_rf, 1.0, 0.0],
                                       ddcolor_p=[dd_model, ddcolor_rf, 1.0, 0.0, enable_fp16],
-                                      ddtweak=dd_tweak, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range])
+                                      ddtweak=dd_tweak, ddtweak_p=[constants.DEF_TWEAK_p, hue_range])
+            clip_colored = clip_colored.std.SetFrameProp(prop="sc_threshold", floatval=0.1)
+            clip_colored = clip_colored.std.SetFrameProp(prop="sc_frequency", intval=1)
         else:
             clip_colored = HAVC_colorizer_fast(clip, method=dd_method, mweight=ddcolor_weight,
                                       deoldify_p=[do_model, deoldify_rf, 1.0, 0.0],
                                       ddcolor_p=[dd_model, ddcolor_rf, 1.0, 0.0, enable_fp16],
-                                      ddtweak=dd_tweak, ddtweak_p=[0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, hue_range],
-                                      frame_interp=FrameInterp, chroma_adjust=chroma_adjust, sc_debug=sc_debug)
+                                      ddtweak=dd_tweak, ddtweak_p=[constants.DEF_TWEAK_p, hue_range],
+                                      frame_interp=FrameInterp, chroma_adjust=chroma_adjust, debug_level=debug_level)
+        if color_temp > 0:
+            clip_colored = HAVC_cmnet2(clip=clip, clip_ref=clip_colored, render_speed='Medium', render_vivid=True,
+                                   ref_merge=color_temp, dark=True, dark_p=[0.2, 0.8], ref_thresh=0.10,
+                                   encode_mode=0, max_memory_frames=0, ref_freq=0, ref_norm=True, smooth=True,
+                                   smooth_p=[0.3, 0.7, 0.9, 0.0, "none"], colormap=chroma_adjust)
 
-        if speed_id > 5:  # 'faster', 'veryfast' -> is used only colormap
+        if speed_id > 4:  # 'fast', 'faster', 'veryfast' -> is used only colormap
             clip_colored = HAVC_stabilizer(clip_colored, colormap=chroma_adjust)
-        elif speed_id > 3:  # 'medium', 'fast' -> are used all the filters except hue_range2 and stab (deoldify only)
+        elif speed_id > 2:  # 'slow', 'medium' -> are used all the filters except hue_range2 and stab (deoldify only)
             if dd_method == 0:
                 clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8], colormap=chroma_adjust,
                                                smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
@@ -605,15 +695,12 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
                 clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8], colormap=chroma_adjust,
                                                smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
                                                stab=stab_enabled, stab_p=[5, 'A', 1, 15, 0.2, 0.8])
-        else:  # 'placebo', 'veryslow', 'slower', 'slow' -> are used all the filters
+        else:  # 'placebo', 'veryslow', 'slower' -> are used all the filters
             clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8], colormap=chroma_adjust,
                                            smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
                                            stab=stab_enabled, stab_p=[5, 'A', 1, 15, 0.2, 0.8, hue_range2])
 
-    if BlackWhiteTune.lower() != 'none':
-        clip_colored = HAVC_bw_tune(clip_colored, BlackWhiteTune, BlackWhiteMode, BlackWhiteBlend)
-
-    return clip_colored
+    return restore_format(clip_colored, orig_fmt)
 
 """
 ------------------------------------------------------------------------------- 
@@ -621,8 +708,8 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
-Color post process  filter for restoring the correct colors for clip previously colored 
-using: DDColor & Zhang's models. 
+Color post process  filter for restoring the correct colors for clip previously 
+colored using: DDColor & Zhang's models. 
 """
 
 def HAVC_rgb_denoise(clip: vs.VideoNode, denoise_levels: list[float] = (0.4, 0.3),
@@ -630,7 +717,7 @@ def HAVC_rgb_denoise(clip: vs.VideoNode, denoise_levels: list[float] = (0.4, 0.3
     """HAVC Color Post Processing function for restoring the correct colors for clip previously colored
        using: DDColor & Zhang's models.
 
-       :param clip:                clip to process, only RGB24 format is supported.
+       :param clip:                clip to process, any format is supported.
        :param denoise_levels:      denoise level for colors and contrast
                                        [0] color denoise, range[0,1] (default = 0.4)
                                        [1] contrast denoise, range[0,1] (default = 0.3)
@@ -641,23 +728,11 @@ def HAVC_rgb_denoise(clip: vs.VideoNode, denoise_levels: list[float] = (0.4, 0.3
 
     """
 
-    orig_fmt_id = clip.format.id
-    orig_fmt_family = clip.format.color_family
-
-    if clip.format.id != vs.RGB24:
-        # clip not in RGB24 format, it will be converted
-        if clip.format.color_family == vs.YUV:
-            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
-                                       dither_type="error_diffusion")
-        else:
-            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
+    clip, orig_fmt = convert_format_RGB24(clip)
 
     clip = rgb_denoise(clip, denoise_levels, rgb_factors)
 
-    if orig_fmt_id != vs.RGB24 and orig_fmt_family == vs.YUV:
-        clip = core.resize.Bicubic(clip=clip, format=orig_fmt_id, matrix_s="709", range_in_s="full", range_s="limited")
-
-    return clip
+    return restore_format(clip, orig_fmt)
 
 """
 ------------------------------------------------------------------------------- 
@@ -671,11 +746,12 @@ It is a wrapper to HAVC_main_restore()
 """
 
 def HAVC_ColorAdjust(clip: vs.VideoNode, BlackWhiteTune: str = 'Light', BlackWhiteMode: int = 0,
-                        BlackWhiteBlend: bool = True, ReColor: bool = False, Strength: int = 0, ScThreshold: float = 0.10,
-                        ScNormalize: bool = True, DeepExVivid: bool = True,  ScMinFreq: int = 0) -> vs.VideoNode:
+                     BlackWhiteBlend: bool = True, ReColor: bool = True, Strength: int = 0, ScThreshold: float = 0.10,
+                     ScNormalize: bool = True, DeepExVivid: bool = True,  ScMinFreq: int = 0,
+                     chroma_resize: bool = False) -> vs.VideoNode:
     """HAVC Color Post Processing function
 
-        :param clip:               clip to process, only RGB24 format is supported.
+        :param clip:               clip to process any clip format is supported.
         :param BlackWhiteTune:     This parameter allows to improve contrast and luminosity of frames colored with HAVC.
                                    Allowed values are:
                                         'None',
@@ -684,16 +760,18 @@ def HAVC_ColorAdjust(clip: vs.VideoNode, BlackWhiteTune: str = 'Light', BlackWhi
                                         'Strong'
         :param BlackWhiteMode:     Method used by BlackWhiteTune to perform colors adjustments.
                                    Allowed values are:
-                                          0 : Apply Contrast Limited Adaptive Histogram Equalization on Luma (default)
-                                          1 : Apply Simple Histogram Equalization on all RGB channels
-                                          2 : Apply CLAHE on all RGB channels
-                                          3 : method=0 and method=1 are merged
-                                          4 : Automatic brightness and contrast optimization with ScaleAbs
-                                          5 : Automatic brightness and contrast optimization with saturation arithmetic.
+                                        0 : CLAHE (luma) (default)
+                                        1 : Simple (RGB)
+                                        2 : CLAHE (RGB)
+                                        3 : CLAHE (luma) + Simple (RGB)
+                                        4 : ScaleAbs – LUT
+                                        5 : Multi-Scale Retinex (HAVC)
+                                        6 : Multi-Scale Retinex (B&W)
         :param BlackWhiteBlend:    If enabled the frames adjusted with BlackWhiteTune will be blended with the original frames.
+                                   Default = True 
         :param ReColor:            If True the clip will be re-colored with ColorMNet to enforce color temporal
                                    stabilization. To be used if the clip was colored using an AI automatic video
-                                   colorizer like HAVC. Default = False
+                                   colorizer like HAVC. Default = True
         :param Strength:           Color temporal stabilization strength, using high level the colors will be more
                                    stable but will be also more washed.
                                    Allowed values are:
@@ -713,7 +791,12 @@ def HAVC_ColorAdjust(clip: vs.VideoNode, BlackWhiteTune: str = 'Light', BlackWhi
                                    range [True, False], default: True
         :param ScMinFreq:          if > 0 will be generated at least a reference frame every "ScMinFreq" frames.
                                    range [0-1500], default: 0.
+        :param chroma_resize:      If True, the clip will be downscaled before applying the filter to speed up
+                                   the processing, default = False
     """
+    # disable packages warnings
+    disable_warnings()
+
     DeepExModel: int = 0
     DeepExRefMerge: int = 1 + min(max(4 - Strength, 0), 4)
     DeepExPreset: str = 'medium'
@@ -727,14 +810,7 @@ def HAVC_ColorAdjust(clip: vs.VideoNode, BlackWhiteTune: str = 'Light', BlackWhi
     if not isinstance(clip, vs.VideoNode):
         HAVC_LogMessage(MessageType.EXCEPTION, "ColorPostProcessing: this is not a clip")
 
-    if clip.format.id != vs.RGB24:
-        HAVC_LogMessage(MessageType.WARNING, "ColorPostProcessing: clip not in RGB24 format, it will be converted")
-        # clip not in RGB24 format, it will be converted
-        if clip.format.color_family == "YUV":
-            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
-                                       dither_type="error_diffusion")
-        else:
-            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
+    clip, orig_fmt = convert_format_RGB24(clip, chroma_resize=chroma_resize)
 
     if ReColor:
         clip_colored = clip
@@ -743,12 +819,75 @@ def HAVC_ColorAdjust(clip: vs.VideoNode, BlackWhiteTune: str = 'Light', BlackWhi
     else:
         clip_colored = None
 
+    tn_id = _get_tune_id(BlackWhiteTune)
+    if tn_id != 0 and BlackWhiteMode in (4, 6):
+        # redefine color mapping
+        bw_tune = 'light'
+        bw_mode = 4
+    else:
+        bw_tune = BlackWhiteTune
+        bw_mode = BlackWhiteMode
+
     clip_restored = HAVC_main_restore(clip, clip_colored, DeepExPreset, DeepExModel, DeepExRefMerge,
                                       ScThreshold, ScMinFreq, ScNormalize, DeepExMaxMemFrames, DeepExMethod,
-                                      DeepExVivid, DeepExEncMode, BlackWhiteTune=BlackWhiteTune,
-                                      BlackWhiteMode=BlackWhiteMode, BlackWhiteBlend=BlackWhiteBlend)
+                                      DeepExVivid, DeepExEncMode, BlackWhiteTune=bw_tune,
+                                      BlackWhiteMode=bw_mode, BlackWhiteBlend=BlackWhiteBlend)
 
-    return clip_restored
+    if tn_id != 0 and BlackWhiteMode in (4, 6):
+        # apply new color mapping
+        if BlackWhiteMode == 4 and tn_id == 1:
+            clip_restored = vs_timecube(clip_restored, strength=0.6, lut_effect=constants.DEF_LUT_Forest_Film)
+        elif BlackWhiteMode == 4 and tn_id == 2:
+            clip_restored = vs_timecube(clip_restored, strength=0.6, lut_effect=constants.DEF_LUT_City_Skyline)
+        elif BlackWhiteMode == 4 and tn_id == 3:
+            clip_restored = vs_timecube(clip_restored, strength=0.8, lut_effect=constants.DEF_LUT_Exploration)
+        if BlackWhiteMode == 6 and tn_id == 1:
+            clip_restored = vs_timecube(clip_restored, strength=0.6, lut_effect=constants.DEF_LUT_FUJ_Film)
+        elif BlackWhiteMode == 6 and tn_id == 2:
+            clip_restored = vs_timecube(clip_restored, strength=0.4, lut_effect=constants.DEF_LUT_Amber_Light)
+        elif BlackWhiteMode == 6 and tn_id == 3:
+            clip_restored = vs_timecube(clip_restored, strength=0.5, lut_effect=constants.DEF_LUT_Warm_Haze)
+
+    if ReColor:
+        clip_restored = vs_reduce_flicker(clip_restored)
+
+    return restore_format(clip_restored, orig_fmt)
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+Wrapper to the patched filter Retinex MSRCP 
+"""
+def HAVC_retinex(clip: vs.VideoNode, luma_dark: float = constants.DEF_RETINEX_DARK, luma_bright: float = constants.DEF_RETINEX_BRIGHT,
+                 sigmas: list[float]=(25, 80, 250), range_tv_in: bool = True, range_tv_out: bool=True,
+                 blend: bool = False) -> vs.VideoNode:
+    """patched filter Retinex MSRCP to avoid artifacts on dark/bright frames
+
+           :param clip:           clip to process, any clip format is supported.
+           :param luma_dark:      luma level to identify dark frames, range [0-1], default = 0.15
+           :param luma_bright:    luma level to identify bright frames, range [0-1], default = 0.85
+           :param sigmas:         sigma of Gaussian function to apply Gaussian filtering.
+                                  Assign an array of multiple sigma to apply MSR. Default = [25, 80, 250]
+                                  Basically, in SSR(Single Scale Retinex), small sigma result in stronger dynamic
+                                  range compression and local contrast enhancement, while large sigma result in
+                                  better color rendition. To afford an acceptable trade-off between these features,
+                                  MSR combines different scales to compute the final Retinex output.
+           :param range_tv_in:    Determine the value range of input clip. True means full range/PC range,
+                                  and False means limited range/TV range. Default = True
+           :param range_tv_out:   Determine the value range of output clip. True means full range/PC range,
+                                  and False means limited range/TV range. Default = True
+           :param blend:          If True the dark frames of filtered clip will be blended with the input clip.
+                                  Default = False
+    """
+
+    clip, orig_fmt = convert_format_RGB24(clip)
+
+    clip = vs_retinex(clip, luma_dark, luma_bright, sigmas, range_tv_in, range_tv_out, blend, fast_mode=True)
+
+    return restore_format(clip, orig_fmt)
 
 """
 ------------------------------------------------------------------------------- 
@@ -761,14 +900,14 @@ by improving contrast and luminosity of colored frames
 with HAVC.
 """
 
-def HAVC_main_restore(clip: vs.VideoNode, clip_colored: vs.VideoNode, DeepExPreset: str = 'medium',
-                      DeepExModel: int = 0, DeepExRefMerge: int = 0, ScThreshold: float = DEF_THRESHOLD,
+def HAVC_main_restore(clip: vs.VideoNode, clip_colored: vs.VideoNode | None, DeepExPreset: str = 'medium',
+                      DeepExModel: int = 0, DeepExRefMerge: int = 0, ScThreshold: float = constants.DEF_THRESHOLD,
                       ScMinFreq: int = 0, ScNormalize: bool = False, DeepExMaxMemFrames: int = 0, DeepExMethod: int = 5,
                       DeepExVivid: bool = True, DeepExEncMode: int = 0, BlackWhiteTune: str = 'Medium',
-                      BlackWhiteMode: int = 0, BlackWhiteBlend: bool = True) -> vs.VideoNode:
+                      BlackWhiteMode: int = 0, BlackWhiteBlend: bool = True, chroma_resize: bool = False) -> vs.VideoNode:
     """Main HAVC restoring function
 
-        :param clip:               clip to process, only RGB24 format is supported.
+        :param clip:               clip to process, any clip format is supported.
         :param clip_colored:       Clip containing the colored frames to be restored
         :param BlackWhiteTune:     This parameter allows to improve contrast and luminosity of frames colored with HAVC.
                                    Allowed values are:
@@ -778,12 +917,13 @@ def HAVC_main_restore(clip: vs.VideoNode, clip_colored: vs.VideoNode, DeepExPres
                                         'Strong'
         :param BlackWhiteMode:     Method used by BlackWhiteTune to perform colors adjustments.
                                    Allowed values are:
-                                          0 : Apply Contrast Limited Adaptive Histogram Equalization on Luma (default)
-                                          1 : Apply Simple Histogram Equalization on all RGB channels
-                                          2 : Apply CLAHE on all RGB channels
-                                          3 : method=0 and method=1 are merged
-                                          4 : Automatic brightness and contrast optimization with ScaleAbs
-                                          5 : Automatic brightness and contrast optimization with saturation arithmetic
+                                        0 : CLAHE (luma) (default)
+                                        1 : Simple (RGB)
+                                        2 : CLAHE (RGB)
+                                        3 : CLAHE (luma) + Simple (RGB)
+                                        4 : ScaleAbs – LUT
+                                        5 : Multi-Scale Retinex (HAVC)
+                                        6 : Multi-Scale Retinex (B&W)
         :param BlackWhiteBlend:    If enabled the frames adjusted with BlackWhiteTune will be blended with the original frames.
         :param DeepExMethod:       Method to use to generate reference frames.
                                             0 = HAVC same as video (default)
@@ -855,33 +995,51 @@ def HAVC_main_restore(clip: vs.VideoNode, clip_colored: vs.VideoNode, DeepExPres
                                    range [0-1500], default: 0.
         :param ScNormalize:        If true the B&W frames are normalized before use misc.SCDetect(), the normalization will
                                    increase the sensitivity to smooth scene changes, range [True, False], default: False
+        :param chroma_resize:      If True, the clip will be downscaled before applying the filter to speed up the processing.
     """
 
+    clip, orig_fmt = convert_format_RGB24(clip, chroma_resize=chroma_resize)
+
+    BWTuneRetinex: bool = BlackWhiteTune.lower() != "none" and BlackWhiteMode == 6
+
     if not clip_colored == None:
+        if BWTuneRetinex:
+            clip = HAVC_bw_tune(clip, bw_tune=BlackWhiteTune, bw_method=5, luma_blend=BlackWhiteBlend)
+            BlackWhiteTune = "none"
+            BlackWhiteMode = 5
         clip = HAVC_restore_video(clip, clip_colored, method=DeepExMethod, render_speed=DeepExPreset, ex_model=DeepExModel,
                        ref_merge=DeepExRefMerge, ref_thresh=ScThreshold, ref_freq=ScMinFreq,
                        max_memory_frames=DeepExMaxMemFrames, render_vivid=DeepExVivid,
                        encode_mode=DeepExEncMode, ref_norm=ScNormalize)
-        clip = HAVC_adjust_rgb(clip, strength=0.5, gamma=[1.0, 1.0, 0.85])
-        clip = HAVC_tweak(clip, hue=5, sat=1.05, bright=0, cont=1.0)
-        if BlackWhiteTune.lower() == 'none':
-            return clip
+        if BWTuneRetinex:
+            clip = HAVC_tweak(clip, hue=5.0, sat=0.95, bright=0, cont=0.95, gamma=0.95)
+        elif BlackWhiteTune.lower() != "none":
+            clip = HAVC_adjust_rgb(clip, strength=0.5, gamma=[1.0, 1.0, 0.95])
+            clip = HAVC_tweak(clip, hue=5, sat=1.05, bright=0, cont=1.0)
+            return restore_format(clip, orig_fmt)
     # ------------------------------------------------------------------------
-    i = BlackWhiteMode
-    cont = [1.0, 0.95, 1.0, 0.95, 0.95, 1.0]
-    hue = [-10.0, -10.0, -10.0, -10.0, -10.0, -10.0]
-    sat = [1.10, 1.05, 1.10, 1.10, 1.05, 1.10]
-    bright = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    if BlackWhiteTune.lower() == 'light':
-        gamma = [1.0, 0.95, 0.95, 0.95, 0.95, 0.95]
+    if BlackWhiteTune.lower() == 'none':
+        return restore_format(clip, orig_fmt)
     else:
-        gamma = [1.0, 0.90, 0.90, 0.90, 0.90, 0.90]
+        BlackWhiteMode = min(BlackWhiteMode, 5)
 
-    clip = HAVC_bw_tune(clip, BlackWhiteTune, i, BlackWhiteBlend)
-    clip = HAVC_tweak(clip, hue[i], sat[i], bright[i], cont[i], gamma[i])
+    i = BlackWhiteMode
+    cont = [1.0, 0.95, 1.0, 0.95, 0.95, 0.90]
+    hue = [-10.0, -10.0, -10.0, -10.0, -10.0, -5.0]
+    sat = [1.10, 1.05, 1.10, 1.10, 0.95, 0.95]
+    bright = [0.0, 0.0, 0.0, 0.0, 0.0, -1.0]
 
-    return clip
+    if BlackWhiteTune.lower() == 'light':
+        gamma = [1.0, 0.98, 0.98, 0.98, 0.98, 0.95]
+    else:
+        gamma = [1.0, 0.95, 0.95, 0.95, 0.95, 0.90]
 
+    clip = HAVC_bw_tune(clip, BlackWhiteTune, i, BlackWhiteBlend, True)
+
+    if BlackWhiteMode < 4:  # Skip Retinex, ScaleAbs
+        clip = HAVC_tweak(clip, hue[i], sat[i], bright[i], cont[i], gamma[i])
+
+    return restore_format(clip, orig_fmt)
 
 """
 ------------------------------------------------------------------------------- 
@@ -895,39 +1053,44 @@ with HAVC.
 
 
 def HAVC_bw_tune(clip: vs.VideoNode = None, bw_tune: str = 'Light', bw_method: int = 0,
-                 luma_blend: bool = True, range_tv: bool = True) -> vs.VideoNode:
+                 luma_blend: bool = True, range_tv: bool = True, chroma_resize: bool = False) -> vs.VideoNode:
     """Post process filter for improving colors and contrast/luminosity of colored clips with HAVC
 
-    :param clip:       Clip to process. Only RGB24 format is supported.
-    :param bw_tune:    This parameter allows to improve contrast and luminosity of input clip colored with HAVC.
-                       Allowed values are:
+    :param clip:          Clip to process, any clip format is supported.
+    :param bw_tune:       This parameter allows to improve contrast and luminosity of input clip colored with HAVC.
+                          Allowed values are:
                               'None'
                               'Light', (default)
                               'Medium', 
                               'Strong'
-    :param bw_method:  Method used to perform color adjustments.
-                       Allowed values are:
-                               0 : Apply Contrast Limited Adaptive Histogram Equalization on Luma [41.5 fps] (default)
-                               1 : Apply Simple Histogram Equalization on all RGB channels [54.5 fps]
-                               2 : Apply CLAHE on all RGB channels [38.5 fps]
-                               3 : method=1 and method=4 are merged [34.5]
-                               4 : Automatic brightness and contrast optimization with ScaleAbs [51.5 fps]
-                               5 : Automatic brightness and contrast optimization with saturation arithmetic [22.5 fps]
-    :param luma_blend: If enabled the equalized image is blended with the original image, darker is the image and more
-                       weight will be assigned to the original image. default = True
-    :param range_tv:   If True, perform the color adjustments on limited TV range (the filter works better in TV range).
+    :param bw_method:     Method used to perform color adjustments.
+                          Allowed values are:
+                                0 : CLAHE (luma) (default)
+                                1 : Simple (RGB)
+                                2 : CLAHE (RGB)
+                                3 : CLAHE (luma) + Simple (RGB)
+                                4 : ScaleAbs – LUT
+                                5 : Multi-Scale Retinex (HAVC)
+    :param luma_blend:    If enabled the equalized image is blended with the original image, darker is the image and more
+                          weight will be assigned to the original image. default = True
+    :param range_tv:      If True, perform the color adjustments on limited TV range (the filter works better in TV range).
+    :param chroma_resize: If True, the clip will be downscaled before applying the filter to speed up the processing.
     """
 
-    if not isinstance(clip, vs.VideoNode):
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_bw_tune: this is not a clip")
+    clip, orig_fmt = convert_format_RGB24(clip, chroma_resize=chroma_resize)
 
     bw_tune_p = bw_tune.lower()
     bw_tune = ['none', 'light', 'medium', 'strong']
     b_strength = [0.0, 0.30, 0.40, 0.50]
-    w_strength = [0.0, 0.40, 0.50, 0.60]
-    r_factor = [1.0, 0.95, 0.92, 0.90]
-    g_factor = [1.0, 1.05, 1.08, 1.10]
+    w_strength = [0.0, 0.30, 0.40, 0.50]
+    r_factor = [1.0, 0.96, 0.94, 0.92]
+    g_factor = [1.0, 1.03, 1.05, 1.08]
     b_factor = [1.0, 1.0, 1.0, 1.0]
+
+    bw_method = min(5, bw_method)
+
+    if bw_method == 5:
+        b_strength = [0.0, 0.98, 0.99, 1.0]
 
     bw_id = 0
     try:
@@ -947,15 +1110,17 @@ def HAVC_bw_tune(clip: vs.VideoNode = None, bw_tune: str = 'Light', bw_method: i
         clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_in_s="full", range_s="limited")
 
     # step #1 : rgb colors are normalized and changed using rgb factors (this will change also the contrast/luminosity)
-    clip = rgb_balance(clip=clip, strength=w_strength[bw_id], rgb_factor=[r, g, b])
+    if bw_method < 4: # Skip Retinex, ScaleAbs
+        clip = rgb_balance(clip=clip, strength=w_strength[bw_id], rgb_factor=[r, g, b])
     # step #2 : the contrast/luminosity previously changed are adjusted/fixed using histogram equalization
-    clip = rgb_equalizer(clip=clip, method=bw_method, strength=b_strength[bw_id], luma_blend=luma_blend, range_tv=range_tv)
+    clip = rgb_equalizer(clip=clip, method=bw_method, strength=b_strength[bw_id], luma_blend=luma_blend,
+                         range_tv=range_tv)
 
     if range_tv:
         clip = clip.std.Levels(min_in=16, max_in=235, min_out=0, max_out=255)
         clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_in_s="limited", range_s="full")
 
-    return clip
+    return restore_format(clip, orig_fmt)
 
 
 def HAVC_adjust_rgb(clip: vs.VideoNode = None, strength: float = 0.0, factor: list = (1.0, 1.0, 1.0),
@@ -963,7 +1128,7 @@ def HAVC_adjust_rgb(clip: vs.VideoNode = None, strength: float = 0.0, factor: li
     """Utility function to change the color and luminance of RGB clip.
        Gain, bias (offset) and gamma can be set independently on each channel.
 
-       :param clip:         Clip to process. Only RGB24 format is supported.
+       :param clip:         Clip to process, any format is supported.
                             RGB adjustments.
        :param strength:     This parameter allows to control the strength of the RGB normalization, strength=0 is
                             equivalent to no normalization, while with strength=1 will be applied 100% normalization.
@@ -980,11 +1145,7 @@ def HAVC_adjust_rgb(clip: vs.VideoNode = None, strength: float = 0.0, factor: li
                             pixel values and gg=0.8 will darken the green pixel values.
     """
 
-    if not isinstance(clip, vs.VideoNode):
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_adjust_rgb: this is not a clip")
-
-    if clip.format.id != vs.RGB24:
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_adjust_rgb: clip not in RGB24 format.")
+    clip, orig_fmt = convert_format_RGB24(clip)
 
     if strength == 1:
         clip = vs_rgb_normalize(clip)
@@ -994,14 +1155,14 @@ def HAVC_adjust_rgb(clip: vs.VideoNode = None, strength: float = 0.0, factor: li
 
     clip_new = havc_utils.adjust_rgb(clip, factor, bias, gamma)
 
-    return clip_new
+    return restore_format(clip_new, orig_fmt)
 
 
 def HAVC_tweak(clip: vs.VideoNode = None, hue: float = 0, sat: float = 1, bright: float = 0,
                cont: float = 1, gamma: float = 1) -> vs.VideoNode:
     """Pre/post - process filter for adjust: hue, saturation, brightness, contrast and gamma of a video clip
 
-        :param clip:        Clip to process. Only RGB24 format is supported.
+        :param clip:        Clip to process, any format is supported.
         :param hue:         Adjust the color hue of the image.
                                  hue>0.0 shifts the image towards red.
                                  hue<0.0 shifts the image towards green.
@@ -1024,12 +1185,11 @@ def HAVC_tweak(clip: vs.VideoNode = None, hue: float = 0, sat: float = 1, bright
                             Range -10.0 to 10.0, default = 1.0
     """
 
-    if not isinstance(clip, vs.VideoNode):
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_Tweak: this is not a clip")
+    clip, orig_fmt = convert_format_RGB24(clip)
 
     clip_new = vs_tweak(clip, hue=hue, sat=sat, bright=bright, cont=cont, gamma=gamma)
 
-    return clip_new
+    return restore_format(clip_new, orig_fmt)
 
 
 """
@@ -1050,7 +1210,7 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
                 max_memory_frames: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
     """Towards Video-Realistic Colorization via Exemplar-based framework
 
-    :param clip:                Clip to process. Only RGB24 format is supported
+    :param clip:                Clip to process, any format is supported
     :param clip_ref:            Clip containing the reference frames (necessary if method=0,1,2,5,6)
     :param method:              Method to use to generate reference frames (RF).
                                         0 = HAVC same as video (default)
@@ -1153,11 +1313,10 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
     # disable packages warnings
     disable_warnings()
 
-    if not isinstance(clip, vs.VideoNode):
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: this is not a clip")
-
     if not torch.cuda.is_available():
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: CUDA is not available")
+
+    clip, orig_fmt = convert_format_RGB24(clip)
 
     if only_ref_frames and (sc_framedir is None):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: only_ref_frames is enabled but sc_framedir is unset")
@@ -1175,23 +1334,7 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
     if method in (0, 1, 2, 5, 6) and (clip_ref is None):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: method in (0, 1, 2, 5, 6) but clip_ref is unset")
 
-    if clip.format.id != vs.RGB24:
-        HAVC_LogMessage(MessageType.WARNING, "HAVC_deepex: clip not in RGB24 format, it will be converted")
-        # clip not in RGB24 format, it will be converted
-        if clip.format.color_family == "YUV":
-            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
-                                       dither_type="error_diffusion")
-        else:
-            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
-
-    if clip_ref is not None and clip_ref.format.id != vs.RGB24:
-        HAVC_LogMessage(MessageType.WARNING, "HAVC_deepex: clip_ref not in RGB24 format, it will be converted")
-        # clip_ref not in RGB24 format, it will be converted
-        if clip_ref.format.color_family == "YUV":
-            clip_ref = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
-                                           dither_type="error_diffusion")
-        else:
-            clip_ref = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
+    clip_ref, orig_fmt_r = convert_format_RGB24(clip_ref)
 
     if method not in range(7):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: method must be in range [0-6]")
@@ -1228,8 +1371,9 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
 
     # SPECIAL MANAGEMENT OF METHOD=(5,6)
     if method in (5, 6):
-        return HAVC_restore_video(clip, clip_ref, method, render_speed, ex_model, ref_merge, ref_weight, ref_thresh,
-                                  ref_freq, ref_norm, max_memory_frames, render_vivid, encode_mode)
+        clip_restored = HAVC_restore_video(clip, clip_ref, method, render_speed, ex_model, ref_merge, ref_weight,
+                                           ref_thresh, ref_freq, ref_norm, max_memory_frames, render_vivid, encode_mode)
+        return restore_format(clip_restored, orig_fmt)
     # ------------------------------------------------------------------------------------------------------------------
 
     # creates the directory "sc_framedir" and does not raise an exception if the directory already exists
@@ -1269,7 +1413,7 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
         if ref_weight is None:
             ref_weight = refmerge_weight[ref_merge]
         if ref_thresh is None:
-            ref_thresh = DEF_THRESHOLD
+            ref_thresh = constants.DEF_THRESHOLD
         if ref_freq is None or ref_freq == 1:
             ref_freq = 0
         clip_sc = SceneDetect(clip, threshold=ref_thresh, frequency=ref_freq, frame_norm=ref_norm)
@@ -1341,6 +1485,7 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
                 clip_colored = vs_deepremaster(clip, clip_ref, clip_sc, render_vivid=render_vivid,
                                                ref_weight=ref_weight, memory_size=max_memory_frames)
             case _:
+                clip_colored = None
                 HAVC_LogMessage(MessageType.EXCEPTION, "HybridAVC: unknown exemplar model id: " + str(ex_model))
 
     clip_resized = smc.restore_clip_size(clip_colored)
@@ -1348,10 +1493,230 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
     # restore original resolution details, 5% faster than ShufflePlanes()
     if not (sc_framedir is None) and method == 0 and only_ref_frames:
         # ref frames are saved if sc_framedir is set
-        return vs_sc_recover_clip_luma(clip_orig, clip_resized, scenechange=True, sc_framedir=sc_framedir)
+        clip_new = vs_sc_recover_clip_luma(clip_orig, clip_resized, scenechange=True, sc_framedir=sc_framedir)
     else:
-        return vs_recover_clip_luma(clip_orig, clip_resized)
+        clip_new =  vs_recover_clip_luma(clip_orig, clip_resized)
 
+    return restore_format(clip_new, orig_fmt)
+
+def HAVC_cmnet2(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, render_speed: str = 'medium',
+                render_vivid: bool = True, ref_merge: int = 0, ref_norm: bool = False, dark: bool = False,
+                dark_p: list = (0.2, 0.8), smooth: bool = False, smooth_p: list = (0.3, 0.7, 0.9, 0.0, "none"),
+                colormap: str = "none", ref_weight: float = None, ref_thresh: float = None, ref_freq: int = None,
+                encode_mode: int = 0, max_memory_frames: int = 0, torch_dir: str = model_dir) -> vs.VideoNode:
+    """Colorment stabilization filter
+
+    :param clip:                Clip to process, any clip format is supported
+    :param clip_ref:            Clip containing the reference frames (necessary if method=0,1,2,5,6)
+    :param render_speed:        Preset to control the render method and speed:
+                                Allowed values are:
+                                        'Fast'   (colors are more washed out)
+                                        'Medium' (colors are a little washed out)
+                                        'Slow'   (colors are a little more vivid)
+    :param render_vivid:        Depending on selected ex_model, if enabled (True), the frames memory is
+                                reset at every reference frame update, range [True, False]
+    :param ref_merge:           Method used by DeepEx to merge the reference frames with the frames propagated by DeepEx.
+                                It is applicable only with DeepEx method: 0, 1, 5.
+                                The HAVC reference frames must be produced with frequency = 1.
+                                Allowed values are:
+                                        0 = No RF merge (reference frames can be produced with any frequency)
+                                        1 = RF-Merge VeryLow (reference frames are merged with weight=0.3)
+                                        2 = RF-Merge Low (reference frames are merged with weight=0.4)
+                                        3 = RF-Merge Med (reference frames are merged with weight=0.5)
+                                        4 = RF-Merge High (reference frames are merged with weight=0.6)
+                                        5 = RF-Merge VeryHigh (reference frames are merged with weight=0.7)
+    :param ref_weight:          If (ref_merge > 0), represent the weight used to merge the reference frames.
+                                If is not set, is assigned automatically a value depending on ref_merge/method values.
+    :param ref_thresh:          Represent the threshold used to create the reference frames. If is not set, is assigned
+                                automatically a value of 0.10
+    :param ref_freq:            If > 0 will be generated at least a reference frame every "ref_freq" frames.
+                                range [0-1500]. If is not set, is assigned automatically a value depending on
+                                ref_merge/method values.
+    :param ref_norm:            If true the B&W frames are normalized before apply the Scene Detection to generate the
+                                reference frames. The normalization will increase the sensitivity to smooth scene changes,
+                                range [True, False], default: False
+    :param dark:                Enable/disable darkness filter (only on ref-frames), range [True,False]
+    :param dark_p:              Parameters for darken the clip's dark portions, which sometimes are wrongly colored by the color models
+                                      [0] : dark_threshold, luma threshold to select the dark area, range [0.1-0.5] (0.01=1%)
+                                      [1] : dark_amount: amount of desaturation to apply to the dark area, range [0-1]
+                                      [2] : "chroma range" parameter (optional), if="none" is disabled (see the README)
+    :param smooth:              Enable/disable chroma smoothing (only on ref-frames), range [True, False]
+    :param smooth_p:            parameters to adjust the saturation and "vibrancy" of the clip.
+                                      [0] : dark_threshold, luma threshold to select the dark area, range [0-1] (0.01=1%)
+                                      [1] : white_threshold, if > dark_threshold will be applied a gradient till white_threshold, range [0-1] (0.01=1%)
+                                      [2] : dark_sat, amount of de-saturation to apply to the dark area, range [0-1]
+                                      [3] : dark_bright, darkness parameter it used to reduce the "V" component in "HSV" colorspace, range [0, 1]
+                                      [4] : "chroma range" parameter (optional), if="none" is disabled (see the README)
+    :param colormap:            Direct hue/color mapping (only on ref-frames), without luma filtering, using the "chroma adjustment"
+                                parameter, if="none" is disabled.
+    :param encode_mode:         Parameter used by ColorMNet to define the encode mode strategy.
+                                Available values are:
+                                     0: remote encoding. The frames will be colored by a thread outside Vapoursynth.
+                                                         This option don't have any GPU memory limitation and will allow
+                                                         to fully use the long term frame memory.
+                                                         It is the faster encode method (default)
+                                     1: local encoding.  The frames will be colored inside the Vapoursynth environment.
+                                                         In this case the max_memory will be limited by the size of GPU
+                                                         memory (max 15 frames for 24GB GPU).
+                                                         Useful for coloring clips with a lot of smooth transitions,
+                                                         since in this case is better to use a short frame memory or
+                                                         the Deep-Exemplar model, which is faster.
+                                     2: remote all-ref   Same as "remote encoding" but all the available reference frames
+                                                         will be used for the inference at the beginning of encoding.
+    :param max_memory_frames:   Parameter used by ColorMNet/DeepRemaster models.
+                                For ColorMNet specify the max number of encoded frames to keep in memory.
+                                Its value depend on encode mode and must be defined manually following the suggested values.
+                                encode_mode=0: there is no memory limit (it could be all the frames in the clip).
+                                Suggested values are:
+                                    min=150, max=10000
+                                If = 0 will be filled with the value of 10000 or the clip length if lower.
+                                encode_mode=1: the max memory frames is limited by available GPU memory.
+                                Suggested values are:
+                                    min=1, max=4    : for 8GB GPU
+                                    min=1, max=8    : for 12GB GPU
+                                    min=1, max=15   : for 24GB GPU
+                                If = 0 will be filled with the max value (depending on total GPU RAM available).
+                                For DeepRemaster represent the number to reference frames to keep in memory.
+                                Suggested values are:
+                                    min=2, max=50
+                                If = 0 will be filled with the value of 20.
+    :param torch_dir:           torch hub dir location, default is model directory, if set to None will switch
+                                to torch cache dir
+    """
+    # disable packages warnings
+    disable_warnings()
+
+    # static variables
+    method: int = 0
+    sc_framedir: str | None = None
+    only_ref_frames: bool = False
+    ex_model: int = 0
+
+    if not torch.cuda.is_available():
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_cmnet2: CUDA is not available")
+
+    clip, orig_fmt = convert_format_RGB24(clip)
+
+    clip_ref, orig_fmt_r = convert_format_RGB24(clip_ref)
+
+    if method not in range(7):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_cmnet2: method must be in range [0-6]")
+
+    if ref_merge not in range(6):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_cmnet2: ref_merge must be in range [0-5]")
+
+    sc_threshold = None
+    sc_frequency = None
+    if method in (0, 1, 2):
+        sc_threshold, sc_frequency = get_sc_props(clip_ref)
+        if sc_threshold == 0 and sc_frequency == 0:
+            HAVC_LogMessage(MessageType.EXCEPTION,
+                            "HAVC_deepex: method in (0, 1, 2) but sc_threshold and sc_frequency are not set")
+        if sc_frequency == 1 and only_ref_frames:
+            HAVC_LogMessage(MessageType.EXCEPTION,
+                            "HAVC_deepex: only_ref_frames is enabled but sc_frequency == 1")
+        if not only_ref_frames and ref_merge > 0 and sc_frequency != 1:
+            HAVC_LogMessage(MessageType.EXCEPTION,
+                            "HAVC_deepex: method in (0, 1, 2) and ref_merge > 0 but sc_frequency != 1")
+
+    if torch_dir is not None:
+        torch.hub.set_dir(torch_dir)
+
+    # static params
+    enable_resize = False
+
+    # unpack dark
+    dark_enabled = dark
+    dark_threshold = dark_p[0]
+    dark_amount = dark_p[1]
+    if len(dark_p) > 2:
+        dark_hue_adjust = dark_p[2]
+    else:
+        dark_hue_adjust = 'none'
+
+    # unpack chroma_smoothing
+    chroma_smoothing_enabled = smooth
+    black_threshold = smooth_p[0]
+    white_threshold = smooth_p[1]
+    dark_sat = smooth_p[2]
+    dark_bright = -smooth_p[3]  # change the sign to reduce the bright
+    if len(smooth_p) > 4:
+        chroma_adjust = smooth_p[4]
+    else:
+        chroma_adjust = 'none'
+
+    # define colormap
+    colormap = colormap.lower()
+    colormap_enabled = (colormap != "none" and colormap != "")
+
+    enable_refmerge: bool = (ref_merge > 0 and sc_frequency == 1)
+    refmerge_weight: list[float] = [0.0, 0.2, 0.4, 0.5, 0.6, 0.8]
+    if enable_refmerge:
+        if ref_weight is None:
+            ref_weight = refmerge_weight[ref_merge]
+        if ref_thresh is None:
+            ref_thresh = constants.DEF_THRESHOLD
+        if ref_freq is None or ref_freq == 1:
+            ref_freq = 0
+        clip_sc = SceneDetect(clip, threshold=ref_thresh, frequency=ref_freq, frame_norm=ref_norm)
+        if method in (1, 2) and not (sc_framedir is None) and not only_ref_frames:
+            clip_sc = SceneDetectFromDir(clip_sc, sc_framedir=sc_framedir, merge_ref_frame=True,
+                                         ref_frame_ext=(method == 2))
+    else:
+        ref_weight = 1.0
+        clip_sc = None
+
+    if method != 0 and not (sc_framedir is None):
+        ref_frame_ext = method in (2, 4)
+        merge_ref_frame = method in (1, 2)
+        if method in (1, 2):
+            clip = SceneDetectFromDir(clip_ref, sc_framedir=sc_framedir, merge_ref_frame=merge_ref_frame,
+                                      ref_frame_ext=ref_frame_ext)
+            clip_ref = CopySCDetect(clip_ref, clip)
+        else:
+            clip = SceneDetectFromDir(clip, sc_framedir=sc_framedir, merge_ref_frame=merge_ref_frame,
+                                      ref_frame_ext=ref_frame_ext)
+    else:
+        clip = CopySCDetect(clip, clip_ref)
+
+    clip_orig = clip
+
+    d_size = get_deepex_size(render_speed=render_speed.lower(), enable_resize=enable_resize, ex_model=ex_model)
+    smc = SmartResizeColorizer(clip_size=d_size, ex_model=ex_model)
+    smr = SmartResizeReference(clip_size=d_size, ex_model=ex_model)
+
+    # clip and clip_ref are resized to match the frame size used for inference
+    clip = smc.get_resized_clip(clip)
+    clip_ref = smr.get_resized_clip(clip_ref)
+
+    if colormap_enabled:
+        clip_ref = vs_sc_colormap(clip_ref, colormap=colormap)
+
+    if dark_enabled:
+        clip_ref = vs_sc_dark_tweak(clip_ref, dark_threshold=dark_threshold, dark_amount=dark_amount,
+                                    dark_hue_adjust=dark_hue_adjust.lower())
+
+    if chroma_smoothing_enabled:
+        clip_ref = vs_sc_chroma_bright_tweak(clip_ref, black_threshold=black_threshold, white_threshold=white_threshold,
+                                             dark_sat=dark_sat, dark_bright=dark_bright,
+                                             chroma_adjust=chroma_adjust.lower())
+    ref_same_as_video = False
+
+    clip_colored = vs_colormnet2(clip, clip_ref, clip_sc, image_size=-1, enable_resize=enable_resize,
+                                            encode_mode=encode_mode, max_memory_frames=max_memory_frames,
+                                            frame_propagate=ref_same_as_video, render_vivid=render_vivid,
+                                            ref_weight=ref_weight)
+
+    clip_resized = smc.restore_clip_size(clip_colored)
+
+    # restore original resolution details, 5% faster than ShufflePlanes()
+    if not (sc_framedir is None) and method == 0 and only_ref_frames:
+        # ref frames are saved if sc_framedir is set
+        clip_new = vs_sc_recover_clip_luma(clip_orig, clip_resized, scenechange=True, sc_framedir=sc_framedir)
+    else:
+        clip_new = vs_recover_clip_luma(clip_orig, clip_resized)
+
+    return restore_format(clip_new, orig_fmt)
 
 def HAVC_restore_video(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method: int = 6,
                        render_speed: str = 'medium', ex_model: int = 0, ref_merge: int = 0, ref_weight: float = None,
@@ -1360,7 +1725,7 @@ def HAVC_restore_video(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None,
                        torch_dir: str = model_dir) -> vs.VideoNode:
     """Colorization Function using DeepRemaster/ColorMNet to restore external video provided externally in clip_ref
 
-    :param clip:                Clip to process. Only RGB24 format is supported
+    :param clip:                Clip to process, any format is supported
     :param clip_ref:            Clip containing the reference frames (necessary if method=0,1,2,5,6)
     :param render_speed:        Preset to control the render method and speed:
                                 Allowed values are:
@@ -1441,29 +1806,12 @@ def HAVC_restore_video(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None,
     if method not in (5, 6):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC: Video restore is supported only with methods: 5, 6")
 
-    if not isinstance(clip, vs.VideoNode):
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: this is not a clip")
-
     if not torch.cuda.is_available():
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: CUDA is not available")
 
-    if clip.format.id != vs.RGB24:
-        HAVC_LogMessage(MessageType.WARNING, "HAVC_deepex: clip not in RGB24 format, it will be converted")
-        # clip not in RGB24 format, it will be converted
-        if clip.format.color_family == "YUV":
-            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
-                                       dither_type="error_diffusion")
-        else:
-            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
+    clip, orig_fmt = convert_format_RGB24(clip)
 
-    if clip_ref is not None and clip_ref.format.id != vs.RGB24:
-        HAVC_LogMessage(MessageType.WARNING, "HAVC_deepex: clip_ref not in RGB24 format, it will be converted")
-        # clip_ref not in RGB24 format, it will be converted
-        if clip_ref.format.color_family == "YUV":
-            clip_ref = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
-                                           dither_type="error_diffusion")
-        else:
-            clip_ref = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
+    clip_ref, orig_fmt_r = convert_format_RGB24(clip_ref)
 
     if clip_ref.width != clip.width or clip_ref.height != clip.height:
         clip_ref = vs.core.resize.Spline36(clip=clip_ref, width=clip.width, height=clip.height)
@@ -1475,10 +1823,10 @@ def HAVC_restore_video(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None,
     enable_resize = False
 
     if ref_thresh is None or ref_thresh == 0:
-        ref_thresh = DEF_THRESHOLD
+        ref_thresh = constants.DEF_THRESHOLD
     if ref_freq is None or ref_freq == 0:
         if ex_model == 2:
-            ref_freq = DEF_MIN_FREQ
+            ref_freq = constants.DEF_MIN_FREQ
         else:
             ref_freq = 0
 
@@ -1521,13 +1869,15 @@ def HAVC_restore_video(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None,
             clip_colored = vs_deepremaster(clip, clip_ref, clip_sc, render_vivid=render_vivid, ref_weight=ref_weight,
                                            memory_size=max_memory_frames, ref_frequency=ref_freq)
         case _:
+            clip_colored = None
             HAVC_LogMessage(MessageType.EXCEPTION, "HybridAVC: unknown exemplar model id: " + str(ex_model))
 
     clip_resized = smc.restore_clip_size(clip_colored)
 
     # restore original resolution details, 5% faster than ShufflePlanes()
-    return vs_recover_clip_luma(clip_orig, clip_resized)
+    clip_new = vs_recover_clip_luma(clip_orig, clip_resized)
 
+    return restore_format(clip_new, orig_fmt)
 
 """
 ------------------------------------------------------------------------------- 
@@ -1539,12 +1889,12 @@ coloring function with additional pre-process and post-process filters
 """
 def HAVC_colorizer_fast(
         clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = (0, 24, 1.0, 0.0),
-        ddcolor_p: list = (1, 24, 1.0, 0.0, True), ddtweak: bool = False,
-        ddtweak_p: list = (0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.8,0.1"),
-        frame_interp: int = 5, chroma_adjust: str = "none", sc_debug: bool = False) -> vs.VideoNode:
+        ddcolor_p: list = (1, 24, 1.0, 0.0, True), ddtweak: list[bool] = (False, False, False),
+        ddtweak_p: list = (constants.DEF_TWEAK_p, "300:360|0.8,0.1"), frame_interp: int = 5, chroma_adjust: str = "none",
+        debug_level: int = 0) -> vs.VideoNode:
     """A Deep Learning based project for colorizing and restoring old images and video using Deoldify and DDColor
 
-    :param clip:                clip to process, only RGB24 format is supported
+    :param clip:                clip to process, any format is supported
     :param method:              method used to combine deoldify() with ddcolor() (default = 2):
                                     0 : deoldify only (no merge)
                                     1 : ddcolor only (no merge)
@@ -1577,9 +1927,29 @@ def HAVC_colorizer_fast(
                                         ddcolor() will start to decrease linearly when the luma < 60% till "min_weight".
                                         For alpha=2, begins to decrease quadratically (because luma/luma_threshold < 1).
                                         With this method is suggested a starting weight > 70% (ex. = 80%).
-                                    The methods 3 and 4 are similar to Simple Merge, but before the merge with deoldify()
-                                    the ddcolor() frame is limited in the chroma changes (method 3) or limited based on the luma
-                                    (method 4). The method 5 is a Simple Merge where the weight decrease with luma.
+                                    6 : Chroma Retention Merge:
+                                        Given that the colors provided by deoldify() are more conservative and stable
+                                        than the colors obtained with ddcolor(). This function try to restore the
+                                        colors of gray pixels provide by deoldify() by using the colors provided
+                                        by ddcolor(). The gray pixels are identified by the parameter "tht". Once are
+                                        identified the gray pixels are substituted with the desaturated colors in deoldify(),
+                                        the level of desaturation is identified by the parameter "sat". It is performed
+                                        a "gradient" substitution, i.e. the gray pixels are gradually substituted depending
+                                        on the level of gray gradient. The steepness of gradient curve is controlled by
+                                        the parameter "alpha". Optionally is possible to resize the frame before the filter
+                                        application to speed up the filter by setting True the parameter "chroma_resize".
+                                     7 : ChromaBound Adaptive
+                                        Adaptive version of Constrained-Chroma. In this version the chroma tolerance is
+                                        adaptive, i.e., it is applied an approach that will allow more color variation
+                                        in textured/complex regions and less in smooth areas. The texture strength is
+                                        computed via Laplacian and chroma tolerance is controlled by the following
+                                        parameters:
+                                              [2] base_tol: int = 20,  # Base chroma tolerance (smooth areas)
+                                              [3] max_extra: int = 24,  # Extra tolerance for textured areas
+                                    The methods 3, 4 and 7 are similar to Simple Merge, but before the merge with clipa
+                                    the clipb frame is limited in the chroma changes (method 3, 7) or limited based
+                                    on theluma (method 4). The method 5 is a Simple Merge where the weight decrease
+                                    with luma.
     :param mweight:             weight given to ddcolor's clip in all merge methods, range [0-1] (0.01=1%)
     :param deoldify_p:          parameters for deoldify():
                                    [0] deoldify model to use (default = 0):
@@ -1624,41 +1994,44 @@ def HAVC_colorizer_fast(
                                 Range [0-10], Default = 0
     :param chroma_adjust:       Direct hue/color mapping (only on ref-frames), without luma filtering, using the "chroma adjustment"
                                 parameter, if="none" is disabled.
-    :param sc_debug:            Print debug messages regarding the scene change detection process.
+    :param debug_level:         Set HAVC debug message level.
     """
     # disable packages warnings
     disable_warnings()
 
-    if frame_interp not in range(11):
+    HAVC_set_debug_level(debug_level)
+
+    if frame_interp not in range(11) or frame_interp == 0:
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_colorizer_fast: frame_interp must be in range [1-10]")
 
-    clip_ref = HAVC_colorizer(clip, method=method, mweight=mweight, deoldify_p=deoldify_p, ddcolor_p=ddcolor_p,
-                              ddtweak=ddtweak, ddtweak_p=ddtweak_p, sc_threshold=0.1, sc_tht_offset=1,
-                              sc_min_freq=frame_interp, sc_min_int=1, sc_tht_ssim=0.0, sc_normalize=False,
-                              sc_debug=sc_debug)
+    clip, orig_fmt = convert_format_RGB24(clip)
 
+    clip_ref = HAVC_colorizer(clip, method=method, mweight=mweight, deoldify_p=deoldify_p, ddcolor_p=ddcolor_p,
+                          ddtweak=ddtweak, ddtweak_p=ddtweak_p, sc_threshold=0.1, sc_tht_offset=1,
+                          sc_min_freq=frame_interp, sc_min_int=1, sc_tht_ssim=0.0, sc_normalize=False,
+                          debug_level=debug_level)
     clip_colored = HAVC_deepex(clip=clip, clip_ref=clip_ref, method=0, render_speed='Medium', render_vivid=True,
-                               ref_merge=0, sc_framedir=None, only_ref_frames=False, dark=True, dark_p=[0.2, 0.8],
-                               ref_thresh=0.10, ex_model=1, encode_mode=0, max_memory_frames=0, ref_freq=frame_interp,
-                               ref_norm=False, smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"], colormap=chroma_adjust)
+                               ref_merge=0, sc_framedir=None, only_ref_frames=False, dark=False,
+                               ref_thresh=0.10, ex_model=1, encode_mode=0, max_memory_frames=0,
+                               ref_freq=frame_interp, ref_norm=False, smooth=False, colormap=chroma_adjust)
 
     clip_colored = clip_colored.std.SetFrameProp(prop="sc_threshold", floatval=0.1)
     clip_colored = clip_colored.std.SetFrameProp(prop="sc_frequency", intval=1)
 
-    return clip_colored
+    return restore_format(clip_colored, orig_fmt)
 
 def HAVC_colorizer(
         clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = (0, 24, 1.0, 0.0),
-        ddcolor_p: list = (1, 24, 1.0, 0.0, True), ddtweak: bool = False,
-        ddtweak_p: list = (0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.8,0.1"),
-        cmc_tresh: float = 0.2, lmm_p: list = (0.2, 0.8, 1.0), alm_p: list = (0.8, 1.0, 0.15), cmb_sw: bool = False,
-        sc_threshold: float = 0.0, sc_tht_offset: int = 1, sc_min_freq: int = 0, sc_tht_ssim: float = 0.0,
-        sc_normalize: bool = False, sc_min_int: int = 1, sc_tht_white: float = DEF_THT_WHITE,
-        sc_tht_black: float = DEF_THT_BLACK, device_index: int = 0, torch_dir: str = model_dir,
-        sc_debug: bool = False) -> vs.VideoNode:
+        ddcolor_p: list = (1, 24, 1.0, 0.0, True), ddtweak: list[bool] = (False, False, False),
+        ddtweak_p: list = (constants.DEF_TWEAK_p, "300:360|0.8,0.1"),
+        cmc_p: list = constants.DEF_CMC_p, lmm_p: list = constants.DEF_LMM_p, alm_p: list = constants.DEF_ALM_p,
+        crt_p: list = constants.DEF_CRT_p, cmb_sw: bool = False, sc_threshold: float = 0.0, sc_tht_offset: int = 1,
+        sc_min_freq: int = 0, sc_tht_ssim: float = 0.0, sc_normalize: bool = False, sc_min_int: int = 1,
+        sc_tht_white: float = constants.DEF_THT_WHITE, sc_tht_black: float = constants.DEF_THT_BLACK, device_index: int = 0,
+        torch_dir: str = model_dir, debug_level: int = 0) -> vs.VideoNode:
     """A Deep Learning based project for colorizing and restoring old images and video using Deoldify and DDColor
 
-    :param clip:                clip to process, only RGB24 format is supported
+    :param clip:                clip to process, any format is supported
     :param method:              method used to combine deoldify() with ddcolor() (default = 2):
                                     0 : deoldify only (no merge)
                                     1 : ddcolor only (no merge)
@@ -1691,9 +2064,29 @@ def HAVC_colorizer(
                                         ddcolor() will start to decrease linearly when the luma < 60% till "min_weight".
                                         For alpha=2, begins to decrease quadratically (because luma/luma_threshold < 1).
                                         With this method is suggested a starting weight > 70% (ex. = 80%).
-                                    The methods 3 and 4 are similar to Simple Merge, but before the merge with deoldify()
-                                    the ddcolor() frame is limited in the chroma changes (method 3) or limited based on the luma
-                                    (method 4). The method 5 is a Simple Merge where the weight decrease with luma.
+                                    6 : Chroma Retention Merge:
+                                        Given that the colors provided by deoldify() are more conservative and stable
+                                        than the colors obtained with ddcolor(). This function try to restore the
+                                        colors of gray pixels provide by deoldify() by using the colors provided
+                                        by ddcolor(). The gray pixels are identified by the parameter "tht". Once are
+                                        identified the gray pixels are substituted with the desaturated colors in deoldify(),
+                                        the level of desaturation is identified by the parameter "sat". It is performed
+                                        a "gradient" substitution, i.e. the gray pixels are gradually substituted depending
+                                        on the level of gray gradient. The steepness of gradient curve is controlled by
+                                        the parameter "alpha". Optionally is possible to resize the frame before the filter
+                                        application to speed up the filter by setting True the parameter chroma_resize.
+                                     7 : ChromaBound Adaptive
+                                        Adaptive version of Constrained-Chroma. In this version the chroma tolerance is
+                                        adaptive, i.e., it is applied an approach that will allow more color variation
+                                        in textured/complex regions and less in smooth areas. The texture strength is
+                                        computed via Laplacian and chroma tolerance is controlled by the following
+                                        parameters:
+                                              [2] base_tol: int = 20,  # Base chroma tolerance (smooth areas)
+                                              [3] max_extra: int = 24,  # Extra tolerance for textured areas
+                                    The methods 3, 4 and 7 are similar to Simple Merge, but before the merge with clipa
+                                    the clipb frame is limited in the chroma changes (method 3, 7) or limited based
+                                    on theluma (method 4). The method 5 is a Simple Merge where the weight decrease
+                                    with luma.
     :param mweight:             weight given to ddcolor's clip in all merge methods, range [0-1] (0.01=1%)
     :param deoldify_p:          parameters for deoldify():
                                    [0] deoldify model to use (default = 0):
@@ -1731,7 +2124,12 @@ def HAVC_colorizer(
                                          for a movie with a lot of dark scenes is suggested alpha > 1, if=0 is not activated, range [>=0]
                                    [7] : gamma_min: minimum value for gamma, range (default=0.5) [>0.1]
                                    [8] : "chroma adjustment" parameter (optional), if="none" is disabled (see the README)
-    :param cmc_tresh:           chroma_threshold (%), used by: "Constrained Chroma Merge", range [0-1] (0.01=1%)
+    :param cmc_p:               parameters list for method: "Constrained Chroma Merge", "ChromaBound Adaptive"
+                                (see methods 3, 7 for a full explanation):
+                                      [0] chroma_threshold (%), range [0-1] (0.01=1%), default = 0.15
+                                      [1] red_fix (default = True),  # if true red-regions in dark areas are desaturated
+                                      [2] base_tol (default = 20),  # Base chroma tolerance (smooth areas)
+                                      [3] max_extra: (default = 24),  # Extra tolerance for textured areas
     :param lmm_p:               parameters for method: "Luma Masked Merge" (see method=4 for a full explanation)
                                    [0] : luma_mask_limit: luma limit for build the mask used in Luma Masked Merge, range [0-1] (0.01=1%)
                                    [1] : luma_white_limit: the mask will apply a gradient till luma_white_limit, range [0-1] (0.01=1%)
@@ -1740,6 +2138,11 @@ def HAVC_colorizer(
                                    [0] : luma_threshold: threshold for the gradient merge, range [0-1] (0.01=1%)
                                    [1] : alpha: exponent parameter used for the weight calculation, range [>0]
                                    [2] : min_weight: min merge weight, range [0-1] (0.01=1%)
+    :param crt_p:               parameters for method: "Chroma Retention Merge" (see method=6 for a full explanation)
+                                   [0] : sat: this parameter allows to change the saturation of colored clip (default = 0.8)
+                                   [1] : tht: threshold to identify gray pixels, range[0, 255] (default = 30)
+                                   [2] : alpha: parameter used to control the steepness of gradient curve, range [>0] (default = 2.0)
+                                   [3] : chroma_resize: if True, the frames will be resized to improve the filter speed (default = False)
     :param cmb_sw:              if true switch the clip order in all the combining methods, range [True,False]
     :param sc_threshold:        Scene change threshold used to generate the reference frames to be used by
                                 "Exemplar-based" Video Colorization. It is a percentage of the luma change between
@@ -1761,16 +2164,17 @@ def HAVC_colorizer(
     :param sc_tht_black:        Threshold to identify dark frames, range [0-1], default 0.15.
     :param device_index:        device ordinal of the GPU, choices: GPU0...GPU7, CPU=99 (default = 0)
     :param torch_dir:           torch hub dir location, default is model directory, if set to None will switch to torch cache dir.
-    :param sc_debug:            Print debug messages regarding the scene change detection process.
+    :param debug_level:         Set the level of HAVC debug messages. Default = 0 (no messages).
     """
     # disable packages warnings
     disable_warnings()
 
+    HAVC_set_debug_level(debug_level)
+
     if not torch.cuda.is_available() and device_index != 99:
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_colorizer: CUDA is not available")
 
-    if not isinstance(clip, vs.VideoNode):
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_colorizer: this is not a clip")
+    clip, orig_fmt = convert_format_RGB24(clip)
 
     if sc_threshold < 0:
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_colorizer: sc_threshold must be >= 0")
@@ -1812,14 +2216,6 @@ def HAVC_colorizer(
     if ddcolor_rf != 0 and ddcolor_rf not in range(10, 65):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_colorizer: ddcolor render_factor must be between: 10-64")
 
-    if clip.format.id != vs.RGB24:
-        # clip not in RGB24 format, it will be converted
-        if clip.format.color_family == "YUV":
-            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
-                                       dither_type="error_diffusion")
-        else:
-            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
-
     # choices: GPU0...GPU7, CPU=99
     device.set(device=DeviceId(device_index))
 
@@ -1834,7 +2230,7 @@ def HAVC_colorizer(
     if scenechange:
         clip = SceneDetect(clip, threshold=sc_threshold, frequency=sc_min_freq, sc_tht_filter=sc_tht_ssim,
                            tht_offset=sc_tht_offset, min_length=sc_min_int, frame_norm=sc_normalize,
-                           tht_white=sc_tht_white, tht_black=sc_tht_black, sc_debug=sc_debug)
+                           tht_white=sc_tht_white, tht_black=sc_tht_black, sc_debug=(debug_level==constants.DEF_LEVEL_DEBUG))
 
     frame_size = min(max(ddcolor_rf, deoldify_rf) * 16, clip.width)  # frame size calculation for inference()
     clip_orig = clip
@@ -1842,21 +2238,22 @@ def HAVC_colorizer(
 
     clipa = vs_sc_deoldify(clip, method=method, model=deoldify_model, render_factor=deoldify_rf,
                            scenechange=scenechange, package_dir=package_dir)
-    clipb = vs_sc_ddcolor(clip, method=method, model=ddcolor_model, render_factor=ddcolor_rf, tweaks_enabled=ddtweak,
+    clipb = vs_sc_ddcolor(clip, method=method, model=ddcolor_model, render_factor=ddcolor_rf, tweaks_flags=ddtweak,
                           tweaks=ddtweak_p, enable_fp16=ddcolor_enable_fp16, scenechange=scenechange,
                           device_index=device_index)
 
     if scenechange:
         clip_colored = vs_sc_combine_models(clip_a=clipa, clip_b=clipb, method=method, sat=[deoldify_sat, ddcolor_sat],
-                                         hue=[deoldify_hue, ddcolor_hue], clipb_weight=merge_weight, CMC_p=cmc_tresh,
-                                         LMM_p=lmm_p, ALM_p=alm_p, invert_clips=cmb_sw, scenechange=True)
+                                         hue=[deoldify_hue, ddcolor_hue], clipb_weight=merge_weight, CMC_p=cmc_p,
+                                         LMM_p=lmm_p, ALM_p=alm_p, CRT_p=crt_p, invert_clips=cmb_sw, scenechange=True)
     else:
         clip_colored = vs_combine_models(clip_a=clipa, clip_b=clipb, method=method, sat=[deoldify_sat, ddcolor_sat],
-                                         hue=[deoldify_hue, ddcolor_hue], clipb_weight=merge_weight, CMC_p=cmc_tresh,
-                                         LMM_p=lmm_p, ALM_p=alm_p, invert_clips=cmb_sw)
+                                         hue=[deoldify_hue, ddcolor_hue], clipb_weight=merge_weight, CMC_p=cmc_p,
+                                         LMM_p=lmm_p, ALM_p=alm_p, CRT_p=crt_p, invert_clips=cmb_sw)
 
     clip_resized = _clip_chroma_resize(clip_orig, clip_colored)
-    return clip_resized
+
+    return restore_format(clip_resized, orig_fmt)
 
 
 """
@@ -1870,12 +2267,12 @@ function with HAVC merge methods
 
 
 def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, clip_luma: vs.VideoNode = None, weight: float = 0.5,
-               method: int = 2, cmc_tresh: float = 0.2, lmm_p: list = (0.2, 0.8, 1.0), alm_p: list = (0.8, 1.0, 0.25)
-               ) -> vs.VideoNode:
+               method: int = 2, cmc_p: list = constants.DEF_CMC_p, lmm_p: list = constants.DEF_LMM_p, alm_p: list = constants.DEF_ALM_p,
+               crt_p: list = constants.DEF_CRT_p) -> vs.VideoNode:
     """Utility function with the implementation of HAVC merge methods
 
-    :param clipa:               first clip to merge, only RGB24 format is supported
-    :param clipb:               second clip to merge, only RGB24 format is supported
+    :param clipa:               first clip to merge, any format is supported
+    :param clipb:               second clip to merge, any format is supported
     :param method:              method used to combine clipa with clipb (default = 2):
                                     0 : clipa only (no merge)
                                     1 : clipb only (no merge)
@@ -1906,12 +2303,37 @@ def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, clip_luma: vs.VideoNode
                                         For example with: luma_threshold = 0.6 and alpha = 1, the weight assigned to
                                         clipb will start to decrease linearly when the luma < 60% till "min_weight".
                                         For alpha=2, begins to decrease quadratically (because luma/luma_threshold < 1).
-                                    The methods 3 and 4 are similar to Simple Merge, but before the merge with clipa
-                                    the clipb frame is limited in the chroma changes (method 3) or limited based on the
-                                    luma (method 4). The method 5 is a Simple Merge where the weight decrease with luma.
+                                    6 : Chroma Retention Merge:
+                                        Given that the colors provided by deoldify() are more conservative and stable
+                                        than the colors obtained with ddcolor(). This function try to restore the
+                                        colors of gray pixels provide by deoldify() by using the colors provided
+                                        by ddcolor(). The gray pixels are identified by the parameter "tht". Once are
+                                        identified the gray pixels are substituted with the desaturated colors in deoldify(),
+                                        the level of desaturation is identified by the parameter "sat". It is performed
+                                        a "gradient" substitution, i.e. the gray pixels are gradually substituted depending
+                                        on the level of gray gradient. The steepness of gradient curve is controlled by
+                                        the parameter "alpha". Optionally is possible to resize the frame before the filter
+                                        application to speed up the filter by setting True the parameter chroma_resize.
+                                    7 : ChromaBound Adaptive
+                                        Adaptive version of Constrained-Chroma. In this version the chroma tolerance is
+                                        adaptive, i.e., it is applied an approach that will allow more color variation
+                                        in textured/complex regions and less in smooth areas. The texture strength is
+                                        computed via Laplacian and chroma tolerance is controlled by the following
+                                        parameters:
+                                              [2] base_tol: int = 20,  # Base chroma tolerance (smooth areas)
+                                              [3] max_extra: int = 24,  # Extra tolerance for textured areas
+                                    The methods 3, 4 and 7 are similar to Simple Merge, but before the merge with clipa
+                                    the clipb frame is limited in the chroma changes (method 3, 7) or limited based
+                                    on theluma (method 4). The method 5 is a Simple Merge where the weight decrease
+                                    with luma.
     :param weight:              weight given to clipb in all merge methods. If weight = 0 will be returned
                                 clipa, if = 1 will be returned clipb. range [0-1] (0.01=1%)
-    :param cmc_tresh:           chroma_threshold (%), used by: "Constrained Chroma Merge", range [0-1] (0.01=1%)
+    :param cmc_p:               parameters list for method: "Constrained Chroma Merge", "ChromaBound Adaptive"
+                                (see methods 3, 7 for a full explanation):
+                                      [0] chroma_threshold (%), range [0-1] (0.01=1%), default = 0.15
+                                      [1] red_fix (default = True),  # if true red-regions in dark areas are desaturated
+                                      [2] base_tol (default = 20),  # Base chroma tolerance (smooth areas)
+                                      [3] max_extra: (default = 24),  # Extra tolerance for textured areas
     :param lmm_p:               parameters for method: "Luma Masked Merge" (see method=4 for a full explanation)
                                    [0] : luma_mask_limit: luma limit for build the mask used in Luma Masked Merge,
                                          range [0-1] (0.01=1%)
@@ -1923,6 +2345,11 @@ def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, clip_luma: vs.VideoNode
                                    [0] : luma_threshold: threshold for the gradient merge, range [0-1] (0.01=1%)
                                    [1] : alpha: exponent parameter used for the weight calculation, range [>0]
                                    [2] : min_weight: min merge weight, range [0-1] (0.01=1%)
+    :param crt_p:               parameters for method: "Chroma Retention Merge" (see method=6 for a full explanation)
+                                   [0] : sat: this parameter allows to change the saturation of colored clip (default = 0.8)
+                                   [1] : tht: threshold to identify gray pixels, range[0, 255] (default = 30)
+                                   [2] : alpha: parameter used to control the steepness of gradient curve, range [>0] (default = 2.0)
+                                   [3] : chroma_resize: if True, the frames will be resized to improve the filter speed (default = False)
     :param clip_luma:           if specified, clip_luma will be used as source of luma component for the merge. It is an
                                 optional parameter, and it is suggested to provide the clip with the best luma
                                 resolution between clipa and clipb. It is used only with the methods: 3, 4, 5 and can
@@ -1943,43 +2370,31 @@ def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, clip_luma: vs.VideoNode
     if method == 1 or weight == 1:
         return clipb
 
-    if method == 2:
-        return vs_simple_merge(clipa, clipb, weight)
-
     merge_weight = weight
 
-    if clipa.format.id != vs.RGB24:
-        # clip not in RGB24 format, it will be converted
-        if clipa.format.color_family == "YUV":
-            clipa = clipa.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
-                                         dither_type="error_diffusion")
-        else:
-            clipa = clipa.resize.Bicubic(format=vs.RGB24, range_s="full")
+    clip_a, orig_fmt_a = convert_format_RGB24(clipa)
+    clip_b, orig_fmt_b = convert_format_RGB24(clipb)
 
-    if clipb.format.id != vs.RGB24:
-        # clip not in RGB24 format, it will be converted
-        if clipb.format.color_family == "YUV":
-            clipb = clipb.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
-                                         dither_type="error_diffusion")
-        else:
-            clipb = clipb.resize.Bicubic(format=vs.RGB24, range_s="full")
+    if method == 2:
+        clip_merged = vs_simple_merge(clip_a, clip_b, merge_weight)
+        return restore_format(clip_merged, orig_fmt_a)
 
     if clip_luma is not None:
         if not isinstance(clip_luma, vs.VideoNode):
             HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_merge: this is not a clip: clip_luma")
         rf = min(max(math.trunc(0.4 * clip_luma.width / 16), 16), 48)
         frame_size = min(rf * 16, clip_luma.width)
-        clipa = clipa.resize.Spline64(width=frame_size, height=frame_size)
-        clipb = clipb.resize.Spline64(width=frame_size, height=frame_size)
+        clip_a = clip_a.resize.Spline64(width=frame_size, height=frame_size)
+        clip_b = clip_b.resize.Spline64(width=frame_size, height=frame_size)
 
-    clip_merged = vs_combine_models(clip_a=clipa, clip_b=clipb, method=method, sat=[1, 1],
-                                    hue=[0, 0], clipb_weight=merge_weight, CMC_p=cmc_tresh,
-                                    LMM_p=lmm_p, ALM_p=alm_p, invert_clips=False)
+    clip_merged = vs_combine_models(clip_a=clip_a, clip_b=clip_b, method=method, sat=[1, 1],
+                                    hue=[0, 0], clipb_weight=merge_weight, CMC_p=cmc_p,
+                                    LMM_p=lmm_p, ALM_p=alm_p, CRT_p=crt_p, invert_clips=False)
 
     if clip_luma is not None:
         clip_merged = _clip_chroma_resize(clip_luma, clip_merged)
 
-    return clip_merged
+    return restore_format(clip_merged, orig_fmt_a)
 
 
 """
@@ -2007,7 +2422,7 @@ def HAVC_DeepRemaster(
 ) -> vs.VideoNode:
     """Function to perform colorization with DeepRemaster using direct access to RF or using Vapoursynth clips
 
-     :param clip:            Clip to process. Only RGB24 "full range" format is supported.
+     :param clip:            Clip to process, any format is supported.
      :param length:          Sequence length that the model processes (min. 2, max. 5). Default: 2
      :param render_vivid:    Given that the generated colors by the inference are a little washed out, by enabling
                              this parameter, the saturation will be increased by about 10%. range [True, False]
@@ -2022,23 +2437,24 @@ def HAVC_DeepRemaster(
                                  0: will use direct access to reference frame folder (fast)
                                  1: will use Vapoursynth clips to access to reference frames (slow)
      """
-    if not isinstance(clip, vs.VideoNode):
-        raise vs.Error("HAVC_DeepRemaster: this is not a clip")
+    clip, orig_fmt = convert_format_RGB24(clip)
 
     if ref_dir is None:
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_DeepRemaster: ref_dir is unset")
 
     if mode == 0:
-        return vs_remaster_colorize(clip, length, render_vivid, ref_dir, ref_minedge,
-                                    frame_mindim, ref_buffer_size, device_index, inference_mode)
+        return remaster.vs_remaster_colorize(clip, length, render_vivid, ref_dir, ref_minedge,
+                                               frame_mindim, ref_buffer_size, device_index, inference_mode)
 
     clip = SceneDetectFromDir(clip, sc_framedir=ref_dir, merge_ref_frame=False, ref_frame_ext=True)
 
     clip_ref = vs_ext_reference_clip(clip, sc_framedir=ref_dir, clip_resize=True)
 
-    return vs_sc_remaster_colorize(clip, clip_ref, clip_sc=None, length=length, render_vivid=render_vivid,
-                                   ref_minedge=ref_minedge, frame_mindim=frame_mindim, ref_buffer_size=ref_buffer_size,
-                                   device_index=0, inference_mode=False)
+    clip_new = remaster.vs_sc_remaster_colorize(clip, clip_ref, clip_sc=None, length=length, render_vivid=render_vivid,
+                                                  ref_minedge=ref_minedge, frame_mindim=frame_mindim, ref_buffer_size=ref_buffer_size,
+                                                  device_index=0, inference_mode=False)
+
+    return restore_format(clip_new, orig_fmt)
 
 
 """
@@ -2056,7 +2472,7 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
                     stab_p: list = (5, 'A', 1, 15, 0.2, 0.8), colormap: str = "none",
                     render_factor: int = 24) -> vs.VideoNode:
     """Video color stabilization filter, which can be applied to stabilize the chroma components in colored clips.
-        :param clip:                clip to process, only RGB24 format is supported.
+        :param clip:                clip to process, any format is supported.
         :param dark:                enable/disable darkness filter, range [True,False]
         :param dark_p:              parameters for darken the clip's dark portions, which sometimes are wrongly colored by the color models
                                       [0] : dark_threshold, luma threshold to select the dark area, range [0.1-0.5] (0.01=1%)
@@ -2093,18 +2509,9 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
                                     the chroma filters and and ultimately get a great high-resolution result, range: [0, 10-64]
     """
 
-    if not isinstance(clip, vs.VideoNode):
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_stabilizer: this is not a clip")
+    clip, orig_fmt = convert_format_RGB24(clip)
 
-    if clip.format.id != vs.RGB24:
-        # clip not in RGB24 format, it will be converted
-        if clip.format.color_family == "YUV":
-            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
-                                       dither_type="error_diffusion")
-        else:
-            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
-
-            # enable chroma_resize
+    # enable chroma_resize
     chroma_resize_enabled = True
 
     if render_factor != 0 and render_factor not in range(16, 65):
@@ -2113,9 +2520,9 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
     if render_factor == 0:
         render_factor = min(max(math.trunc(0.4 * clip.width / 16), 16), 64)
 
+    clip_orig = clip
     if chroma_resize_enabled:
         frame_size = min(render_factor * 16, clip.width)  # frame size calculation for filters
-        clip_orig = clip
         clip = clip.resize.Spline64(width=frame_size, height=frame_size)
 
     # unpack dark
@@ -2176,10 +2583,11 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
                                                tht_scen=stab_tht_scen, algo=stab_algo)
 
     if chroma_resize_enabled:
-        return _clip_chroma_resize(clip_orig, clip_colored)
+        clip_new = _clip_chroma_resize(clip_orig, clip_colored)
     else:
-        return clip_colored
+        clip_new = clip_colored
 
+    return restore_format(clip_new, orig_fmt)
 
 """
 ------------------------------------------------------------------------------- 
@@ -2192,74 +2600,64 @@ Utility function to restore the colors of gray pixels.
 
 
 def HAVC_recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode = None, sat: float = 0.8, tht: int = 30,
-                            strength: float = 1.0, alpha: float = 2.0, chroma_resize: bool = True,
-                            return_mask: bool = False, binary_mask: bool = False) -> vs.VideoNode:
+                            strength: float = 1.0, alpha: float = 2.0, mask_weight: float = 1.0, chroma_resize: bool = True,
+                            return_mask: bool = False, binary_mask: bool = False, algo: int = 0) -> vs.VideoNode:
     """Utility function to restore the colors of gray pixels in the input clip by using the colors provided in the clip:
        clip_color. Useful to repair the clips colored with DeepRemaster
 
-        :param clip:          clip to repair the colors, only RGB24 format is supported
-        :param clip_color:    clip with the colors to restore, only RGB24 format is supported
+        :param clip:          clip to repair the colors, any format is supported
+        :param clip_color:    clip with the colors to restore, any format is supported
         :param sat:           this parameter allows to change the saturation of colored clip (default = 0.8)
         :param tht:           threshold to identify gray pixels, range[0, 255] (default = 30)
         :param strength:      represent the strength of the filter. Range[0,1] (default = 1.0)
         :param alpha:         parameter used to control the steepness of gradient curve, values above the default value
                               will preserve more pixels, but could introduce some artifacts, range[1, 10] (default = 2)
+        :param mask_weight:   represent the weight of masked colored clip when merged with clip_a. Range[0,1] (default = 1.0)
         :param chroma_resize: if True, the frames will be resized to improve the filter speed (default = True)
         :param return_mask:   if True, will be returned the mask used to identify the gray pixels (white region), could
                               be useful to visualize the gradient mask for debugging, (default = false).
         :param binary_mask:   if True, will be used a binary mask instead of a gradient mask, could be useful to get a
                               clear view on the selected desaturated regions for debugging, (default = false)
+        :param algo:          algorithm to build the mask, allowed values are:
+                                    [0] = Linear decay with steep gradient, (default)
+                                    [1] = Linear decay
+                                    [2] = Exponential decay
     """
 
-    if not isinstance(clip, vs.VideoNode):
-        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_merge: this is not a clip: clip")
+    clip, orig_fmt = convert_format_RGB24(clip)
 
     if not isinstance(clip_color, vs.VideoNode):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_merge: this is not a clip: clip_color")
 
-    if clip.format.id != vs.RGB24:
-        # clip not in RGB24 format, it will be converted
-        if clip.format.color_family == "YUV":
-            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
-                                       dither_type="error_diffusion")
-        else:
-            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
+    clip_color, orig_fmt_c = convert_format_RGB24(clip_color)
 
-    if clip_color.format.id != vs.RGB24:
-        # clip not in RGB24 format, it will be converted
-        if clip_color.format.color_family == "YUV":
-            clip_color = clip_color.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
-                                                   dither_type="error_diffusion")
-        else:
-            clip_color = clip_color.resize.Bicubic(format=vs.RGB24, range_s="full")
+    clip_restored = ChromaRetentionMerge(clip_a=clip, clip_b=clip_color, sat=sat, tht=tht, clipb_weight=strength,
+                                     alpha=alpha, mask_weight=mask_weight, scenechange=False, chroma_resize=chroma_resize,
+                                     return_mask=return_mask, binary_mask=binary_mask, algo=algo)
 
-    alpha = max(min(alpha, DEF_MAX_COLOR_ALPHA), DEF_MIN_COLOR_ALPHA)
+    return restore_format(clip_restored, orig_fmt)
 
-    clip_luma = clip
-    if chroma_resize and not return_mask:
-        rf = min(max(math.trunc(0.4 * clip_luma.width / 16), 16), 48)
-        frame_size = min(rf * 16, clip_luma.width)
-        clip = clip.resize.Spline64(width=frame_size, height=frame_size)
-        clip_color = clip_color.resize.Spline64(width=frame_size, height=frame_size)
 
-    if binary_mask:
-        clip_restored = vs_recover_clip_color(clip=clip, clip_color=clip_color, sat=sat, tht=tht, weight=0,
-                                              tht_scen=1.0, hue_adjust='none', return_mask=return_mask)
-    else:
-        clip_restored = vs_recover_gradient_color(clip=clip, clip_color=clip_color, sat=sat, tht=tht, weight=0,
-                                                  alpha=alpha, return_mask=return_mask)
+def HAVC_TimeCube(clip: vs.VideoNode, strength: 1.0, lut_effect: int = 0) -> vs.VideoNode:
+    """Utility function to apply TimeCube effects
 
-    # Restore the original size, necessary for merge and chroma_resize
-    if chroma_resize and not return_mask:
-        clip_restored = clip_restored.resize.Spline64(width=clip_luma.width, height=clip_luma.height)
+    :param clip:                clip to process, any format is supported.
+    :param strength:            strength of the filter, range [0, 1]. Default = 1
+    :param lut_effect:          LUT effect to apply, range [0,6], allowed values are:
+                                    DEF_LUT_Forest_Film: int = 0
+                                    DEF_LUT_City_Skyline: int = 1
+                                    DEF_LUT_Exploration: int = 2
+                                    DEF_LUT_FUJ_Film: int = 3
+                                    DEF_LUT_Hollywood: int = 4
+                                    DEF_LUT_Classic_Film: int = 5
+                                    DEF_LUT_Warm_Haze: int = 6
+    """
 
-    clip_restored = vs_simple_merge(clip, clip_restored, weight=strength)
+    clip, orig_fmt = convert_format_RGB24(clip)
 
-    if chroma_resize and not return_mask:
-        clip_restored = _clip_chroma_resize(clip_luma, clip_restored)
+    clip = vs_timecube(clip, strength, lut_effect)
 
-    return clip_restored
-
+    return restore_format(clip, orig_fmt)
 
 """
 ------------------------------------------------------------------------------- 
@@ -2271,13 +2669,13 @@ wrapper to function vSceneDetect() to set the scene-change frames in the clip
 """
 
 
-def HAVC_SceneDetect(clip: vs.VideoNode, sc_threshold: float = DEF_THRESHOLD, sc_tht_offset: int = 1,
+def HAVC_SceneDetect(clip: vs.VideoNode, sc_threshold: float = constants.DEF_THRESHOLD, sc_tht_offset: int = 1,
                      sc_tht_ssim: float = 0.0, sc_min_int: int = 1, sc_min_freq: int = 0, sc_normalize: bool = False,
-                     sc_tht_white: float = DEF_THT_WHITE, sc_tht_black: float = DEF_THT_BLACK,
+                     sc_tht_white: float = constants.DEF_THT_WHITE, sc_tht_black: float = constants.DEF_THT_BLACK,
                      sc_debug: bool = False) -> vs.VideoNode:
     """Utility function to set the scene-change frames in the clip
 
-    :param clip:                clip to process, only RGB24 format is supported.
+    :param clip:                clip to process, any format is supported.
     :param sc_threshold:        Scene change threshold used to generate the reference frames.
                                 It is a percentage of the luma change between the previous n-frame (n=sc_tht_offset)
                                 and the current frame. range [0-1], default 0.10.
@@ -2298,10 +2696,13 @@ def HAVC_SceneDetect(clip: vs.VideoNode, sc_threshold: float = DEF_THRESHOLD, sc
     :param sc_debug:            Enable SC debug messages. default: False
 
     """
+    clip, orig_fmt = convert_format_RGB24(clip)
+
     clip = SceneDetect(clip, threshold=sc_threshold, tht_offset=sc_tht_offset, frequency=sc_min_freq,
                        sc_tht_filter=sc_tht_ssim, min_length=sc_min_int, tht_white=sc_tht_white,
                        tht_black=sc_tht_black, frame_norm=sc_normalize, sc_debug=sc_debug)
-    return clip
+
+    return restore_format(clip, orig_fmt)
 
 
 """
@@ -2315,16 +2716,16 @@ reference frames
 """
 
 
-def HAVC_extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = DEF_THRESHOLD, sc_tht_offset: int = 1,
+def HAVC_extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = constants.DEF_THRESHOLD, sc_tht_offset: int = 1,
                                   sc_tht_ssim: float = 0.0, sc_min_int: int = 1, sc_min_freq: int = 0,
                                   sc_framedir: str = "./", sc_sequence: bool = False, sc_normalize: bool = False,
-                                  ref_offset: int = 0, sc_tht_white: float = DEF_THT_WHITE,
-                                  sc_tht_black: float = DEF_THT_BLACK, ref_ext: str = DEF_EXPORT_FORMAT,
-                                  ref_jpg_quality: int = DEF_JPG_QUALITY, ref_override: bool = True,
+                                  ref_offset: int = 0, sc_tht_white: float = constants.DEF_THT_WHITE,
+                                  sc_tht_black: float = constants.DEF_THT_BLACK, ref_ext: str = constants.DEF_EXPORT_FORMAT,
+                                  ref_jpg_quality: int = constants.DEF_JPG_QUALITY, ref_override: bool = True,
                                   sc_debug: bool = False) -> vs.VideoNode:
     """Utility function to export reference frames
 
-    :param clip:                clip to process, only RGB24 format is supported.
+    :param clip:                clip to process, any format is supported.
     :param sc_threshold:        Scene change threshold used to generate the reference frames.
                                 It is a percentage of the luma change between the previous n-frame (n=sc_offset)
                                 and the current frame. range [0-1], default 0.05.
@@ -2353,13 +2754,16 @@ def HAVC_extract_reference_frames(clip: vs.VideoNode, sc_threshold: float = DEF_
     :param sc_debug:            Enable SC debug messages. default: False
 
     """
+    clip, orig_fmt = convert_format_RGB24(clip)
+
     pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
     clip = SceneDetect(clip, threshold=sc_threshold, tht_offset=sc_tht_offset, frequency=sc_min_freq,
                        sc_tht_filter=sc_tht_ssim, min_length=sc_min_int, tht_white=sc_tht_white,
                        tht_black=sc_tht_black, frame_norm=sc_normalize, sc_debug=sc_debug)
     clip = vs_sc_export_frames(clip, sc_framedir=sc_framedir, ref_offset=ref_offset, ref_ext=ref_ext,
                                ref_jpg_quality=ref_jpg_quality, ref_override=ref_override, sequence=sc_sequence)
-    return clip
+
+    return restore_format(clip, orig_fmt)
 
 
 """
@@ -2373,11 +2777,11 @@ wrapper to function vs_sc_export_frames() to export the clip's reference frames
 
 
 def HAVC_export_reference_frames(clip: vs.VideoNode, sc_framedir: str = "./", ref_offset: int = 0,
-                                 ref_ext: str = DEF_EXPORT_FORMAT, ref_jpg_quality: int = DEF_JPG_QUALITY,
+                                 ref_ext: str = constants.DEF_EXPORT_FORMAT, ref_jpg_quality: int = constants.DEF_JPG_QUALITY,
                                  ref_override: bool = True) -> vs.VideoNode:
     """Utility function to export reference frames
 
-    :param clip:                clip to process, only RGB24 format is supported.
+    :param clip:                clip to process, any format is supported.
     :param sc_framedir:         If set, define the directory where are stored the reference frames.
                                 The reference frames are named as: ref_nnnnnn.[jpg|png].
     :param ref_offset:          Offset number that will be added to the number of generated frames. default: 0.
@@ -2386,47 +2790,134 @@ def HAVC_export_reference_frames(clip: vs.VideoNode, sc_framedir: str = "./", re
     :param ref_override:        If True, the reference frames with the same name will be overridden, otherwise will
                                 be discarded. default: True
     """
+
+    clip, orig_fmt = convert_format_RGB24(clip)
+
     pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
     clip = vs_sc_export_frames(clip, sc_framedir=sc_framedir, ref_offset=ref_offset, ref_ext=ref_ext,
                                ref_jpg_quality=ref_jpg_quality, ref_override=ref_override)
-    return clip
 
-def HAVC_export_list_frames(clip: vs.VideoNode, sc_framedir: str = "./", ref_list: list[int] = None,
-                                 ref_ext: str = DEF_EXPORT_FORMAT, ref_jpg_quality: int = DEF_JPG_QUALITY,
-                                 ref_override: bool = True) -> vs.VideoNode:
+    return restore_format(clip, orig_fmt)
+
+def HAVC_export_list_frames(clip: vs.VideoNode, sc_framedir: str = "./", ref_list: list[int] | None= None,
+                            offset: int = 0, ref_ext: str = constants.DEF_EXPORT_FORMAT, ref_jpg_quality: int = constants.DEF_JPG_QUALITY,
+                            ref_override: bool = True, fast_extract: bool = True) -> vs.VideoNode:
     """Utility function to export reference frames
 
-    :param clip:                clip to process, only RGB24 format is supported.
+    :param clip:                clip to process, any format is supported.
     :param sc_framedir:         If set, define the directory where are stored the reference frames.
                                 The reference frames are named as: ref_nnnnnn.[jpg|png].
-    :param ref_list:            List of frame numbers to export. default: None.
+    :param ref_list:            List of frame numbers to export. default: None. If ref_list contains only one frame
+                                number, for example ref_list = [25], will be exported a reference frame every 25 frames
+    :param offset:              The offset will be added to the frame number. default = 0.
     :param ref_ext:             File extension and format of saved frames, range ["jpg", "png"] . default: "jpg"
     :param ref_jpg_quality:     Quality of "jpg" compression, range[0,100]. default: 95
     :param ref_override:        If True, the reference frames with the same name will be overridden, otherwise will
                                 be discarded. default: True
+    :param fast_extract:        If True, the reference frames will be extracted directly with get_frame(), otherwise will
+                                be performed a full parsing of the clip (necessary if there is a sequential temporal
+                                dependency in the script calling this function). default = True
     """
-    if ref_list is None:
+    if ref_list is None or len(ref_list) < 1:
         return clip
 
-    orig_fmt_id = clip.format.id
-    orig_fmt_family = clip.format.color_family
-    if clip.format.id != vs.RGB24:
-        # clip not in RGB24 format, it will be converted
-        if clip.format.color_family == vs.YUV:
-            clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full",
-                                       dither_type="error_diffusion")
-        else:
-            clip = clip.resize.Bicubic(format=vs.RGB24, range_s="full")
+    clip, orig_fmt = convert_format_RGB24(clip)
 
     pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
-    clip = vs_list_export_frames(clip, sc_framedir=sc_framedir, ref_list=ref_list, ref_ext=ref_ext,
-                               ref_jpg_quality=ref_jpg_quality, ref_override=ref_override)
 
-    if orig_fmt_id != vs.RGB24 and orig_fmt_family == vs.YUV:
-        clip = core.resize.Bicubic(clip=clip, format=orig_fmt_id, matrix_s="709", range_in_s="full", range_s="limited")
+    clip = vs_list_export_frames(clip, sc_framedir=sc_framedir, ref_list=ref_list, ref_ext=ref_ext, offset=offset,
+                                 ref_jpg_quality=ref_jpg_quality, ref_override=ref_override)
 
-    return clip
+    return restore_format(clip, orig_fmt)
 
+def HAVC_set_tweak_params(tweaks_param: list = None):
+    """Utility function to set ddcolor tweak parameters
+
+    :param tweaks_param:       list of values for ddcolor tweak parameters.
+                               The template list for tweak parameters the following:
+                                    tweaks_param[0] = bright
+                                    tweaks_param[1] = cont
+                                    tweaks_param[2] = gamma
+                                    tweaks_param[3] = luma_constrained_tweak
+                                    tweaks_param[4] = luma_min
+                                    tweaks_param[5] = gamma_luma_min
+                                    tweaks_param[6] = gamma_alpha
+                                    tweaks_param[7] = gamma_min
+    """
+
+    if tweaks_param is None:
+        return
+
+    #global DEF_TWEAK_p
+
+    constants.DEF_TWEAK_p = tweaks_param.copy()
+
+def HAVC_set_debug_level(debug_level: int = 0):
+    """Utility function to set HAVC debug level
+
+    :param debug_level:       list of values for HAVC debug level.
+                              Allowed values are the following:
+                                    DEF_LEVEL_NONE = 0 -> disable any message
+                                    DEF_LEVEL_INFO = 1 -> info messages are enabled
+                                    DEF_LEVEL_DEBUG = 3 -> info & debug messages are enabled
+    """
+
+    if debug_level in (constants.DEF_LEVEL_NONE, constants.DEF_LEVEL_INFO, constants.DEF_LEVEL_DEBUG):
+        constants.DEF_DEBUG_LEVEL = debug_level
+
+def HAVC_set_merge_params(method: int = 2, merge_params: list = None):
+    """Utility function to set the combination parameters
+
+    :param method:             method used to combine clipa with clipb (default = 2):
+                                    0   : clipa only (no merge)
+                                    1   : clipb only (no merge)
+                                    2   : Simple Merge (default)
+                                    3,7 : Constrained Chroma Merge: list[float, bool, int, int]
+                                    4   : Luma Masked Merge: list[float, float, float]
+                                    5   : Adaptive Luma Merge: list[float, float, float]
+                                    6   : Chroma Retention Merge: list[float, float, float, bool, float, int]
+    :param merge_params:       list of values for the selected method (no check is performed on values and
+                               number of parameters in the list). The list to be passed depend on selected method.
+                               The template list for each method is the following:
+                                    3,7 : Constrained Chroma Merge: list[float, bool, int, int]
+                                            [0] chroma_threshold (default = 0.15)
+                                            [1] red_fix (default = True)
+                                            [2] base_tol (default = 20)
+                                            [3] max_extra (default = 24)
+                                    4  : Luma Masked Merge: list[float, float, float]
+                                            [0] luma_mask_limit (default = 0.15)
+                                            [1] luma_white_limit (default = 0.65)
+                                            [2] luma_mask_sat (default = 1.0)
+                                    5  : Adaptive Luma Merge: list[float, float, float]
+                                            [0] luma_threshold (default = 0.8)
+                                            [1] alpha (default = 1.0)
+                                            [2] min_weight (default = 0.15)
+                                    6  : Chroma Retention Merge: list[float, float, float, bool, float, int]
+                                            [0] sat (default = 0.8)
+                                            [1] threshold (default = 30)
+                                            [2] alpha (default = 2.0)
+                                            [3] resize (default = False)
+                                            [4] mask_weight (default = 0)
+                                            [5] algo (default = 0)
+    """
+
+    if merge_params is None or method in (0, 1, 2):
+        return
+
+    match method:
+        case 3:
+            constants.DEF_CMC_p = merge_params.copy()
+        case 4:
+            constants.DEF_LMM_p = merge_params.copy()
+        case 5:
+            constants.DEF_ALM_p = merge_params.copy()
+        case 6:
+            constants.DEF_CRT_p = merge_params.copy()
+        case 7:
+            constants.DEF_CMC_p = merge_params.copy()
+        case _:
+            # handle invalid method
+            HAVC_LogMessage(MessageType.EXCEPTION, f"HAVC_set_merge_params: Unsupported method: {method}")
 
 """
 ------------------------------------------------------------------------------------------------------------------------ 
@@ -2446,10 +2937,14 @@ wrapper to function vs_sc_export_frames() to export the clip's reference frames
 
 def _extract_reference_frames(clip: vs.VideoNode, sc_framedir: str = "./", ref_offset: int = 0, ref_ext: str = "png",
                               ref_override: bool = True, prop_name: str = "_SceneChangePrev") -> vs.VideoNode:
+
     pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
+
+    clip, orig_fmt = convert_format_RGB24(clip)
+
     clip = vs_sc_export_frames(clip, sc_framedir=sc_framedir, ref_offset=ref_offset, ref_ext=ref_ext,
                                ref_override=ref_override, prop_name=prop_name)
-    return clip
+    return restore_format(clip, orig_fmt)
 
 
 """
@@ -2463,8 +2958,15 @@ wrapper to function vs_recover_clip_luma().
 
 
 def _clip_chroma_resize(clip_hires: vs.VideoNode, clip_lowres: vs.VideoNode) -> vs.VideoNode:
+
     clip_resized = clip_lowres.resize.Spline64(width=clip_hires.width, height=clip_hires.height)
-    return vs_recover_clip_luma(clip_hires, clip_resized)
+
+    clip_hires, orig_fmt_h = convert_format_RGB24(clip_hires)
+    clip_resized, orig_fmt_r = convert_format_RGB24(clip_resized)
+
+    clip_recovered = vs_recover_clip_luma(clip_hires, clip_resized)
+
+    return restore_format(clip_recovered, orig_fmt_h)
 
 
 """
@@ -2478,8 +2980,9 @@ wrapper to function vs_get_clip_frame() to get frames fast.
 
 
 def _get_clip_frame(clip: vs.VideoNode, nframe: int = 0) -> vs.VideoNode:
+    clip, orig_fmt = convert_format_RGB24(clip)
     clip = vs_get_clip_frame(clip=clip, nframe=nframe)
-    return clip
+    return restore_format(clip, orig_fmt)
 
 
 """
@@ -2514,7 +3017,6 @@ def disable_warnings():
 
     torch._logging.set_logs(all=logging.ERROR)
 
-
 """
 ------------------------------------------------------------------------------------------------------------------------ 
                                    DDEOLDIFY LEGACY FUNCTIONS (deprecated)
@@ -2525,19 +3027,20 @@ def disable_warnings():
 def HAVC_ddeoldify(
         clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = (0, 24, 1.0, 0.0),
         ddcolor_p: list = (1, 24, 1.0, 0.0, True), ddtweak: bool = False,
-        ddtweak_p: list = (0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.8,0.1"),
+        ddtweak_p: list = (constants.DEF_TWEAK_p, "300:360|0.8,0.1"),
         cmc_tresh: float = 0.2, lmm_p: list = (0.2, 0.8, 1.0), alm_p: list = (0.8, 1.0, 0.15), cmb_sw: bool = False,
         sc_threshold: float = 0.0, sc_tht_offset: int = 1, sc_min_freq: int = 0, sc_tht_ssim: float = 0.0,
-        sc_normalize: bool = False, sc_min_int: int = 1, sc_tht_white: float = DEF_THT_WHITE,
-        sc_tht_black: float = DEF_THT_BLACK, device_index: int = 0, torch_dir: str = model_dir,
+        sc_normalize: bool = False, sc_min_int: int = 1, sc_tht_white: float = constants.DEF_THT_WHITE,
+        sc_tht_black: float = constants.DEF_THT_BLACK, device_index: int = 0, torch_dir: str = model_dir,
         sc_debug: bool = False) -> vs.VideoNode:
     vs.core.log_message(
         vs.MESSAGE_TYPE_WARNING,
         "Warning: HAVC_ddeoldify is deprecated and may be removed in the future, please use 'HAVC_colorizer' instead.")
 
-    return HAVC_colorizer(clip, method, mweight, deoldify_p, ddcolor_p, ddtweak, ddtweak_p, cmc_tresh, lmm_p, alm_p,
-                          cmb_sw, sc_threshold, sc_tht_offset, sc_min_freq, sc_tht_ssim, sc_normalize, sc_min_int,
-                          sc_tht_white, sc_tht_black, device_index, torch_dir, sc_debug)
+    debug_level = constants.DEF_LEVEL_DEBUG if sc_debug else constants.DEF_LEVEL_NONE
+    return HAVC_colorizer(clip, method, mweight, deoldify_p, ddcolor_p, [ddtweak, False, False], ddtweak_p, [cmc_tresh], lmm_p, alm_p,
+                          constants.DEF_CRT_p, cmb_sw, sc_threshold, sc_tht_offset, sc_min_freq, sc_tht_ssim, sc_normalize, sc_min_int,
+                          sc_tht_white, sc_tht_black, device_index, torch_dir, debug_level)
 
 
 def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'Stable', ColorFix: str = 'Violet/Red',
@@ -2552,19 +3055,17 @@ def ddeoldify_main(clip: vs.VideoNode, Preset: str = 'Fast', VideoTune: str = 'S
 
 
 def ddeoldify(clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = (0, 24, 1.0, 0.0),
-              ddcolor_p: list = (1, 24, 1.0, 0.0, True),
-              dotweak: bool = False, dotweak_p: list = (0.0, 1.0, 1.0, False, 0.2, 0.5, 1.5, 0.5),
-              ddtweak: bool = False, ddtweak_p: list = (0.0, 1.0, 2.5, True, 0.3, 0.6, 1.5, 0.5, "300:360|0.8,0.1"),
+              ddcolor_p: list = (1, 24, 1.0, 0.0, True), dotweak: bool = False, dotweak_p: list = (0.0, 1.0, 1.0, False, 0.2, 0.5, 1.5, 0.5),
+              ddtweak: bool = False, ddtweak_p: list = (constants.DEF_TWEAK_p, "300:360|0.8,0.1"),
               degrain_strength: int = 0, cmc_tresh: float = 0.2, lmm_p: list = (0.2, 0.8, 1.0),
               alm_p: list = (0.8, 1.0, 0.15), cmb_sw: bool = False, device_index: int = 0,
               torch_dir: str = model_dir) -> vs.VideoNode:
     vs.core.log_message(
         vs.MESSAGE_TYPE_WARNING,
-        "Warning: ddeoldify is deprecated and may be removed in the future, please use 'HAVC_ddeoldify' instead.")
+        "Warning: ddeoldify is deprecated and may be removed in the future, please use 'HAVC_colorizer' instead.")
 
-    return HAVC_colorizer(clip, method, mweight, deoldify_p, ddcolor_p, ddtweak, ddtweak_p, cmc_tresh, lmm_p, alm_p,
-                          cmb_sw,
-                          sc_threshold=0, sc_min_freq=0, device_index=device_index, torch_dir=torch_dir)
+    return HAVC_colorizer(clip, method, mweight, deoldify_p, ddcolor_p, [ddtweak, False, False], ddtweak_p, [cmc_tresh], lmm_p, alm_p,
+                          constants.DEF_CRT_p, cmb_sw, sc_threshold=0, sc_min_freq=0, device_index=device_index, torch_dir=torch_dir)
 
 
 def ddeoldify_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2, 0.8), smooth: bool = False,

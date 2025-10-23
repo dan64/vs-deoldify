@@ -19,13 +19,13 @@ Based on paper:
 }
 """
 from __future__ import annotations, print_function
-import threading
-import torch
-import os
-import gc
-from functools import partial
+#import threading
+#import torch
+#import os
+#import gc
+#from functools import partial
+#import vapoursynth as vs
 
-import vapoursynth as vs
 from vsdeoldify.colormnet.colormnet_render import ColorMNetRender
 from vsdeoldify.colormnet.colormnet_utils import *
 from vsdeoldify.colormnet.colormnet_server import ColorMNetServer

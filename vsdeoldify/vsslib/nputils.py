@@ -10,10 +10,8 @@ Description:
 ------------------------------------------------------------------------------- 
 Library of Numpy utlity functions.
 """
-import math
 import numpy as np
 import cv2
-from PIL import Image
 
 """
 ------------------------------------------------------------------------------- 
@@ -26,7 +24,17 @@ is not available on the base library.
 """
 
 
-def array_max(a: np.ndarray, a_max: np.ndarray, dtype: np.dtype = np.int32) -> np.ndarray:
+def array_max(a: np.ndarray, a_max: any, dtype: np.dtype = np.uint8) -> np.ndarray:
+    """
+    Function to cap the values of np matrix to a_max
+
+    Args:
+        a : np matrix
+        a_max: max allowed value for the matrix elements
+        dtype: np return type (default: np.uint8)
+    Return:
+        np.ndarray : matrix with values capped to a_max
+    """
     return np.where(a > a_max, a_max, a).astype(dtype)
 
 
@@ -41,7 +49,17 @@ is not available on the base library.
 """
 
 
-def array_min(a: np.ndarray, a_min: np.ndarray, dtype: np.dtype = np.int32) -> np.ndarray:
+def array_min(a: np.ndarray, a_min: any, dtype: np.dtype = np.uint8) -> np.ndarray:
+    """
+    Function to floor the values of np matrix to a_min
+
+    Args:
+        a : np matrix
+        a_min: min allowed value for the matrix elements
+        dtype: np return type (default: np.uint8)
+    Return:
+        np.ndarray : matrix with values floored to a_min
+    """
     return np.where(a < a_min, a_min, a).astype(dtype)
 
 
@@ -54,13 +72,18 @@ Description:
 implementation of min(max()) function on numpy array.
 """
 
+def array_clip(a: np.ndarray, a_min: any, a_max: any, dtype: np.dtype = np.uint8) -> np.ndarray:
+    """
+    Function to clip the values of np matrix from a_min to a_max
 
-def array_max_min(a: np.ndarray, a_max: np.ndarray, a_min: np.ndarray, dtype: np.dtype = np.int32) -> np.ndarray:
-    a_m = array_max(a, a_max, dtype)
-    return array_min(a_m, a_min, dtype)
-
-
-def array_min_max(a: np.ndarray, a_min: np.ndarray, a_max: np.ndarray, dtype: np.dtype = np.int32) -> np.ndarray:
+    Args:
+       a : np matrix
+       a_max: max allowed value for the matrix elements
+       a_min: min allowed value for the matrix elements
+       dtype: np return type (default: np.uint8)
+    Return:
+       np.ndarray : matrix.clip(a_min, a_max)
+    """
     a_m = array_max(a, a_max, dtype)
     return array_min(a_m, a_min, dtype)
 
@@ -140,12 +163,12 @@ def w_np_rgb_to_gray(img_np: np.ndarray, dark_luma: float = 0, luma_white: float
 
         luma_grad = ((luma_np - tresh) * grad).astype(float)
 
-        weighted_luma = array_min_max(luma_grad, 0.0, 1.0, np.float32)
+        weighted_luma = array_clip(luma_grad, 0.0, 1.0, np.float32)
 
         if as_weight:
             gray_np = gray_np.astype(float)
         else:
-            weighted_luma = np.multiply(weighted_luma, 255).clip(0, 255).astype(int)
+            weighted_luma = np.multiply(weighted_luma, 255).clip(0, 255).astype(np.uint8)
 
         for i in range(3):
             gray_np[:, :, i] = weighted_luma
@@ -184,7 +207,7 @@ def np_image_mask_merge(img1_np: np.ndarray, img2_np: np.ndarray,
     img_m = img1_np * mask_black + img2_np * mask_white
 
     for i in range(3):
-        img_np[:, :, i] = img_m[:, :, i].clip(0, 255).astype(int)
+        img_np[:, :, i] = img_m[:, :, i].clip(0, 255).astype(np.uint8)
 
     return img_np
 
@@ -201,6 +224,17 @@ numpy weighted merge of image1 with image2 using the mask (white->img2, black->i
 
 def w_np_image_mask_merge(img1_np: np.ndarray, img2_np: np.ndarray,
                           mask_w_np: np.ndarray, normalize: bool = False) -> np.ndarray:
+    """
+    numpy weighted merge of image1 with image2 using the mask (black->img1, white->img2)
+
+    Args:
+       img1_np: np.ndarray
+       img2_np: np.ndarray
+       mask_w_np: mask (w=0 -> black, w=1 -> white, gray in between)
+       normalize: pixel will be divided by 255
+    Return:
+       img1*(1-w) + img2*w (if w=0 return img1, if w=1 return img2)
+    """
 
     if normalize:
         mask_white = (mask_w_np / 255).astype(float)  # pass only white
@@ -214,7 +248,7 @@ def w_np_image_mask_merge(img1_np: np.ndarray, img2_np: np.ndarray,
     img_m = (np.multiply(img1_np, mask_black) + np.multiply(img2_np, mask_white))
 
     for i in range(3):
-        img_np[:, :, i] = img_m[:, :, i].clip(0, 255).astype(int)
+        img_np[:, :, i] = img_m[:, :, i].clip(0, 255).astype(np.uint8)
 
     return img_np
 
@@ -225,14 +259,23 @@ Author: Dan64
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
-numpy implementation of image merge on 3 planes, faster than vs.core.std.Merge()
 """
 
 
 def np_weighted_merge(img1_np: np.ndarray, img2_np: np.ndarray, weight: float = 0.5) -> np.ndarray:
+    """
+    numpy implementation of image merge on 3 planes, faster than vs.core.std.Merge()
+
+    Args:
+       img1_np: np.ndarray
+       img2_np: np.ndarray
+       weight: float = 0.5
+    Return:
+       img1*(1-w) + img2*w (if w=0 return img1, if w=1 return img2)
+    """
     img_new = np.copy(img1_np)
 
-    img_m = (np.multiply(img1_np, 1 - weight) + np.multiply(img2_np, weight)).clip(0, 255).astype(int)
+    img_m = (np.multiply(img1_np, 1 - weight) + np.multiply(img2_np, weight)).clip(0, 255).astype(np.uint8)
     img_new[:, :, 0] = img_m[:, :, 0]
     img_new[:, :, 1] = img_m[:, :, 1]
     img_new[:, :, 2] = img_m[:, :, 2]
@@ -312,7 +355,7 @@ def np_image_gamma_contrast(np_img: np.ndarray = None, gamma: float = 1.0, cont:
         y_fix = np.clip(y, y_min, y_max)
         y_cont = ((y_fix - y_min) * cont / (y_max - y_min))
 
-        y_cont = array_min_max(y_cont, 0, 1, np.float64) * 255
+        y_cont = array_clip(y_cont, 0, 1, np.float32) * 255
 
         y_new = y_cont.clip(0, 255).astype(int)
     else:
@@ -320,7 +363,7 @@ def np_image_gamma_contrast(np_img: np.ndarray = None, gamma: float = 1.0, cont:
 
     if gamma != 1:
         y_new = np.power(y_new / 255, 1 / gamma)
-        y_new = np.multiply(y_new, 255).clip(0, 255).astype(int)
+        y_new = np.multiply(y_new, 255).clip(0, 255).astype(np.uint8)
 
     yuv_new[:, :, 0] = y_new
 
