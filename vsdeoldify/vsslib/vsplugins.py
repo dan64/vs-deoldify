@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-10-09
 version: 
 LastEditors: Dan64
-LastEditTime: 2024-10-19
+LastEditTime: 2024-10-26
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -15,7 +15,7 @@ import vapoursynth as vs
 from pathlib import Path
 from vsdeoldify.vsslib.mcomb import vs_combine_models
 from vsdeoldify.vsslib.vsfilters import vs_tweak
-from vsdeoldify.vsslib.vsutils import HAVC_LogMessage, MessageType
+from vsdeoldify.vsslib.vsutils import HAVC_LogMessage, MessageType, frame_to_image
 
 from vsdeoldify.vsslib.constants import *
 
@@ -210,7 +210,7 @@ def vs_timecube(clip: vs.VideoNode, strength: float = 1.0, lut_effect: int = DEF
             sat = 0.80; hue = 3; bright = 1
         case 11:
             f_name = os.path.normpath(os.path.join(TimeCube_dir, "color", "Presetpro - Flat Pop.cube"))
-            sat = 0.80; hue = 5; bright = -2
+            sat = 0.80; hue = -2; bright = 0
 
     if not Path(f_name).is_file():
         HAVC_LogMessage(MessageType.INFORMATION, f"LUT cube file: {f_name} not found!")

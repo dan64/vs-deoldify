@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-09-30
+LastEditTime: 2025-10-26
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -441,11 +441,8 @@ def vs_sc_adjust_clip_hue(clip: vs.VideoNode = None, hue_adjust: str = 'none',
 
         if scenechange:
             is_scenechange = (n == 0) or (f.props.get('_SceneChangePrev', 0) == 1)
-        else:
-            is_scenechange = False
-
-        if not is_scenechange:
-            return f.copy()
+            if not is_scenechange:
+                return f.copy()
 
         img_color = frame_to_image(f)
         img_restored = adjust_hue_range(img_color, hue_adjust=hue_adjust)
@@ -533,11 +530,8 @@ def vs_sc_chroma_bright_tweak(clip: vs.VideoNode = None, black_threshold: float 
 
         if scenechange:
             is_scenechange = (n == 0) or (f.props.get('_SceneChangePrev', 0) == 1)
-        else:
-            is_scenechange = False
-
-        if not is_scenechange:
-            return f.copy()
+            if not is_scenechange:
+                return f.copy()
 
         img1 = frame_to_image(f)
         img2 = image_chroma_tweak(img1, bright=dark_bright, sat=dark_sat, hue_adjust=chroma_adjust)
@@ -585,11 +579,8 @@ def _vs_sc_colormap(clip: vs.VideoNode = None, colormap: str = 'none', scenechan
 
         if scenechange:
             is_scenechange = (n == 0) or (f.props.get('_SceneChangePrev', 0) == 1)
-        else:
-            is_scenechange = False
-
-        if not is_scenechange:
-            return f.copy()
+            if not is_scenechange:
+                return f.copy()
 
         img = frame_to_image(f)
         img_m = image_chroma_tweak(img, hue_adjust=chroma_adjust)
@@ -628,11 +619,8 @@ def vs_sc_dark_tweak(clip: vs.VideoNode = None, dark_threshold: float = 0.3, dar
 
         if scenechange:
             is_scenechange = (n == 0) or (f.props.get('_SceneChangePrev', 0) == 1)
-        else:
-            is_scenechange = False
-
-        if not is_scenechange:
-            return f.copy()
+            if not is_scenechange:
+                return f.copy()
 
         img1 = frame_to_image(f)
         img2 = image_tweak(img1, bright=dark_bright, sat=dark_sat, hue_range=dark_hue_adjust)
@@ -672,11 +660,8 @@ def sc_constrained_tweak(clip: vs.VideoNode = None, luma_min: float = 0.1, gamma
 
         if scenechange:
             is_scenechange = (n == 0) or (f.props.get('_SceneChangePrev', 0) == 1)
-        else:
-            is_scenechange = False
-
-        if not is_scenechange:
-            return f.copy()
+            if not is_scenechange:
+                return f.copy()
 
         img = frame_to_image(f)
         img_m = luma_adjusted_levels(img, luma_min, gamma, gamma_luma_min, gamma_alpha, gamma_min)

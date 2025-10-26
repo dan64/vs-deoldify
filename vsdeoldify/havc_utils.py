@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2025-02-06
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-10-19
+LastEditTime: 2025-10-26
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -674,8 +674,8 @@ URL: https://pyimagesearch.com/2021/02/01/opencv-histogram-equalization-and-adap
 URL: https://docs.opencv.org/4.x/d5/daf/tutorial_py_histogram_equalization.html
 ------------------------------------------------------------------------------- 
 """
-def bw_retinex(clip: vs.VideoNode = None, mode: str = 'Medium',
-                luma_blend: bool = True, range_tv: bool = True) -> vs.VideoNode:
+def vs_auto_levels(clip: vs.VideoNode = None, mode: str = 'Medium', method: int = 5,
+                   luma_blend: bool = True, range_tv: bool = True) -> vs.VideoNode:
     """Pre-process filter using Retinex for improving contrast/luminosity of B&W clips
        to be colored with HAVC.
 
@@ -685,6 +685,14 @@ def bw_retinex(clip: vs.VideoNode = None, mode: str = 'Medium',
                               'Light',
                               'Medium', (default)
                               'Strong'
+    :param method:        Method used to perform the histogram equalization.
+                         Allowed values are:
+                            0 : Apply Contrast Limited Adaptive Histogram Equalization on Luma [41.5 fps] (default)
+                            1 : Apply Simple Histogram Equalization on all RGB channels [54.5 fps]
+                            2 : Apply CLAHE on all RGB channels [37.5 fps]
+                            3 : method=0 and method=1 are merged [34.5]
+                            4 : ScaleAbs + LUT [51.5 fps]
+                            5 : Multi-Scale Retinex on Luma [45.5 fps]
     :param luma_blend:    If enabled the equalized image is blended with the original image, darker is the image and more
                           weight will be assigned to the original image. default = True
     :param range_tv:      If True, perform the color adjustments on limited TV range (the filter works better in TV range).
@@ -707,7 +715,7 @@ def bw_retinex(clip: vs.VideoNode = None, mode: str = 'Medium',
         clip = clip.std.Levels(min_in=0, max_in=255, min_out=16, max_out=235)
         clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_in_s="full", range_s="limited")
 
-    clip = rgb_equalizer(clip=clip, method=5, strength=b_strength[bw_id], luma_blend=luma_blend,
+    clip = rgb_equalizer(clip=clip, method=method, strength=b_strength[bw_id], luma_blend=luma_blend,
                          range_tv=range_tv)
 
     if range_tv:
@@ -729,7 +737,7 @@ def rgb_equalizer(clip: vs.VideoNode, method: int = 0, clip_limit : float = 1.0,
                             1 : Apply Simple Histogram Equalization on all RGB channels [54.5 fps]
                             2 : Apply CLAHE on all RGB channels [37.5 fps]
                             3 : method=0 and method=1 are merged [34.5] 
-                            4 : Automatic brightness and contrast optimization with ScaleAbs [51.5 fps]
+                            4 : ScaleAbs + LUT [51.5 fps]
                             5 : Multi-Scale Retinex on Luma [45.5 fps]
    :param clip_limit:    Threshold for contrast limiting, range [0, 50] (default=1.0)
    :param gridsize:      Size of grid for histogram equalization. The input image will be divided into equally
@@ -927,8 +935,9 @@ def rgb_equalizer(clip: vs.VideoNode, method: int = 0, clip_limit : float = 1.0,
       # weight=0 means that is returned clip_a, weight=1 means that is returned clip_b
       clip_a = vs.core.std.Merge(clip_a, clip_b, weight3)
    elif method ==4:
-      # clip_a = rgb_clip.std.ModifyFrame(clips=rgb_clip, selector=partial(autolevels_with_Scale, algo=0, blend=luma_blend, clip_hist_percent=clip_limit))
       clip_a = vs_timecube(rgb_clip, strength = 0.7, lut_effect = DEF_LUT_Flat_Pop)
+      #clip_a = rgb_clip.std.ModifyFrame(clips=clip_a, selector=partial(autolevels_with_Scale, algo=0, blend=luma_blend,
+      #                                                  clip_hist_percent=clip_limit))
    else:
       clip_a = vs_retinex(rgb_clip, luma_dark=0.20, luma_bright=0.80, sigmas=[25, 80, 250], range_tv_in=range_tv,
                           range_tv_out=range_tv, blend=luma_blend)

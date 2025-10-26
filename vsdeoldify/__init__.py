@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-02-29
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-10-19
+LastEditTime: 2025-10-26
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -31,7 +31,7 @@ import pathlib
 import math
 
 from vsdeoldify.havc_utils import _get_tune_id, convert_format_RGB24, restore_format, HAVC_read_video, rgb_denoise
-from vsdeoldify.havc_utils import  rgb_balance, rgb_equalizer
+from vsdeoldify.havc_utils import  rgb_balance, rgb_equalizer, vs_auto_levels
 from vsdeoldify.vsslib.mcomb import vs_sc_combine_models, vs_combine_models, vs_ext_reference_clip, ChromaRetentionMerge
 from vsdeoldify.vsslib.vsfilters import vs_rgb_normalize, vs_simple_merge, vs_tweak, vs_sc_colormap, vs_sc_dark_tweak
 from vsdeoldify.vsslib.vsfilters import  vs_sc_chroma_bright_tweak, vs_sc_recover_clip_luma, vs_recover_clip_luma
@@ -52,7 +52,7 @@ import vsdeoldify.remaster
 
 import vsdeoldify.vsslib.constants as constants
 
-__version__ = "5.6.0"
+__version__ = "5.6.1"
 
 import warnings
 import logging

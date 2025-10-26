@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-04-08
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-09-28
+LastEditTime: 2025-10-26
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -26,7 +26,7 @@ from vsdeoldify.colormnet import vs_colormnet_remote, vs_colormnet_local
 from vsdeoldify.colormnet2 import vs_colormnet2_remote, vs_colormnet2_local
 from vsdeoldify.deepex import deepex_colorizer, ModelColorizer
 from vsdeoldify.colorization import ModelColorization
-from vsdeoldify.havc_utils import bw_retinex, rgb_denoise
+from vsdeoldify.havc_utils import rgb_denoise, vs_auto_levels
 
 from vsdeoldify.vsslib.constants import *
 
@@ -326,11 +326,14 @@ def vs_sc_ddcolor(clip: vs.VideoNode, method: int = 2, model: int = 1, render_fa
         gamma_luma_min = tweaks[5]
         gamma_alpha = tweaks[6]
         gamma_min = tweaks[7]
-        hue_adjust = 'none'
+        if len(tweaks) > 8:
+            hue_adjust = tweaks[8]
+        else:
+            hue_adjust = 'none'
 
     if tweaks_enabled:
         if retinex_enabled:
-            clipb = bw_retinex(clip, mode='strong', luma_blend=True, range_tv=True)
+            clipb = vs_auto_levels(clip, mode='strong', method=5, luma_blend=True, range_tv=True)
         elif luma_constrained_tweak:
             clipb = vs_sc_tweak(clip, bright=bright, cont=cont,
                                 scenechange=scenechange)  # contrast and bright are adjusted before the constrainded luma and gamma
