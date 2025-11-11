@@ -52,7 +52,7 @@ import vsdeoldify.remaster
 
 import vsdeoldify.vsslib.constants as constants
 
-__version__ = "5.6.1"
+__version__ = "5.6.2"
 
 import warnings
 import logging
@@ -1334,7 +1334,8 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
     if method in (0, 1, 2, 5, 6) and (clip_ref is None):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: method in (0, 1, 2, 5, 6) but clip_ref is unset")
 
-    clip_ref, orig_fmt_r = convert_format_RGB24(clip_ref)
+    if clip_ref is not None:
+        clip_ref, orig_fmt_r = convert_format_RGB24(clip_ref)
 
     if method not in range(7):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_deepex: method must be in range [0-6]")
