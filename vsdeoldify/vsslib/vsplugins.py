@@ -30,6 +30,27 @@ Description:
 Utility functions to load Vapoursynth plugins dynamically.
 """
 
+def load_Akarin_plugin() -> bool:
+    """
+    Ensures Akarin VapourSynth plugin is loaded.
+    """
+
+    plugin_path = os.path.normpath(os.path.join(support_dir, "akarin.dll"))
+
+    try:
+        if hasattr(vs.core, 'akarin') and hasattr(vs.core.akarin, 'Expr'):
+            if DEF_DEBUG_LEVEL > DEF_LEVEL_NONE:
+                HAVC_LogMessage(MessageType.INFORMATION,f"[INFO] Plugin 'Akarin' already loaded.")
+            return True
+        else:
+            vs.core.std.LoadPlugin(path=plugin_path)
+            if DEF_DEBUG_LEVEL > DEF_LEVEL_NONE:
+                HAVC_LogMessage(MessageType.INFORMATION, f"[INFO] Plugin 'Akarin' loaded from: {plugin_path}")
+            return True
+    except Exception as error:
+        HAVC_LogMessage(MessageType.WARNING,"[WARNING] Plugin 'Akarin': check/load failed ->", str(error))
+        return False
+
 def load_Retinex_plugin() -> bool:
     """
     Ensures Retinex VapourSynth plugin is loaded.
@@ -165,52 +186,36 @@ Description:
 Wrapper to TimeCube
 """
 
-def vs_timecube(clip: vs.VideoNode, strength: float = 1.0, lut_effect: int = DEF_LUT_Exploration) -> vs.VideoNode:
-
-    if strength == 0:
-        return clip   # nothing to do
+def vs_timecube_load(clip: vs.VideoNode, lut_effect: int = DEF_LUT_Exploration) -> vs.VideoNode:
 
     load_TimeCube_plugin()
 
-    hue: float = 0; sat: float = 1; bright: float = 0; cont: float = 1; gamma: float = 1
     f_name: str = ""
     match lut_effect:
         case 0:
             f_name = os.path.normpath(os.path.join(TimeCube_dir, "color", "Stockpresets - Forest Film.cube"))
-            sat = 0.70; hue = 10
         case 1:
             f_name = os.path.normpath(os.path.join(TimeCube_dir, "color", "Presetpro - City Skyline.cube"))
-            cont = 0.85; sat = 0.65; hue = -3; bright = 1; gamma = 1.10
         case 2:
             f_name = os.path.normpath(os.path.join(TimeCube_dir, "color", "Presetpro - Exploration.cube"))
-            sat = 1.05; cont = 1.05; gamma = 0.90; hue = 10; bright = -1
         case 3:
             f_name = os.path.normpath(os.path.join(TimeCube_dir, "color", "Presetpro - FUJ Film.cube"))
-            sat = 0.80; hue = 10
         case 4:
             f_name = os.path.normpath(os.path.join(TimeCube_dir, "color", "Presetpro - Hollywood.cube"))
-            sat = 0.75; hue = 10
         case 5:
             f_name = os.path.normpath(os.path.join(TimeCube_dir, "color", "Presetpro - Classic Film.cube"))
-            sat = 0.80
         case 6:
             f_name = os.path.normpath(os.path.join(TimeCube_dir, "color", "Presetpro - Warm Haze.cube"))
-            sat = 0.75
         case 7:
             f_name = os.path.normpath(os.path.join(TimeCube_dir, "color", "Presetpro - HDR Color.cube"))
-            sat = 0.95
         case 8:
             f_name = os.path.normpath(os.path.join(TimeCube_dir, "color", "Presetpro - Amber Light.cube"))
-            sat = 0.40; hue = 10; bright = 5
         case 9:
             f_name = os.path.normpath(os.path.join(TimeCube_dir, "color", "Presetpro - Blue Mist.cube"))
-            sat = 0.80; hue = 3; bright = -1
         case 10:
             f_name = os.path.normpath(os.path.join(TimeCube_dir, "color", "Presetpro - Vintage Fox.cube"))
-            sat = 0.80; hue = 3; bright = 1
         case 11:
             f_name = os.path.normpath(os.path.join(TimeCube_dir, "color", "Presetpro - Flat Pop.cube"))
-            sat = 0.80; hue = -2; bright = 0
 
     if not Path(f_name).is_file():
         HAVC_LogMessage(MessageType.INFORMATION, f"LUT cube file: {f_name} not found!")
@@ -220,6 +225,50 @@ def vs_timecube(clip: vs.VideoNode, strength: float = 1.0, lut_effect: int = DEF
         clip_new = vs.core.timecube.Cube(clip=clip, cube=f_name)
     except Exception as error:
         raise vs.Error("vs_timecube: plugin 'vscube.dll' not properly loaded/installed -> " + str(error))
+
+    return clip_new
+
+def vs_timecube(clip: vs.VideoNode, strength: float = 1.0, lut_effect: int = DEF_LUT_Exploration, factors: list = None) -> vs.VideoNode:
+
+    if strength == 0:
+        return clip   # nothing to do
+
+    clip_new = vs_timecube_load(clip, lut_effect)
+
+    hue: float = 0; sat: float = 1; bright: float = 0; cont: float = 1; gamma: float = 1
+
+    if factors is None:
+        match lut_effect:
+            case 0:
+                sat = 0.70; hue = 10
+            case 1:
+                cont = 0.90; sat = 0.65; hue = -3; bright = 1; gamma = 1.05
+            case 2:
+                sat = 1.05; cont = 1.05; gamma = 0.95; hue = 10; bright = -1
+            case 3:
+                sat = 0.80; hue = 10
+            case 4:
+                sat = 0.75; hue = 10
+            case 5:
+                sat = 0.80
+            case 6:
+                sat = 0.75
+            case 7:
+                sat = 0.95
+            case 8:
+                sat = 0.40; hue = 10; bright = 5
+            case 9:
+                sat = 0.80; hue = 3; bright = -1
+            case 10:
+                sat = 0.80; hue = 3; bright = 1
+            case 11:
+                sat = 0.80; hue = -2; bright = 0
+    else:
+        hue = factors[0]
+        sat = factors[1]
+        bright = factors[2]
+        cont = factors[3]
+        gamma = factors[4]
 
     clip_new = vs_tweak(clip_new, cont = cont, sat = sat, hue = hue, bright = bright, gamma = gamma)
 

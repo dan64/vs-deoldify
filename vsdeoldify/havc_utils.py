@@ -68,17 +68,9 @@ def convert_format_RGB24(clip: vs.VideoNode, chroma_resize: bool = False) -> tup
     if not isinstance(clip, vs.VideoNode):
         HAVC_LogMessage(MessageType.EXCEPTION, "convert_format_RGB24: Input is not a valid clip.")
 
-    # Create the ClipInfo struct
-    clip_info = ClipInfo(clip_orig=None,
-                         format_id=original_format.id,
-                         color_family=original_format.color_family,
-                         bits_per_sample=original_format.bits_per_sample,
-                         matrix=vs.MATRIX_BT709,
-                         color_range=vs.RANGE_FULL,
-                         chroma_resize=False)
-
-    if clip.format.id == vs.RGB24:
-        return clip, clip_info
+    # Get frame properties for matrix and color range
+    frame = clip.get_frame(0)
+    props = frame.props
 
     # Set missing color properties to reasonable defaults
     if _matrixIsInvalid(clip):
@@ -86,12 +78,28 @@ def convert_format_RGB24(clip: vs.VideoNode, chroma_resize: bool = False) -> tup
     if _rangeIsInvalid(clip):
         clip = clip.std.SetFrameProps(_ColorRange=vs.RANGE_LIMITED)
 
-    # Get frame properties for matrix and color range
-    frame = clip.get_frame(0)
-    props = frame.props
+    if clip.format.id == vs.RGB24:
+        if chroma_resize:
+            clip_info = ClipInfo(clip_orig=clip,
+                                 format_id=original_format.id,
+                                 color_family=original_format.color_family,
+                                 bits_per_sample=original_format.bits_per_sample,
+                                 matrix=vs.MatrixCoefficients(props.get('_Matrix', vs.MATRIX_BT709.value)),
+                                 color_range=vs.ColorRange(props.get('_ColorRange', vs.RANGE_LIMITED.value)),
+                                 chroma_resize=True)
+            clip = vsresize.resize_min_HW(clip)
+        else:
+            clip_info = ClipInfo(clip_orig=None,
+                         format_id=original_format.id,
+                         color_family=original_format.color_family,
+                         bits_per_sample=original_format.bits_per_sample,
+                         matrix=vs.MatrixCoefficients(props.get('_Matrix', vs.MATRIX_BT709.value)),
+                         color_range=vs.ColorRange(props.get('_ColorRange', vs.RANGE_LIMITED.value)),
+                         chroma_resize=False)
+        return clip, clip_info
 
     # resize to max allowed width
-    if chroma_resize and clip.width > DEF_MAX_RESIZE:
+    if chroma_resize:
         clip_info = ClipInfo(clip_orig=clip,
                              format_id=original_format.id,
                              color_family=original_format.color_family,
@@ -99,7 +107,7 @@ def convert_format_RGB24(clip: vs.VideoNode, chroma_resize: bool = False) -> tup
                              matrix=vs.MatrixCoefficients(props.get('_Matrix', vs.MATRIX_BT709.value)),
                              color_range=vs.ColorRange(props.get('_ColorRange', vs.RANGE_LIMITED.value)),
                              chroma_resize=True)
-        clip = vsresize.resize_to_width(clip, DEF_MAX_RESIZE)
+        clip = vsresize.resize_min_HW(clip)
     else:
         clip_info = ClipInfo(clip_orig=None,
                          format_id=original_format.id,
@@ -162,12 +170,12 @@ def restore_format(clip: vs.VideoNode, clip_info: ClipInfo) -> vs.VideoNode:
     if clip.format.id != vs.RGB24:
         HAVC_LogMessage(MessageType.EXCEPTION, "restore_format: Input clip must be RGB24.")
 
+    if clip_info.chroma_resize:
+        clip = vsresize.resize_to_chroma(clip_info.clip_orig, clip)
+
     # If already in target format (unlikely post-colorization), return as-is
     if clip.format.id == clip_info.format_id:
         return clip
-
-    if clip_info.chroma_resize:
-        clip = vsresize.resize_to_chroma(clip_info.clip_orig, clip)
 
     if clip_info.color_family == vs.YUV:
         # Use the original matrix if available, otherwise default to BT.709
@@ -227,7 +235,8 @@ function to read a video clip
 """
 
 
-def HAVC_read_video(source: str, fpsnum: int = 0, fpsden: int = 1) -> vs.VideoNode:
+def HAVC_read_video(source: str, fpsnum: int = 0, fpsden: int = 1, width: int = 0, height: int = 0,
+                    return_rgb: bool = True) -> vs.VideoNode:
     """HAVC utility function to read a video provided externally.
        The clip provided in output will be already in RGB24 format
 
@@ -236,7 +245,10 @@ def HAVC_read_video(source: str, fpsnum: int = 0, fpsden: int = 1) -> vs.VideoNo
                          same value of clip to be colored: clip.fps_num
     :param fpsden:       FPS denominator, for using it in HAVC, must be provided the
                          same value of clip to be colored: clip.fps_den
-    :return:             clip in RGB24 format
+    :param width:        If > 0 the clip is resized to width using Spline36
+    :param height:       If > 0 the clip is resized to height using Spline36
+    :param return_rgb:   If True (default) the clip will be converted in RGB24 format
+    :return:             clip in RGB24 format if return_rgb=True
     """
     if not os.path.isfile(source):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC: invalid clip -> " + source)
@@ -254,6 +266,13 @@ def HAVC_read_video(source: str, fpsnum: int = 0, fpsden: int = 1) -> vs.VideoNo
         clip = None
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC: LSMASHSource.dll not loaded or invalid clip -> " + str(error))
 
+    if width > 0 and height > 0:
+        clip = clip.resize.Spline36(width=width, height=height)
+    elif width > 0:
+        clip = clip.resize.Spline36(width=width, height=clip.height)
+    elif height > 0:
+        clip = clip.resize.Spline36(width=clip.width, height=height)
+
     # setting color matrix to 709.
     clip = vs.core.std.SetFrameProps(clip, _Matrix=vs.MATRIX_BT709)
     # setting color transfer (vs.TRANSFER_BT709), if it is not set.
@@ -268,12 +287,17 @@ def HAVC_read_video(source: str, fpsnum: int = 0, fpsden: int = 1) -> vs.VideoNo
     clip = vs.core.std.AssumeFPS(clip=clip, fpsnum=clip.fps_num, fpsden=clip.fps_den)
     # making sure the detected scan type is set (detected: progressive)
     clip = vs.core.std.SetFrameProps(clip=clip, _FieldBased=vs.FIELD_PROGRESSIVE)  # progressive
-    # changing range from limited to full range for HAVC
-    clip = vs.core.resize.Bicubic(clip, range_in_s="limited", range_s="full")
-    # setting color range to PC (full) range.
-    clip = vs.core.std.SetFrameProps(clip=clip, _ColorRange=vs.RANGE_FULL)
-    # adjusting color space to RGB24 for HAVC
-    clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full")
+
+    if return_rgb:
+        # changing range from limited to full range for HAVC
+        clip = vs.core.resize.Bicubic(clip, range_in_s="limited", range_s="full")
+        # setting color range to PC (full) range.
+        clip = vs.core.std.SetFrameProps(clip=clip, _ColorRange=vs.RANGE_FULL)
+        # adjusting color space to RGB24 for HAVC
+        clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full")
+    else:
+        # setting color range to TV (limited) range.
+        clip = vs.core.std.SetFrameProps(clip=clip, _ColorRange=vs.RANGE_LIMITED)
 
     return clip
 
@@ -292,8 +316,8 @@ def _get_render_factors(Preset: str) -> tuple[int, int, int]:
     # Select presets / tuning
     Preset = Preset.lower()
     presets = ['placebo', 'veryslow', 'slower', 'slow', 'medium', 'fast', 'faster', 'veryfast']
-    preset0_rf = [34, 32, 28, 26, 24, 22, 20, 16]
-    preset1_rf = [34, 32, 28, 26, 24, 22, 20, 16]
+    preset0_rf = [32, 32, 32, 28, 24, 22, 20, 16]
+    preset1_rf = [32, 32, 32, 28, 24, 22, 20, 16]
 
     pr_id = 5  # default 'fast'
     try:
@@ -333,37 +357,64 @@ def _get_comb_method(CombMethod: str) -> int:
 
     return method_id[w_id]
 
+def _spit_color_model(ColorModel: str) -> tuple[str, str]:
+    ColorModel = ColorModel.lower()
+
+    deoldify = "none"
+    ddcolor = "none"
+
+    if '+' not in ColorModel:
+        if 'deoldify' in ColorModel:
+            return ColorModel, ddcolor
+        else:
+            return deoldify, ColorModel
+
+    cm = ColorModel.split("+")
+
+    deoldify = f"deoldify({cm[0]})"
+
+    if cm[1] in ('siggraph17', 'eccv16'):
+        ddcolor = f"zhang({cm[1]})"
+    else:
+        ddcolor = f"ddcolor({cm[1]})"
+
+    return deoldify, ddcolor
 
 def _get_color_model(ColorModel: str) -> tuple[int, int, int]:
     ColorModel = ColorModel.lower()
 
-    do_model = 0  # default: Video
-    dd_model = 1  # default: Artistic
-
-    if 'siggraph17' in ColorModel:
-        dd_model = 2
-    elif 'eccv16' in ColorModel:
-        dd_model = 3
-
-    if 'modelscope' in ColorModel:
-        dd_model = 0
-        if 'artistic' in ColorModel:
-            do_model = 2
-    if 'stable' in ColorModel:
-        do_model = 1
+    ddcolor_list = ["modelscope", "artistic", "siggraph17", "eccv16"]
+    deoldify_list = ["video", "stable", "artistic"]
 
     if '+' in ColorModel:
+        cm = ColorModel.split("+")
+        do_model = deoldify_list.index(cm[0])
+        dd_model = ddcolor_list.index(cm[1])
         dd_method = 2
-    elif 'deoldify' in ColorModel:
+        return do_model, dd_model, dd_method
+
+    do_model = 0  # default: Video
+    dd_model = 0  # default: Modelscope
+    cmodel = ""
+
+    if "deoldify" in ColorModel:
+        cmodel = ColorModel.replace("deoldify", "").replace("(", "").replace(")", "")
+        do_model = deoldify_list.index(cmodel)
         dd_method = 0
-        if 'artistic' in ColorModel:
-            do_model = 2
-    elif 'ddcolor' in ColorModel:
-        dd_method = 1
-    else :
-        dd_method = 1
+        return do_model, dd_model, dd_method
+
+    if "ddcolor" in ColorModel:
+        cmodel = ColorModel.replace("ddcolor", "").replace("(", "").replace(")", "")
+    elif "zhang" in ColorModel:
+        cmodel = ColorModel.replace("zhang", "").replace("(", "").replace(")", "")
+    else:
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: ColorModel choice is invalid for '" + ColorModel + "'")
+
+    dd_method = 1
+    dd_model = ddcolor_list.index(cmodel)
 
     return do_model, dd_model, dd_method
+
 
 def _get_temp_color(ColorTemp: str) -> int:
     # Select ColorTemp
@@ -435,9 +486,9 @@ def _get_color_tune(ColorTune: str, ColorFix: str, ColorMap: str,
         dd_tweak[0] = True
         dd_tweak[1] = True
     elif tn_id != 0 and co_id == 9:
-        hue_range = hue_fix[4] + "|0.8,0.1"
-        hue_range2 = hue_fix[4] + "|0.9,0.0"
-        # in this case the tweaks/retinex for DDcolor are enabled and hue adjust is set to 'violet/red'
+        hue_range = hue_fix[4] +  "|" + hue_tune[2]
+        hue_range2 = hue_fix[4] + "|" + hue_tune2[2]
+        # in this case the tweaks/retinex for DDcolor are enabled and hue adjust is set to 'violet/red', tune = 'medium'
         dd_tweak[0] = True
         dd_tweak[2] = True
     else:
@@ -478,6 +529,37 @@ def _get_color_tune(ColorTune: str, ColorFix: str, ColorMap: str,
 
     return dd_tweak, hue_range, hue_range2, chroma_adjust, chroma_adjust2
 
+def _get_colormap(ColorMap: str = "red->brown", ColorTune: str ="light") -> str:
+
+    color_tune = ['none', 'light', 'medium', 'strong']
+    tn_id = 0
+    try:
+        tn_id = color_tune.index(ColorTune)
+    except ValueError:
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: ColorTune choice is invalid for '" + ColorTune + "'")
+
+    # Select Color Mapping
+    ColorMap = ColorMap.lower()
+    hue_w = ["1.0", "0.90", "0.80", "0.75"]
+    colormap = ['none', 'blue->brown', 'blue->red', 'blue->green', 'green->brown', 'green->red', 'green->blue',
+                'redrose->brown', 'redrose->blue', "red->brown", 'red->blue', 'yellow->rose']
+    hue_map = ["none", "180:280|+140", "180:280|+100", "180:280|+220", "80:180|+260", "80:180|+220", "80:180|+140",
+               "300:360,0:20|+40", "300:360,0:20|+260", "320:360|+50", "300:360|+260", "30:90|+300"]
+
+    cl_id = 0
+    try:
+        cl_id = colormap.index(ColorMap)
+    except ValueError:
+        ret_range = restcolor._parse_hue_adjust(ColorMap)
+        if ret_range is None:
+            HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: ColorMap choice is invalid for '" + ColorMap + "'")
+        else:
+            return ColorMap
+
+    chroma_adjust = hue_map[cl_id] + "," + hue_w[tn_id]
+
+    return chroma_adjust
+
 def _get_tune_id(bw_tune: str) -> int:
     BWTune = bw_tune.lower()
     bw_tune_list = ['none', 'light', 'medium', 'strong']
@@ -495,10 +577,10 @@ def _check_input(DeepExOnlyRefFrames: bool, ScFrameDir: str, DeepExMethod: int, 
         HAVC_LogMessage(MessageType.EXCEPTION,
                         "HAVC_main: DeepExOnlyRefFrames is enabled but method not = 0 (HAVC)")
 
-    if DeepExMethod != 0 and (ScFrameDir is None):
+    if (DeepExMethod != 0 and DeepExMethod != DEF_HAVC_METHOD_PLACEBO) and (ScFrameDir is None):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_main: DeepExMethod != 0 but ScFrameDir is unset")
 
-    if DeepExMethod in (0, 1, 2, 5, 6) and ScThreshold == 0 and ScMinFreq == 0:
+    if DeepExMethod in (0, 1, 2, 5, 6, DEF_HAVC_METHOD_PLACEBO) and ScThreshold == 0 and ScMinFreq == 0:
         HAVC_LogMessage(MessageType.EXCEPTION,
                         "HAVC_main: DeepExMethod in (0, 1, 2, 5, 6) but ScThreshold and ScMinFreq are not set")
 
@@ -745,7 +827,7 @@ def rgb_equalizer(clip: vs.VideoNode, method: int = 0, clip_limit : float = 1.0,
                          Used by models: 0, 2, 3 (default=8)
    :param strength:      Strength of the filter. A strength=0 means that the clip is returned unchanged,
                          range [0, 1] (default=0.5)
-   :param weight3:       Weight for method 3 (default=0.5)
+   :param weight3:       Weight for method 3 (default=0.3)
    :param luma_blend:    If enabled the equalized image is blended with the original image, darker is the image and more
                          weight will be assigned to the original image. default = True
    :param range_tv:      If True, the clip is using limited TV range.
@@ -757,7 +839,7 @@ def rgb_equalizer(clip: vs.VideoNode, method: int = 0, clip_limit : float = 1.0,
    # A zero weight means that the clip filtered is returned unchanged and 1 means that original clip is returned
    weight: float = min(max(1.0 - strength, 0.0), 1.0)
 
-   #  Contrast Limited Adaptive Histogram Equalization
+   #  Apply Contrast Limited Adaptive Histogram Equalization (CLAHE) on Luma, to improve the contrast of images
    def frame_autolevels_CLAHE_yuv(n, f, limit : float = 2.0, gridsize: int = 8, blend: bool = True):
 
       img = frame_to_image(f)
@@ -800,7 +882,7 @@ def rgb_equalizer(clip: vs.VideoNode, method: int = 0, clip_limit : float = 1.0,
 
       return image_to_frame(img_m, f.copy())
 
-   # CLAHE (Contrast Limited Adaptive Histogram Equalization) is used to improve the contrast of images
+   # CLAHE (Contrast Limited Adaptive Histogram Equalization) on RGB
    def frame_autolevels_CLAHE_rgb(n, f, limit : float = 2.0, gridsize: int = 8, algo = 0, blend: bool = True):
 
       img = frame_to_image(f)
@@ -918,6 +1000,16 @@ def rgb_equalizer(clip: vs.VideoNode, method: int = 0, clip_limit : float = 1.0,
 
       return image_to_frame(img_m, f.copy())
 
+   def ScaleAbs_LUT(clip: vs.VideoNode, lut_tune: float) -> vs.VideoNode:
+       if lut_tune == 3:  # strong
+           clip_a = vs_timecube(clip, strength=0.5, lut_effect=DEF_LUT_Amber_Light)
+       elif lut_tune == 2:  # medium
+           clip_a = vs_timecube(clip, strength=0.7, lut_effect=DEF_LUT_City_Skyline)
+       else:  # light
+           clip_a = vs_timecube(clip, strength=0.9, lut_effect=DEF_LUT_Exploration)
+
+       return clip_a
+
    if method == 0:
       clip_a = rgb_clip.std.ModifyFrame(clips=rgb_clip, selector=partial(frame_autolevels_CLAHE_yuv, limit=clip_limit,
                                                                      gridsize=gridsize, blend=luma_blend))
@@ -934,10 +1026,10 @@ def rgb_equalizer(clip: vs.VideoNode, method: int = 0, clip_limit : float = 1.0,
                                                                       gridsize=gridsize, blend=luma_blend))
       # weight=0 means that is returned clip_a, weight=1 means that is returned clip_b
       clip_a = vs.core.std.Merge(clip_a, clip_b, weight3)
-   elif method ==4:
-      clip_a = vs_timecube(rgb_clip, strength = 0.7, lut_effect = DEF_LUT_Flat_Pop)
-      #clip_a = rgb_clip.std.ModifyFrame(clips=clip_a, selector=partial(autolevels_with_Scale, algo=0, blend=luma_blend,
-      #                                                  clip_hist_percent=clip_limit))
+   elif method == 4:
+       clip_a = ScaleAbs_LUT(rgb_clip, weight3)
+       # clip_a = rgb_clip.std.ModifyFrame(clips=clip_a, selector=partial(autolevels_with_Scale, algo=0, blend=luma_blend,
+       #                                                  clip_hist_percent=clip_limit))
    else:
       clip_a = vs_retinex(rgb_clip, luma_dark=0.20, luma_bright=0.80, sigmas=[25, 80, 250], range_tv_in=range_tv,
                           range_tv_out=range_tv, blend=luma_blend)

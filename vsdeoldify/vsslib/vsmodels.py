@@ -15,7 +15,7 @@ import math
 import torch
 from functools import partial
 
-from vsdeoldify.deoldify.visualize import ModelImageInitializer, ModelImageVisualizer
+from vsdeoldify.deoldify.visualize import ModelImageRender
 #from vsdeoldify.deoldify.visualize import *
 from vsdeoldify.remaster import vs_sc_remaster_colorize
 from vsdeoldify.vsslib.imfilters import image_weighted_merge
@@ -198,25 +198,25 @@ def vs_sc_deoldify(clip: vs.VideoNode, method: int = 2, model: int = 0, render_f
     if method == 1:
         return None
 
-    m_cfg = ModelImageInitializer(package_dir=package_dir)
-
     match model:
-        case 0:
-            colorizer = m_cfg.get_image_colorizer(artistic=False, isvideo=True)
-        case 1:
-            colorizer = m_cfg.get_image_colorizer(artistic=False, isvideo=False)
-        case 2:
-            colorizer = m_cfg.get_image_colorizer(artistic=True, isvideo=False)
+        case 0:  # model: Video
+            colorizer = ModelImageRender(package_dir=package_dir, modelname='video', render_factor=render_factor)
+        case 1:  # model: Stable
+            colorizer = ModelImageRender(package_dir=package_dir, modelname='stable', render_factor=render_factor,
+                                         video_weight=DEF_STABLE_WEIGHT)
+        case 2:  # model: Artistic
+            colorizer = ModelImageRender(package_dir=package_dir, modelname='artistic', render_factor=render_factor,
+                                         video_weight=DEF_ARTISTIC_WEIGHT)
+        case _:
+            colorizer = ModelImageRender(package_dir=package_dir, modelname='video', render_factor=render_factor)
 
-    clipa_rgb = _deoldify(clip, colorizer, render_factor, scenechange)
+    clipa_rgb = _deoldify(clip, colorizer, scenechange=scenechange)
 
     return clipa_rgb
 
 
-def _deoldify(clip: vs.VideoNode, colorizer: ModelImageVisualizer = None, render_factor: int = 24,
-              scenechange: bool = True) -> vs.VideoNode:
-    def deoldify_colorize(n: int, f: vs.VideoFrame, colorizer: ModelImageVisualizer = None,
-                          render_factor: int = 24, scenechange: bool = True) -> vs.VideoFrame:
+def _deoldify(clip: vs.VideoNode, colorizer: ModelImageRender = None, scenechange: bool = True) -> vs.VideoNode:
+    def deoldify_colorize(n: int, f: vs.VideoFrame, colorizer: ModelImageRender, scenechange: bool) -> vs.VideoFrame:
 
         if scenechange:
             is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1)
@@ -225,13 +225,12 @@ def _deoldify(clip: vs.VideoNode, colorizer: ModelImageVisualizer = None, render
 
         img_orig = frame_to_image(f)
 
-        img_color = colorizer.get_transformed_image(img_orig, render_factor=render_factor, post_process=True)
+        img_color = colorizer.get_transformed_image(img_orig, post_process=True)
 
         return image_to_frame(img_color, f.copy())
 
     return clip.std.ModifyFrame(clips=[clip],
-                                selector=partial(deoldify_colorize, colorizer=colorizer, render_factor=render_factor,
-                                                 scenechange=scenechange))
+                                selector=partial(deoldify_colorize, colorizer=colorizer, scenechange=scenechange))
 
 
 """

@@ -42,8 +42,13 @@ from vsdeoldify.vsslib.vsmodels import vs_colormnet2
 from vsdeoldify.vsslib.vsplugins import vs_reduce_flicker, vs_timecube
 from vsdeoldify.vsslib.vsretinex import vs_retinex
 from vsdeoldify.vsslib.vsutils import vs_sc_export_frames, vs_list_export_frames, HAVC_LogMessage, MessageType
+from vsdeoldify.vsslib.vsutils import frame_to_image
 from vsdeoldify.vsslib.vsresize import SmartResizeColorizer, SmartResizeReference
 from vsdeoldify.vsslib.vsscdect import SceneDetectFromDir, SceneDetect, CopySCDetect, get_sc_props
+
+from vsdeoldify.vsslib.vstiles4 import ClipTiles
+from vsdeoldify.vsslib.vstiles4 import vs_slice_into_2_horizontal_tiles, vs_reconstruct_from_2_horizontal_tiles
+from vsdeoldify.vsslib.vstiles4 import vs_slice_into_2x2_overlapping_tiles, vs_reconstruct_from_2x2_overlapping_tiles
 
 from vsdeoldify.deoldify import device
 from vsdeoldify.deoldify.device_id import DeviceId
@@ -52,10 +57,12 @@ import vsdeoldify.remaster
 
 import vsdeoldify.vsslib.constants as constants
 
-__version__ = "5.6.2"
+__version__ = "5.6.5"
 
 import warnings
 import logging
+
+from typing import Sequence
 
 warnings.filterwarnings("ignore", category=UserWarning, message=".*?Your .*? set is empty.*?")
 warnings.filterwarnings("ignore", category=UserWarning,
@@ -104,7 +111,7 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
     :param clip:                clip to process, any format is supported.
     :param Preset:              Preset to control the encoding speed/quality.
                                 Allowed values are:
-                                    'Placebo',
+                                    'Placebo', (HD coloring support, speed-up with FrameInterp)
                                     'VerySlow',
                                     'Slower',
                                     'Slow',
@@ -113,10 +120,10 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
                                     'Faster',
                                     'VeryFast'
     :param FrameInterp:         This parameter will allow to enable the frame interpolation. This method will use
-                                Deep-Exemplar to interpolate the colored frames. If = 0, the interpolation is disabled,
-                                if > 0 represent the number of frames used for interpolation. The quality of
-                                interpolation will decrease with the number of frames, suggested value is 5.
-                                Range [0-10], Default = 0
+                                Deep-Exemplar to interpolate the colored frames if FrameInterp < 5, otherwise will use
+                                ColorMNet. If = 0, the interpolation is disabled, if > 0 represent the number of frames
+                                used for interpolation. The quality of interpolation will decrease with the number of
+                                frames, suggested value is 3. Range [0-10], Default = 0
     :param ColorModel:          Preset to control the Color Models to be used for the color inference
                                 Allowed values are:
                                     'Video+Artistic'  (default)
@@ -306,12 +313,186 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
 
     # Select presets / tuning
     speed_id, deoldify_rf, ddcolor_rf = havc_utils._get_render_factors(Preset)
+    if speed_id == 0:
+        return HAVC_placebo_preset(clip, CombMethod, VideoTune, ColorModel, ColorFix, ColorTune,
+               ColorMap, ColorTemp, FrameInterp, BlackWhiteTune, BlackWhiteMode, BlackWhiteBlend,
+               RefRange, enable_fp16, debug_level)
+    elif speed_id == 1:
+        return HAVC_veryslow_preset(clip, 'Slower', FrameInterp, ColorModel, CombMethod, VideoTune, ColorFix,
+               ColorTune, ColorMap, ColorTemp, BlackWhiteTune, BlackWhiteMode, BlackWhiteBlend, EnableDeepEx=False,
+               RefRange=RefRange, enable_fp16=enable_fp16, debug_level=debug_level)
+    else:
+        return HAVC_main_presets(clip, Preset, FrameInterp, ColorModel, CombMethod, VideoTune, ColorFix,
+               ColorTune, ColorMap, ColorTemp, BlackWhiteTune, BlackWhiteMode, BlackWhiteBlend, EnableDeepEx,
+               DeepExMethod, DeepExPreset, DeepExRefMerge, DeepExOnlyRefFrames, ScFrameDir, ScThreshold, ScThtOffset,
+               ScMinFreq, ScMinInt, ScThtSSIM, ScNormalize, DeepExModel, DeepExVivid, DeepExEncMode, DeepExMaxMemFrames,
+               RefRange, enable_fp16, debug_level)
 
-    chroma_resize: bool = (speed_id > 2)   # 'placebo', 'veryslow' and 'slower' will not be downsized
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description:
+------------------------------------------------------------------------------- 
+Main HAVC function supporting Presets
+"""
+
+def HAVC_veryslow_preset(clip: vs.VideoNode, Preset: str = 'Slower', FrameInterp: int = 0,
+                         ColorModel: str = 'Video+Artistic', CombMethod: str = 'Simple', VideoTune: str = 'Stable',
+                         ColorFix: str = 'Magenta/Violet', ColorTune: str = 'Light', ColorMap: str = 'None',
+                         ColorTemp: str = "None", BlackWhiteTune: str = 'None', BlackWhiteMode: int = 0,
+                         BlackWhiteBlend: bool = True, EnableDeepEx: bool = False, DeepExMethod: int = 0,
+                         ScThreshold: float = 0.1, ScMinFreq: int = 0, RefRange: tuple[int, int] = (0, 0),
+                         enable_fp16: bool = True, debug_level: int = 0) -> vs.VideoNode:
+    """
+    HAVC function supporting Preset VerySlow: Deep-Exemplar settings is not supported, only ColorTemp and FrameInterp
+    """
+
+    def veryslow_preset(clip: vs.VideoNode, Preset: str = 'Slower', FrameInterp: int = 0,
+                        ColorModel: str = 'Video+Artistic', CombMethod: str = 'Simple', VideoTune: str = 'Stable',
+                        ColorFix: str = 'Magenta/Violet', ColorTune: str = 'Light', ColorMap: str = 'None',
+                        ColorTemp: str = "None", BlackWhiteTune: str = 'None', BlackWhiteMode: int = 0,
+                        BlackWhiteBlend: bool = True, EnableDeepEx: bool = False, DeepExMethod: int = 0,
+                        ScThreshold: float = 0.1, ScMinFreq: int = 0, RefRange: tuple[int, int] = (0, 0),
+                        enable_fp16: bool = True, debug_level: int = 0) -> vs.VideoNode:
+
+        deoldify_model, ddcolor_model = havc_utils._spit_color_model(ColorModel)
+        # -- Clip1: DeOldify --------------------------
+        if deoldify_model != "none":
+            clip_dark = HAVC_tweak(clip=clip, bright=-1, gamma=0.90, cont=0.80)
+            clip1 = HAVC_main_presets(clip=clip_dark, Preset=Preset, ColorModel=deoldify_model, ColorTemp="none", ColorFix="none",
+                                      ColorTune="medium", BlackWhiteTune="light", BlackWhiteMode=0, BlackWhiteBlend=True,
+                                      FrameInterp=0, EnableDeepEx=EnableDeepEx, DeepExMethod=DeepExMethod,
+                                      ScThreshold=ScThreshold, ScMinFreq=ScMinFreq, RefRange=RefRange,
+                                      enable_fp16=enable_fp16, debug_level=debug_level)
+            clip1 = HAVC_ColorAdjust(clip1, BlackWhiteTune='medium', BlackWhiteMode=4, BlackWhiteBlend=True, ReColor=False,
+                                     chroma_resize=True)
+            clip1 = HAVC_tweak(clip=clip1, sat=0.95, hue=5)
+        else:
+            clip1 = None
+        # -- Clip2: DDColor -------------------------- Support: FrameInterp
+        if ddcolor_model != "none":
+            clip_dark = HAVC_tweak(clip=clip, bright=-1, gamma=0.95, cont=0.95)
+            clip2 = HAVC_main_presets(clip=clip_dark, Preset=Preset, ColorModel=ddcolor_model, ColorTemp="none",
+                                  ColorFix=ColorFix, ColorMap=ColorMap, ColorTune=ColorTune, BlackWhiteMode=0,
+                                  FrameInterp=0, BlackWhiteTune="light", BlackWhiteBlend=True,
+                                  EnableDeepEx=EnableDeepEx, DeepExMethod=DeepExMethod, ScThreshold=ScThreshold,
+                                  ScMinFreq=ScMinFreq, RefRange=RefRange, enable_fp16=enable_fp16, debug_level=debug_level)
+        else:
+            clip2 = None
+        # -------------------------------
+        if clip1 is None:
+            clip_color = HAVC_merge(clipa=clip2, clip_luma=clip, method=0)
+        elif clip2 is None:
+            clip_color = HAVC_merge(clipa=clip1, clip_luma=clip, method=0)
+        else:
+            ddcolor_weight = havc_utils._get_mweight(VideoTune)
+            dd_method = havc_utils._get_comb_method(CombMethod)
+            clip_color = HAVC_merge(clipa=clip1, clipb=clip2, clip_luma=clip, weight=ddcolor_weight, method=dd_method)
+        return clip_color
+
+    clip, orig_fmt = convert_format_RGB24(clip, chroma_resize=False)
+
+    if FrameInterp == 0:  # Very Slow encoding (2x slower)
+        color_temp = havc_utils._get_temp_color(ColorTemp)
+        clip_colored = veryslow_preset(clip, "Slower", 0, ColorModel, CombMethod, VideoTune, ColorFix,
+                                         ColorTune, ColorMap, "None", BlackWhiteTune, BlackWhiteMode, BlackWhiteBlend,
+                                         RefRange=RefRange, enable_fp16=enable_fp16, debug_level=debug_level)
+        if color_temp > 0:
+            clip_ref = clip_colored.std.SetFrameProp(prop="sc_threshold", floatval=0.1)
+            clip_ref = clip_ref.std.SetFrameProp(prop="sc_frequency", intval=1)
+            clip_colored = HAVC_cmnet2(clip=clip, clip_ref=clip_ref, render_speed='Medium', render_vivid=True,
+                                     ref_merge=color_temp, dark=True, dark_p=[0.2, 0.8], ref_thresh=0.10,
+                                     encode_mode=0, max_memory_frames=0, ref_freq=0, ref_norm=True,
+                                     smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"], colormap="300:360|0.8,0.1")
+
+    else:  # Faster Encoding, using ColorMNet as frame interpolator
+        ref_freq_temp = FrameInterp if FrameInterp < 5 else FrameInterp * 2
+        clip_colored = veryslow_preset(clip, "Slower", 0, ColorModel, CombMethod, VideoTune, ColorFix,
+                                         ColorTune, ColorMap, "None", BlackWhiteTune, BlackWhiteMode, BlackWhiteBlend,
+                                         EnableDeepEx=True, DeepExMethod=constants.DEF_HAVC_METHOD_PLACEBO,
+                                         ScThreshold=0.1,  ScMinFreq=ref_freq_temp, RefRange=RefRange,
+                                         enable_fp16=enable_fp16, debug_level=debug_level)
+        clip_ref = clip_colored.std.SetFrameProp(prop="sc_threshold", floatval=0.1)
+        clip_ref = clip_ref.std.SetFrameProp(prop="sc_frequency", intval=ref_freq_temp)
+        clip_colored = vs_frame_interpolation(clip=clip, clip_ref=clip_ref, frame_interp=FrameInterp,
+                                              chroma_adjust="300:360|0.8,0.1", process_id=2)
+
+    clip_adjusted = HAVC_ColorAdjust(clip_colored,  BlackWhiteTune=BlackWhiteTune, BlackWhiteMode=BlackWhiteMode,
+                                     BlackWhiteBlend=BlackWhiteBlend, ReColor=False)
+
+    clip_adjusted = HAVC_tweak(clip_adjusted, hue=10, sat=1.05, cont=0.90)
+    clip_colored = HAVC_merge(clipa=clip_adjusted, clipb=clip_colored, weight=0.4, method=2)
+
+    return restore_format(clip_colored, orig_fmt)
+
+def HAVC_placebo_preset(clip: vs.VideoNode, CombMethod: str = 'Simple', VideoTune: str = 'Stable',
+                        ColorModel: str = 'Video+Artistic', ColorFix: str = 'Magenta/Violet', ColorTune: str = 'Light',
+                        ColorMap: str = 'None', ColorTemp: str = 'None', FrameInterp: int = 0,
+                        BlackWhiteTune: str = 'None', BlackWhiteMode: int = 0, BlackWhiteBlend: bool = True,
+                        RefRange: tuple[int, int] = (0, 0), enable_fp16: bool = True,
+                        debug_level: int = 0) -> vs.VideoNode:
+    """
+    HAVC function supporting Preset Placebo: Deep-Exemplar settings is not supported, only ColorTemp and FrameInterp
+    """
+    clip, orig_fmt = convert_format_RGB24(clip, chroma_resize=False)
+
+    if FrameInterp == 0:   # Very Slow encoding (4x slower)
+        color_temp = havc_utils._get_temp_color(ColorTemp)
+        clip_colored = HAVC_main_presets(clip, "Placebo", 0, ColorModel, CombMethod, VideoTune, ColorFix,
+                       ColorTune, ColorMap, "None", BlackWhiteTune, BlackWhiteMode, BlackWhiteBlend,
+                       RefRange=RefRange, enable_fp16=enable_fp16, debug_level=debug_level)
+        if color_temp > 0:
+            clip_ref = clip_colored.std.SetFrameProp(prop="sc_threshold", floatval=0.1)
+            clip_ref = clip_ref.std.SetFrameProp(prop="sc_frequency", intval=1)
+            clip_colored = HAVC_cmnet2(clip=clip, clip_ref=clip_ref, render_speed='Medium', render_vivid=True,
+                                     ref_merge=color_temp, dark=True, dark_p=[0.2, 0.8], ref_thresh=0.10,
+                                     encode_mode=0, max_memory_frames=0, ref_freq=0, ref_norm=True,
+                                     smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"], colormap="300:360|0.8,0.1")
+
+    else:  # Faster Encoding, using ColorMNet as frame interpolator
+        ref_freq_temp = FrameInterp if FrameInterp < 5 else FrameInterp*2
+
+        clip_colored = HAVC_main_presets(clip, "Placebo", 0, ColorModel, CombMethod, VideoTune, ColorFix,
+                       ColorTune, ColorMap, "None", BlackWhiteTune, BlackWhiteMode, BlackWhiteBlend,
+                       EnableDeepEx = True, DeepExMethod = constants.DEF_HAVC_METHOD_PLACEBO, ScThreshold = 0.1,
+                       ScMinFreq = ref_freq_temp, RefRange=RefRange, enable_fp16=enable_fp16, debug_level=debug_level)
+
+        clip_ref = clip_colored.std.SetFrameProp(prop="sc_threshold", floatval=0.1)
+        clip_ref = clip_ref.std.SetFrameProp(prop="sc_frequency", intval=ref_freq_temp)
+        clip_colored = vs_frame_interpolation(clip=clip, clip_ref=clip_ref, frame_interp=FrameInterp,
+                                              chroma_adjust="300:360|0.8,0.1", process_id=2)
+
+    return restore_format(clip_colored, orig_fmt)
+
+def HAVC_main_presets(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, ColorModel: str = 'Video+Artistic',
+                  CombMethod: str = 'Simple', VideoTune: str = 'Stable', ColorFix: str = 'Magenta/Violet',
+                  ColorTune: str = 'Light', ColorMap: str = 'None', ColorTemp: str = "None",
+                  BlackWhiteTune: str = 'None', BlackWhiteMode: int = 0, BlackWhiteBlend: bool = True,
+                  EnableDeepEx: bool = False, DeepExMethod: int = 0, DeepExPreset: str = 'Medium',
+                  DeepExRefMerge: int = 0, DeepExOnlyRefFrames: bool = False, ScFrameDir: str = None,
+                  ScThreshold: float = constants.DEF_THRESHOLD, ScThtOffset: int = 1, ScMinFreq: int = 0,
+                  ScMinInt: int = 1, ScThtSSIM: float = 0.0, ScNormalize: bool = False, DeepExModel: int = 0,
+                  DeepExVivid: bool = True, DeepExEncMode: int = 0, DeepExMaxMemFrames=0,
+                  RefRange: tuple[int, int] = (0, 0),
+                  enable_fp16: bool = True, debug_level: int = 0) -> vs.VideoNode:
+    """
+    HAVC function supporting Presets: 'Slower', 'Slow', 'Medium', 'Fast', 'Faster', 'VeryFast'
+    """
+
+    # disable packages warnings
+    disable_warnings()
+
+    HAVC_set_debug_level(debug_level)
+
+    # Select presets / tuning
+    speed_id, deoldify_rf, ddcolor_rf = havc_utils._get_render_factors(Preset)
+
+    chroma_resize: bool = (speed_id > 1)   # 'placebo' and 'veryslow' will not be downsized
 
     clip, orig_fmt = convert_format_RGB24(clip, chroma_resize=chroma_resize)
 
-    EnableRetinex: bool = ColorTune.lower() != "none" and ColorFix == "retinex/red"
+    EnableRetinex: bool = ColorTune.lower() != "none" and ColorFix.lower() == "retinex/red"
     BWTuneRetinex: bool = BlackWhiteTune.lower() != "none" and BlackWhiteMode == 6
     DeFlicker: bool = EnableDeepEx or ColorTemp.lower() != "none" or EnableRetinex or BWTuneRetinex
 
@@ -320,41 +501,30 @@ def HAVC_main(clip: vs.VideoNode, Preset: str = 'Medium', FrameInterp: int = 0, 
         BlackWhiteTune = "light"
         BlackWhiteMode = 0
         BlackWhiteBlend = True
-
+    
     clip_colored = HAVC_main_colorizer(clip, Preset, ColorModel, CombMethod,  VideoTune, ColorFix, ColorTemp,
               ColorTune, ColorMap, EnableDeepEx, DeepExMethod, DeepExPreset, DeepExRefMerge, DeepExOnlyRefFrames,
               ScFrameDir, ScThreshold, ScThtOffset, ScMinFreq, ScMinInt, ScThtSSIM, ScNormalize, DeepExModel,
               DeepExVivid, DeepExEncMode, DeepExMaxMemFrames, FrameInterp, RefRange, enable_fp16, debug_level)
 
     if BWTuneRetinex:
-        clip_colored = HAVC_tweak(clip_colored, hue=5.0, sat=0.95, bright=0, cont=0.95, gamma=0.95)
+        clip_colored = HAVC_tweak(clip_colored, hue=5.0, sat=0.95, bright=0, cont=0.98, gamma=0.98)
 
     if BlackWhiteTune.lower() != "none":
         clip_colored = HAVC_bw_tune(clip_colored, BlackWhiteTune, BlackWhiteMode, BlackWhiteBlend)
 
     clip_final = clip_colored
-    if speed_id > 3:  # 'medium', 'fast', 'faster', 'veryfast'
-        if EnableRetinex:
-            match ColorTune.lower():
-                case 'medium':
-                    clip_final = vs_timecube(clip_colored, 0.6, constants.DEF_LUT_City_Skyline)
-                case 'strong':
-                    if ColorMap.lower() == "red->brown":
-                        clip_final = vs_timecube(clip_colored, 0.8, constants.DEF_LUT_Exploration)
-                    else:
-                        clip_final = vs_timecube(clip_colored, 0.6, constants.DEF_LUT_FUJ_Film)
-    else:  # 'placebo', 'veryslow', 'slower', 'slow'
-        if EnableRetinex:
-            match ColorTune.lower():
-                case 'light':
-                    clip_final = vs_timecube(clip_colored, 0.8, constants.DEF_LUT_Exploration)
-                case 'medium':
-                    clip_final = vs_timecube(clip_colored, 0.6, constants.DEF_LUT_City_Skyline)
-                case 'strong':
-                    if ColorMap.lower() == "red->brown":
-                        clip_final = vs_timecube(clip_colored, 0.4, constants.DEF_LUT_Amber_Light)
-                    else:
-                        clip_final = vs_timecube(clip_colored, 0.6, constants.DEF_LUT_FUJ_Film)
+    if EnableRetinex:
+        match ColorTune.lower():
+            case 'light':
+                clip_final = vs_timecube(clip_colored, 0.8, constants.DEF_LUT_Exploration)
+            case 'medium':
+                clip_final = vs_timecube(clip_colored, 0.6, constants.DEF_LUT_City_Skyline)
+            case 'strong':
+                if ColorMap.lower() == "red->brown":
+                    clip_final = vs_timecube(clip_colored, 0.4, constants.DEF_LUT_Amber_Light)
+                else:
+                    clip_final = vs_timecube(clip_colored, 0.6, constants.DEF_LUT_FUJ_Film)
 
     if DeFlicker:
         clip_final = vs_reduce_flicker(clip_final)
@@ -375,7 +545,7 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
     :param clip:                clip to process, any format is supported.
     :param Preset:              Preset to control the encoding speed/quality.
                                 Allowed values are:
-                                    'Placebo',
+                                    'Placebo', (HD coloring support, speed-up with FrameInterp)
                                     'VerySlow',
                                     'Slower',
                                     'Slow',
@@ -522,10 +692,10 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
                                     min=4, max=50
                                 If = 0 will be filled with the value of 20.
     :param FrameInterp:         This parameter will allow to enable the frame interpolation. This method will use
-                                Deep-Exemplar to interpolate the colored frames. If = 0, the interpolation is disabled,
-                                if > 0 represent the number of frames used for interpolation. The quality of
-                                interpolation will decrease with the number of frames, suggested value is 5.
-                                Range [0-10], Default = 0
+                                Deep-Exemplar to interpolate the colored frames if FrameInterp < 5, otherwise will use
+                                ColorMNet. If = 0, the interpolation is disabled, if > 0 represent the number of frames
+                                used for interpolation. The quality of interpolation will decrease with the number of
+                                frames, suggested value is 3. Range [0-10], Default = 0.
     :param ScFrameDir:          if set, define the directory where are stored the reference frames that will be used
                                 by "Exemplar-based" Video Colorization models. With DeepExMethod 5,6 this parameter 
                                 can be the path to a video clip.
@@ -582,8 +752,20 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
     if color_temp > 0:
         ScMinFreq = 1 # Forced to 1
         DeepExVivid = EnableDeepEx  # if EnableDeepEx is true, DeepExVivid is forced to True
-    # ---------------------- START COLORING ------------------------------------
-    if EnableDeepEx and DeepExMethod in (0, 1, 2, 5, 6):
+    if FrameInterp > 4:
+        EnableDeepEx = False  # is not compatible with FrameInterp > 4
+
+    # ---------------------- SET Placebo ------------------------------------
+    slices_n = 0
+    overlap_x = (round(max(min((0.5 * clip.width)*0.2,192), 64),0) // 2) * 2
+    overlap_y = (round(max(min((0.5 * clip.height)*0.2,108), 64),0) // 2) * 2
+    deoldify_rf_n = min(max(math.trunc((0.5 * clip.width + overlap_x) / 16), 22), 32)
+    ddcolor_rf_n = deoldify_rf_n
+    blend_weight = 0 # linear blend good with 20% overlap
+    if speed_id in (0, 1): # Placebo, VerySlow
+        slices_n = 4 if speed_id == 0 else 2
+    # ---------------------- START COLORING --------------------------------------------
+    if EnableDeepEx and DeepExMethod in (0, 1, 2, 5, 6, constants.DEF_HAVC_METHOD_PLACEBO):
 
         havc_utils._check_input(DeepExOnlyRefFrames, ScFrameDir, DeepExMethod, ScThreshold, ScMinFreq, DeepExRefMerge)
 
@@ -614,9 +796,9 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
                                               max_memory_frames=DeepExMaxMemFrames, render_vivid=DeepExVivid,
                                               encode_mode=DeepExEncMode, ref_norm=ScNormalize)
 
-        else:
+        else: # HAVC method in (0, 1, 2, DEF_HAVC_METHOD_PLACEBO)
 
-            if FrameInterp == 0 :
+            if FrameInterp == 0 or DeepExRefMerge == 0:
                 clip_ref = HAVC_colorizer(clip, method=dd_method, mweight=ddcolor_weight,
                                       deoldify_p=[do_model, deoldify_rf, 1.0, 0.0],
                                       ddcolor_p=[dd_model, ddcolor_rf, 1.0, 0.0, enable_fp16],
@@ -636,15 +818,19 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
                                        encode_mode=0, max_memory_frames=0, ref_freq=0, ref_norm=True, smooth=True,
                                        smooth_p=[0.3, 0.7, 0.9, 0.0, "none"], colormap=chroma_adjust)
 
-            clip_colored = HAVC_deepex(clip=clip, clip_ref=clip_ref, method=DeepExMethod, render_speed=DeepExPreset,
+            if DeepExMethod != constants.DEF_HAVC_METHOD_PLACEBO:
+                clip_colored = HAVC_deepex(clip=clip, clip_ref=clip_ref, method=DeepExMethod, render_speed=DeepExPreset,
                                        render_vivid=DeepExVivid, ref_merge=DeepExRefMerge, sc_framedir=ScFrameDir,
                                        only_ref_frames=DeepExOnlyRefFrames, dark=True, dark_p=[0.2, 0.8],
                                        ref_thresh=ref_tresh, ex_model=DeepExModel, encode_mode=DeepExEncMode,
                                        max_memory_frames=DeepExMaxMemFrames, ref_freq=ScMinFreq, ref_norm=ScNormalize,
                                        smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"], colormap=chroma_adjust)
+            else:
+                clip_colored = clip_ref
 
         # are applied the faster stabilization settings
-        clip_colored = HAVC_stabilizer(clip_colored, stab=stab_enabled, stab_p=[3, 'A', 1, 0, 0, 0],
+        if DeepExMethod != constants.DEF_HAVC_METHOD_PLACEBO:
+            clip_colored = HAVC_stabilizer(clip_colored, stab=stab_enabled, stab_p=[3, 'A', 1, 0, 0, 0],
                                        colormap=chroma_adjust2)
 
     elif EnableDeepEx and DeepExMethod in (3, 4):
@@ -666,19 +852,41 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
     else:  # No DeepEx -> HAVC classic
 
         if FrameInterp == 0:
-            clip_colored = HAVC_colorizer(clip, method=dd_method, mweight=ddcolor_weight,
+            if slices_n == 0:
+                clip_colored = HAVC_colorizer(clip, method=dd_method, mweight=ddcolor_weight,
                                       deoldify_p=[do_model, deoldify_rf, 1.0, 0.0],
                                       ddcolor_p=[dd_model, ddcolor_rf, 1.0, 0.0, enable_fp16],
                                       ddtweak=dd_tweak, ddtweak_p=[constants.DEF_TWEAK_p, hue_range])
-            clip_colored = clip_colored.std.SetFrameProp(prop="sc_threshold", floatval=0.1)
-            clip_colored = clip_colored.std.SetFrameProp(prop="sc_frequency", intval=1)
+            else:
+                clips = HAVC_clip_slice(clip, slices=slices_n, overlap_x=overlap_x, overlap_y=overlap_y)
+                for i in range(slices_n):
+                    #img_bw=frame_to_image(clips.tiles[i].get_frame(0))
+                    clips.tiles[i] = HAVC_colorizer(clips.tiles[i], method=dd_method, mweight=ddcolor_weight,
+                                      deoldify_p=[do_model, deoldify_rf_n, 1.0, 0.0],
+                                      ddcolor_p=[dd_model, ddcolor_rf_n, 1.0, 0.0, enable_fp16],
+                                      ddtweak=dd_tweak, ddtweak_p=[constants.DEF_TWEAK_p, hue_range])
+                    #img_col = frame_to_image(clips.tiles[i].get_frame(0))
+                clip_colored = HAVC_clip_reconstruct(clips, blend_weight=blend_weight, chroma_resize=True)
+                #img_col2 = frame_to_image(clip_colored.get_frame(0))
         else:
-            clip_colored = HAVC_colorizer_fast(clip, method=dd_method, mweight=ddcolor_weight,
+            if slices_n == 0:
+                clip_colored = HAVC_colorizer_fast(clip, method=dd_method, mweight=ddcolor_weight,
                                       deoldify_p=[do_model, deoldify_rf, 1.0, 0.0],
                                       ddcolor_p=[dd_model, ddcolor_rf, 1.0, 0.0, enable_fp16],
                                       ddtweak=dd_tweak, ddtweak_p=[constants.DEF_TWEAK_p, hue_range],
                                       frame_interp=FrameInterp, chroma_adjust=chroma_adjust, debug_level=debug_level)
+            else:
+                clips = HAVC_clip_slice(clip, slices=slices_n, overlap_x=overlap_x, overlap_y=overlap_y)
+                for i in range(slices_n):
+                    clips.tiles[i] = HAVC_colorizer_fast(clip, method=dd_method, mweight=ddcolor_weight,
+                                      deoldify_p=[do_model, deoldify_rf_n, 1.0, 0.0],
+                                      ddcolor_p=[dd_model, ddcolor_rf_n, 1.0, 0.0, enable_fp16],
+                                      ddtweak=dd_tweak, ddtweak_p=[constants.DEF_TWEAK_p, hue_range],
+                                      frame_interp=FrameInterp, chroma_adjust=chroma_adjust, debug_level=debug_level)
+                clip_colored = HAVC_clip_reconstruct(clips, blend_weight=blend_weight, chroma_resize=True)
         if color_temp > 0:
+            clip_colored = clip_colored.std.SetFrameProp(prop="sc_threshold", floatval=0.1)
+            clip_colored = clip_colored.std.SetFrameProp(prop="sc_frequency", intval=1)
             clip_colored = HAVC_cmnet2(clip=clip, clip_ref=clip_colored, render_speed='Medium', render_vivid=True,
                                    ref_merge=color_temp, dark=True, dark_p=[0.2, 0.8], ref_thresh=0.10,
                                    encode_mode=0, max_memory_frames=0, ref_freq=0, ref_norm=True, smooth=True,
@@ -686,7 +894,7 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
 
         if speed_id > 4:  # 'fast', 'faster', 'veryfast' -> is used only colormap
             clip_colored = HAVC_stabilizer(clip_colored, colormap=chroma_adjust)
-        elif speed_id > 2:  # 'slow', 'medium' -> are used all the filters except hue_range2 and stab (deoldify only)
+        elif speed_id > 1:  # 'slower', 'slow', 'medium' -> are used all the filters except hue_range2 and stab (deoldify only)
             if dd_method == 0:
                 clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8], colormap=chroma_adjust,
                                                smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
@@ -695,7 +903,7 @@ def HAVC_main_colorizer(clip: vs.VideoNode, Preset: str = 'Medium', ColorModel: 
                 clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8], colormap=chroma_adjust,
                                                smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
                                                stab=stab_enabled, stab_p=[5, 'A', 1, 15, 0.2, 0.8])
-        else:  # 'placebo', 'veryslow', 'slower' -> are used all the filters
+        else:  # 'placebo', 'veryslow'  -> are used all the filters
             clip_colored = HAVC_stabilizer(clip_colored, dark=True, dark_p=[0.2, 0.8], colormap=chroma_adjust,
                                            smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"],
                                            stab=stab_enabled, stab_p=[5, 'A', 1, 15, 0.2, 0.8, hue_range2])
@@ -822,7 +1030,7 @@ def HAVC_ColorAdjust(clip: vs.VideoNode, BlackWhiteTune: str = 'Light', BlackWhi
     tn_id = _get_tune_id(BlackWhiteTune)
     if tn_id != 0 and BlackWhiteMode in (4, 6):
         # redefine color mapping
-        bw_tune = 'light'
+        bw_tune = 'none'
         bw_mode = 4
     else:
         bw_tune = BlackWhiteTune
@@ -836,15 +1044,15 @@ def HAVC_ColorAdjust(clip: vs.VideoNode, BlackWhiteTune: str = 'Light', BlackWhi
     if tn_id != 0 and BlackWhiteMode in (4, 6):
         # apply new color mapping
         if BlackWhiteMode == 4 and tn_id == 1:
-            clip_restored = vs_timecube(clip_restored, strength=0.6, lut_effect=constants.DEF_LUT_Forest_Film)
+            clip_restored = vs_timecube(clip_restored, strength=0.8, lut_effect=constants.DEF_LUT_Exploration)
         elif BlackWhiteMode == 4 and tn_id == 2:
             clip_restored = vs_timecube(clip_restored, strength=0.6, lut_effect=constants.DEF_LUT_City_Skyline)
         elif BlackWhiteMode == 4 and tn_id == 3:
-            clip_restored = vs_timecube(clip_restored, strength=0.8, lut_effect=constants.DEF_LUT_Exploration)
+            clip_restored = vs_timecube(clip_restored, strength=0.5, lut_effect=constants.DEF_LUT_Amber_Light)
         if BlackWhiteMode == 6 and tn_id == 1:
             clip_restored = vs_timecube(clip_restored, strength=0.6, lut_effect=constants.DEF_LUT_FUJ_Film)
         elif BlackWhiteMode == 6 and tn_id == 2:
-            clip_restored = vs_timecube(clip_restored, strength=0.4, lut_effect=constants.DEF_LUT_Amber_Light)
+            clip_restored = vs_timecube(clip_restored, strength=0.7, lut_effect=constants.DEF_LUT_Flat_Pop)
         elif BlackWhiteMode == 6 and tn_id == 3:
             clip_restored = vs_timecube(clip_restored, strength=0.5, lut_effect=constants.DEF_LUT_Warm_Haze)
 
@@ -1012,9 +1220,9 @@ def HAVC_main_restore(clip: vs.VideoNode, clip_colored: vs.VideoNode | None, Dee
                        max_memory_frames=DeepExMaxMemFrames, render_vivid=DeepExVivid,
                        encode_mode=DeepExEncMode, ref_norm=ScNormalize)
         if BWTuneRetinex:
-            clip = HAVC_tweak(clip, hue=5.0, sat=0.95, bright=0, cont=0.95, gamma=0.95)
+            clip = HAVC_tweak(clip, hue=5.0, sat=0.95, bright=0, cont=0.98, gamma=0.98)
         elif BlackWhiteTune.lower() != "none":
-            clip = HAVC_adjust_rgb(clip, strength=0.5, gamma=[1.0, 1.0, 0.95])
+            clip = HAVC_adjust_rgb(clip, strength=0.5, gamma=[1.0, 1.0, 0.98])
             clip = HAVC_tweak(clip, hue=5, sat=1.05, bright=0, cont=1.0)
             return restore_format(clip, orig_fmt)
     # ------------------------------------------------------------------------
@@ -1030,9 +1238,9 @@ def HAVC_main_restore(clip: vs.VideoNode, clip_colored: vs.VideoNode | None, Dee
     bright = [0.0, 0.0, 0.0, 0.0, 0.0, -1.0]
 
     if BlackWhiteTune.lower() == 'light':
-        gamma = [1.0, 0.98, 0.98, 0.98, 0.98, 0.95]
+        gamma = [1.0, 0.98, 0.98, 0.98, 0.98, 0.98]
     else:
-        gamma = [1.0, 0.95, 0.95, 0.95, 0.95, 0.90]
+        gamma = [1.0, 0.95, 0.95, 0.95, 0.95, 0.95]
 
     clip = HAVC_bw_tune(clip, BlackWhiteTune, i, BlackWhiteBlend, True)
 
@@ -1101,6 +1309,11 @@ def HAVC_bw_tune(clip: vs.VideoNode = None, bw_tune: str = 'Light', bw_method: i
     if bw_id == 0:
         return clip
 
+    if bw_method == 4:
+        weight3 = float(bw_id)
+    else:
+        weight3 = w_strength[bw_id]
+
     r =  r_factor[bw_id]
     g = g_factor[bw_id]
     b = b_factor[bw_id]
@@ -1113,8 +1326,8 @@ def HAVC_bw_tune(clip: vs.VideoNode = None, bw_tune: str = 'Light', bw_method: i
     if bw_method < 4: # Skip Retinex, ScaleAbs
         clip = rgb_balance(clip=clip, strength=w_strength[bw_id], rgb_factor=[r, g, b])
     # step #2 : the contrast/luminosity previously changed are adjusted/fixed using histogram equalization
-    clip = rgb_equalizer(clip=clip, method=bw_method, strength=b_strength[bw_id], luma_blend=luma_blend,
-                         range_tv=range_tv)
+    clip = rgb_equalizer(clip=clip, method=bw_method, strength=b_strength[bw_id], weight3=weight3,
+                         luma_blend=luma_blend, range_tv=range_tv)
 
     if range_tv:
         clip = clip.std.Levels(min_in=16, max_in=235, min_out=0, max_out=255)
@@ -1356,7 +1569,7 @@ def HAVC_deepex(clip: vs.VideoNode = None, clip_ref: vs.VideoNode = None, method
                             "HAVC_deepex: method in (0, 1, 2) but sc_threshold and sc_frequency are not set")
         if sc_frequency == 1 and only_ref_frames:
             HAVC_LogMessage(MessageType.EXCEPTION,
-                            "HAVC_deepex: only_ref_frames is enabled but sc_frequency == 1")
+                            "HAVC_deepex: only_ref_frames is enabled but sc_frequency == 1 or ColorTemp/FrameInterp are set ")
         if not only_ref_frames and ref_merge > 0 and sc_frequency != 1:
             HAVC_LogMessage(MessageType.EXCEPTION,
                             "HAVC_deepex: method in (0, 1, 2) and ref_merge > 0 but sc_frequency != 1")
@@ -1888,6 +2101,29 @@ Description:
 ------------------------------------------------------------------------------- 
 coloring function with additional pre-process and post-process filters 
 """
+
+def vs_frame_interpolation(clip: vs.VideoNode, clip_ref: vs.VideoNode, frame_interp: int = 5,
+                           chroma_adjust: str = "none", process_id: int = 1)  -> vs.VideoNode:
+    if frame_interp < 5:  # Deep-Exemplar
+        clip_colored = HAVC_deepex(clip=clip, clip_ref=clip_ref, method=0, render_speed='Medium', render_vivid=True,
+                                       ref_merge=0, sc_framedir=None, only_ref_frames=False, dark=False,
+                                       ref_thresh=0.10, ex_model=1, encode_mode=0, max_memory_frames=0,
+                                       ref_freq=frame_interp, ref_norm=False, smooth=False, colormap=chroma_adjust)
+    else:
+        if process_id == 1:
+            clip_colored = HAVC_deepex(clip=clip, clip_ref=clip_ref, method=0, render_speed='Medium', render_vivid=True,
+                                       ref_merge=0, sc_framedir=None, only_ref_frames=False, dark=False,
+                                       ref_thresh=0.10, ex_model=0, encode_mode=0, max_memory_frames=0,
+                                       ref_freq=frame_interp*2, ref_norm=False, smooth=False, colormap=chroma_adjust)
+        else:
+            clip_colored = HAVC_cmnet2(clip=clip, clip_ref=clip_ref, render_speed='Medium', render_vivid=True,
+                                   ref_merge=0, dark=True, dark_p=[0.2, 0.8], ref_thresh=0.10,
+                                   encode_mode=0, max_memory_frames=0, ref_freq=frame_interp*2, ref_norm=True,
+                                   smooth=True, smooth_p=[0.3, 0.7, 0.9, 0.0, "none"], colormap=chroma_adjust)
+
+    return clip_colored
+
+
 def HAVC_colorizer_fast(
         clip: vs.VideoNode, method: int = 2, mweight: float = 0.4, deoldify_p: list = (0, 24, 1.0, 0.0),
         ddcolor_p: list = (1, 24, 1.0, 0.0, True), ddtweak: list[bool] = (False, False, False),
@@ -1989,10 +2225,10 @@ def HAVC_colorizer_fast(
                                    [7] : gamma_min: minimum value for gamma, range (default=0.5) [>0.1]
                                    [8] : "chroma adjustment" parameter (optional), if="none" is disabled (see the README)
     :param frame_interp:        This parameter will allow to enable the frame interpolation. This method will use
-                                Deep-Exemplar to interpolate the colored frames. If = 0, the interpolation is disabled,
-                                if > 0 represent the number of frames used for interpolation. The quality of
-                                interpolation will decrease with the number of frames, suggested value is 5.
-                                Range [0-10], Default = 0
+                                Deep-Exemplar to interpolate the colored frames if frame_interp < 5, otherwise will use
+                                ColorMNet. If = 0, the interpolation is disabled, if > 0 represent the number of frames
+                                used for interpolation. The quality of interpolation will decrease with the number of
+                                frames, suggested value is 3. Range [0-10], Default = 0
     :param chroma_adjust:       Direct hue/color mapping (only on ref-frames), without luma filtering, using the "chroma adjustment"
                                 parameter, if="none" is disabled.
     :param debug_level:         Set HAVC debug message level.
@@ -2011,11 +2247,8 @@ def HAVC_colorizer_fast(
                           ddtweak=ddtweak, ddtweak_p=ddtweak_p, sc_threshold=0.1, sc_tht_offset=1,
                           sc_min_freq=frame_interp, sc_min_int=1, sc_tht_ssim=0.0, sc_normalize=False,
                           debug_level=debug_level)
-    clip_colored = HAVC_deepex(clip=clip, clip_ref=clip_ref, method=0, render_speed='Medium', render_vivid=True,
-                               ref_merge=0, sc_framedir=None, only_ref_frames=False, dark=False,
-                               ref_thresh=0.10, ex_model=1, encode_mode=0, max_memory_frames=0,
-                               ref_freq=frame_interp, ref_norm=False, smooth=False, colormap=chroma_adjust)
 
+    clip_colored = vs_frame_interpolation(clip, clip_ref, frame_interp, chroma_adjust, process_id=1)
     clip_colored = clip_colored.std.SetFrameProp(prop="sc_threshold", floatval=0.1)
     clip_colored = clip_colored.std.SetFrameProp(prop="sc_frequency", intval=1)
 
@@ -2224,7 +2457,7 @@ def HAVC_colorizer(
         torch.hub.set_dir(torch_dir)
 
     if ddcolor_rf == 0:
-        ddcolor_rf = min(max(math.trunc(0.4 * clip.width / 16), 16), 48)
+        ddcolor_rf = min(max(math.trunc(0.4 * clip.width / 16), 16), 32)
 
     scenechange = not (sc_threshold == 0 and sc_min_freq == 0)
 
@@ -2267,16 +2500,20 @@ function with HAVC merge methods
 """
 
 
-def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, clip_luma: vs.VideoNode = None, weight: float = 0.5,
+def HAVC_merge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = None, clip_luma: vs.VideoNode = None, weight: float = 0.5,
                method: int = 2, cmc_p: list = constants.DEF_CMC_p, lmm_p: list = constants.DEF_LMM_p, alm_p: list = constants.DEF_ALM_p,
                crt_p: list = constants.DEF_CRT_p) -> vs.VideoNode:
     """Utility function with the implementation of HAVC merge methods
 
     :param clipa:               first clip to merge, any format is supported
     :param clipb:               second clip to merge, any format is supported
+    :param clip_luma:           if specified, clip_luma will be used as source of luma component for the merge. It is an
+                                optional parameter, and it is suggested to provide the clip with the best luma
+                                resolution between clipa and clipb. It is used only with the methods: 3, 4, 5 and can
+                                speed up the filter when it uses these methods.
     :param method:              method used to combine clipa with clipb (default = 2):
-                                    0 : clipa only (no merge)
-                                    1 : clipb only (no merge)
+                                    0 : clipa only (no merge), if clip_luma is not None is luma merged with clip_luma
+                                    1 : clipb only (no merge), if clip_luma is not None is luma merged with clip_luma
                                     2 : Simple Merge (default):
                                         the frames are combined using a weighted merge, where the parameter "weight"
                                         represent the weight assigned to the colors provided by the clipb frames.
@@ -2351,24 +2588,31 @@ def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, clip_luma: vs.VideoNode
                                    [1] : tht: threshold to identify gray pixels, range[0, 255] (default = 30)
                                    [2] : alpha: parameter used to control the steepness of gradient curve, range [>0] (default = 2.0)
                                    [3] : chroma_resize: if True, the frames will be resized to improve the filter speed (default = False)
-    :param clip_luma:           if specified, clip_luma will be used as source of luma component for the merge. It is an
-                                optional parameter, and it is suggested to provide the clip with the best luma
-                                resolution between clipa and clipb. It is used only with the methods: 3, 4, 5 and can
-                                speed up the filter when it uses these methods. 
     """
     # disable packages warnings
     disable_warnings()
 
-    if not isinstance(clipa, vs.VideoNode):
+    if clipa is not None and not isinstance(clipa, vs.VideoNode):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_merge: this is not a clip: clipa")
 
-    if not isinstance(clipb, vs.VideoNode):
+    if clipb is not None and not isinstance(clipb, vs.VideoNode):
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_merge: this is not a clip: clipb")
 
+    if clip_luma is not None and not isinstance(clip_luma, vs.VideoNode):
+        HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_merge: this is not a clip: clip_luma")
+
     if method == 0 or weight == 0:
+        if clip_luma is not None:
+            clipa_sc = clipa
+            clipa = _clip_chroma_resize(clip_luma, clipa)
+            clipa = CopySCDetect(clipa, clipa_sc)
         return clipa
 
     if method == 1 or weight == 1:
+        if clip_luma is not None:
+            clipb_sc = clipb
+            clipb = _clip_chroma_resize(clip_luma, clipb)
+            clipb = CopySCDetect(clipb, clipb_sc)
         return clipb
 
     merge_weight = weight
@@ -2381,9 +2625,7 @@ def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, clip_luma: vs.VideoNode
         return restore_format(clip_merged, orig_fmt_a)
 
     if clip_luma is not None:
-        if not isinstance(clip_luma, vs.VideoNode):
-            HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_merge: this is not a clip: clip_luma")
-        rf = min(max(math.trunc(0.4 * clip_luma.width / 16), 16), 48)
+        rf = min(max(math.trunc(0.4 * clip_luma.width / 16), 16), 32)
         frame_size = min(rf * 16, clip_luma.width)
         clip_a = clip_a.resize.Spline64(width=frame_size, height=frame_size)
         clip_b = clip_b.resize.Spline64(width=frame_size, height=frame_size)
@@ -2393,7 +2635,9 @@ def HAVC_merge(clipa: vs.VideoNode, clipb: vs.VideoNode, clip_luma: vs.VideoNode
                                     LMM_p=lmm_p, ALM_p=alm_p, CRT_p=crt_p, invert_clips=False)
 
     if clip_luma is not None:
+        clipm_sc = clip_merged
         clip_merged = _clip_chroma_resize(clip_luma, clip_merged)
+        clip_merged = CopySCDetect(clip_merged, clipm_sc)
 
     return restore_format(clip_merged, orig_fmt_a)
 
@@ -2519,7 +2763,7 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
         HAVC_LogMessage(MessageType.EXCEPTION, "HAVC_stabilizer: render_factor must be between: 16-64")
 
     if render_factor == 0:
-        render_factor = min(max(math.trunc(0.4 * clip.width / 16), 16), 64)
+        render_factor = min(max(math.trunc(0.4 * clip.width / 16), 16), 32)
 
     clip_orig = clip
     if chroma_resize_enabled:
@@ -2549,6 +2793,10 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
     # define colormap
     colormap = colormap.lower()
     colormap_enabled = (colormap != "none" and colormap != "")
+    if colormap_enabled:
+        colormap_adjust = havc_utils._get_colormap(colormap)
+    else:
+        colormap_adjust = "none"
 
     # unpack chroma_stabilizer
     stab_enabled = stab
@@ -2576,7 +2824,7 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
                                               dark_bright=dark_bright, chroma_adjust=chroma_adjust.lower())
 
     if colormap_enabled:
-        clip_colored = vs_colormap(clip_colored, colormap=colormap)
+        clip_colored = vs_colormap(clip_colored, colormap=colormap_adjust)
 
     if stab_enabled:
         clip_colored = vs_chroma_stabilizer_ex(clip_colored, nframes=stab_nframes, mode=stab_mode, sat=stab_sat,
@@ -2590,6 +2838,77 @@ def HAVC_stabilizer(clip: vs.VideoNode, dark: bool = False, dark_p: list = (0.2,
 
     return restore_format(clip_new, orig_fmt)
 
+
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description: 
+------------------------------------------------------------------------------- 
+Utility function to slices the input clip into 2 or 4 overlapping tiles (2x2 grid).
+"""
+
+def HAVC_clip_slice(clip: vs.VideoNode, slices: int = 2, overlap_x: int = 32, overlap_y: int = 32) -> ClipTiles:
+    """
+    Slices the input clip into 2 or 4 overlapping tiles (2x2 grid).
+
+    Args:
+        clip: clip to be sliced in 2 or 4 tiles
+        slices: number of slices, allowed values are 2 or 4, default = 2
+        overlap_x: horizontal overlap pixels size, default = 32
+        overlap_y: vertical overlap pixels size, default = 32 (used only if slices = 4)
+
+    Returns:
+        class ClipTiles with items:
+            - clip_orig: original clip
+            - tiles: [tl, tr, bl, br] — each larger than H/2 x W/2 due to overlap
+            - original_width: original width
+            - original_height: original height
+            - base_tile_w: base tile width (without extra padding)
+            - base_tile_h: base tile height (without extra padding)
+            - overlap_x: actual horizontal overlap pixels
+            - overlap_y: actual vertical overlap pixels
+    """
+
+    if slices == 4:
+        return vs_slice_into_2x2_overlapping_tiles(clip, overlap_x, overlap_y)
+    else:
+        return vs_slice_into_2_horizontal_tiles(clip, overlap_x)
+
+"""
+------------------------------------------------------------------------------- 
+Author: Dan64
+------------------------------------------------------------------------------- 
+Description: 
+------------------------------------------------------------------------------- 
+Utility function to reconstructs the original clip from 2 or 4 overlapping tiles.
+"""
+
+def HAVC_clip_reconstruct(clip_tiles: ClipTiles, blend_weight: float = 0.5, chroma_resize: bool = False) -> vs.VideoNode:
+    """
+    Reconstructs the original clip from 4 overlapping filtered tiles,
+    using smooth linear blending in overlap zones.
+
+    Args:
+        clip_tiles: class ClipTiles with items
+            - tiles: list of sliced clips
+            - base_tile_w: base tile width (without extra padding)
+            - base_tile_h: base tile height (without extra padding)
+            - overlap_x: actual horizontal overlap pixels
+            - overlap_y: actual vertical overlap pixels
+        blend_weight: fixed weight to merge the overlapping region, if == 0 is performed a merge with linear
+                      increasing weight from 0 to 1 in the overlapping region for smooth transitions, default = 0.5
+        chroma_resize: if True will be performed a chroma Resize. The Y plane of reconstructed clip will be 
+                       replaced by the Y plane of the original clip
+
+    Return:
+       clip after reconstruction = original size H × W.
+    """
+    if len(clip_tiles.tiles) == 4:
+        return vs_reconstruct_from_2x2_overlapping_tiles(clip_tiles, blend_weight, chroma_resize)
+    else:
+        return vs_reconstruct_from_2_horizontal_tiles(clip_tiles, blend_weight, chroma_resize)
 """
 ------------------------------------------------------------------------------- 
 Author: Dan64
@@ -2639,7 +2958,7 @@ def HAVC_recover_clip_color(clip: vs.VideoNode = None, clip_color: vs.VideoNode 
     return restore_format(clip_restored, orig_fmt)
 
 
-def HAVC_TimeCube(clip: vs.VideoNode, strength: 1.0, lut_effect: int = 0) -> vs.VideoNode:
+def HAVC_TimeCube(clip: vs.VideoNode, strength: float= 1.0, lut_effect: int = 0, factors: list = None) -> vs.VideoNode:
     """Utility function to apply TimeCube effects
 
     :param clip:                clip to process, any format is supported.
@@ -2652,13 +2971,178 @@ def HAVC_TimeCube(clip: vs.VideoNode, strength: 1.0, lut_effect: int = 0) -> vs.
                                     DEF_LUT_Hollywood: int = 4
                                     DEF_LUT_Classic_Film: int = 5
                                     DEF_LUT_Warm_Haze: int = 6
+                                    DEF_LUT_HDR_Color: int = 7
+                                    DEF_LUT_Amber_Light: int = 8
+                                    DEF_LUT_Blue_Mist: int = 9
+                                    DEF_LUT_Vintage_Fox: int = 10
+                                    DEF_LUT_Flat_Pop: int = 11
+    :param factors:             if is not set to None, is necessary to provide a list
+                                with the full adjustment factors with the following order:
+                                    factors[0] -> hue (default = 0)
+                                    factors[1] -> sat (default = 1)
+                                    factors[2] -> bright (default = 0)
+                                    factors[3] -> cont (default = 1)
+                                    factors[4] -> gamma (default = 1)
     """
 
     clip, orig_fmt = convert_format_RGB24(clip)
 
-    clip = vs_timecube(clip, strength, lut_effect)
+    clip = vs_timecube(clip, strength, lut_effect, factors)
 
     return restore_format(clip, orig_fmt)
+
+
+def HAVC_clip_overlay(
+        base: vs.VideoNode,
+        overlay: vs.VideoNode,
+        x: int = 0,
+        y: int = 0,
+        mask: vs.VideoNode | None = None,
+        opacity: float = 1.0,
+        mode: str = 'normal',
+        planes: (int | Sequence[int]) | None = None,
+        mask_first_plane: bool = True,
+) -> vs.VideoNode:
+    """
+    Puts clip overlay on top of clip base using different blend modes, and with optional x,y positioning, masking and opacity.
+
+    Parameters:
+    :param base:      This clip will be the base, determining the size and all other video properties of the result.
+    :param overlay:   This is the image that will be placed on top of the base clip.
+    :param x, y:      Define the placement of the overlay image on the base clip, in pixels. Can be positive or negative.
+    :param mask:      Optional transparency mask. Must be the same size as overlay. Where mask is darker, overlay will be more transparent.
+    :param opacity:   Set overlay transparency. The value is from 0.0 to 1.0, where 0.0 is transparent and 1.0 is fully opaque.
+                      This value is multiplied by mask luminance to form the final opacity.
+    :param mode:      Defines how your overlay should be blended with your base image. Available blend modes are:
+                      normal, addition, average, difference, divide, exclusion, multiply, overlay, subtract.
+    :param planes:    Specifies which planes will be processed. Any unprocessed planes will be simply copied.
+    :param mask_first_plane: If true, only the mask's first plane will be used for transparency.
+    """
+
+    if not (isinstance(base, vs.VideoNode) and isinstance(overlay, vs.VideoNode)):
+        raise vs.Error('mask_overlay: this is not a clip')
+
+    if mask is not None:
+        if not isinstance(mask, vs.VideoNode):
+            raise vs.Error('mask_overlay: mask is not a clip')
+
+        if (mask.width != overlay.width or mask.height != overlay.height or
+                mask.format.bits_per_sample != overlay.format.bits_per_sample):
+            raise vs.Error('mask_overlay: mask must have the same dimensions and bit depth as overlay')
+
+    if base.format.sample_type == vs.INTEGER:
+        bits = base.format.bits_per_sample
+        neutral = 1 << (bits - 1)
+        peak = (1 << bits) - 1
+        factor = 1 << bits
+    else:
+        neutral = 0.5
+        peak = factor = 1.0
+
+    plane_range = range(base.format.num_planes)
+
+    if planes is None:
+        planes = list(plane_range)
+    elif isinstance(planes, int):
+        planes = [planes]
+
+    if base.format.subsampling_w > 0 or base.format.subsampling_h > 0:
+        base_orig = base
+        base = base.resize.Point(format=base.format.replace(subsampling_w=0, subsampling_h=0))
+    else:
+        base_orig = None
+
+    if overlay.format.id != base.format.id:
+        overlay = overlay.resize.Point(format=base.format)
+
+    if mask is None:
+        mask = overlay.std.BlankClip(
+            format=overlay.format.replace(color_family=vs.GRAY, subsampling_w=0, subsampling_h=0), color=peak)
+    elif mask.format.id != overlay.format.id and mask.format.color_family != vs.GRAY:
+        mask = mask.resize.Point(format=overlay.format, range_s='full')
+
+    opacity = min(max(opacity, 0.0), 1.0)
+    mode = mode.lower()
+
+    # Calculate padding sizes
+    l, r = x, base.width - overlay.width - x
+    t, b = y, base.height - overlay.height - y
+
+    # Split into crop and padding values
+    cl, pl = min(l, 0) * -1, max(l, 0)
+    cr, pr = min(r, 0) * -1, max(r, 0)
+    ct, pt = min(t, 0) * -1, max(t, 0)
+    cb, pb = min(b, 0) * -1, max(b, 0)
+
+    # Crop and padding
+    overlay = overlay.std.Crop(left=cl, right=cr, top=ct, bottom=cb)
+    overlay = overlay.std.AddBorders(left=pl, right=pr, top=pt, bottom=pb)
+    mask = mask.std.Crop(left=cl, right=cr, top=ct, bottom=cb)
+    mask = mask.std.AddBorders(left=pl, right=pr, top=pt, bottom=pb, color=[0] * mask.format.num_planes)
+
+    if opacity < 1:
+        mask = mask.std.Expr(expr=f'x {opacity} *')
+
+    if mode == 'normal':
+        pass
+    elif mode == 'addition':
+        expr = f'x y +'
+    elif mode == 'average':
+        expr = f'x y + 2 /'
+    elif mode == 'difference':
+        expr = f'x y - abs'
+    elif mode == 'divide':
+        expr = f'y 0 <= {peak} {peak} x * y / ?'
+    elif mode == 'exclusion':
+        expr = f'x y + 2 x * y * {peak} / -'
+    elif mode == 'multiply':
+        expr = f'x y * {peak} /'
+    elif mode == 'overlay':
+        expr = f'x {neutral} < 2 x y * {peak} / * {peak} 2 {peak} x - {peak} y - * {peak} / * - ?'
+    elif mode == 'subtract':
+        expr = f'x y -'
+    else:
+        raise vs.Error('mask_overlay: invalid mode specified')
+
+    if mode != 'normal':
+        overlay = vs.core.std.Expr([overlay, base], expr=[expr if i in planes else '' for i in plane_range])
+
+    # Return padded clip
+    last = vs.core.std.MaskedMerge(base, overlay, mask, planes=planes, first_plane=mask_first_plane)
+    if base_orig is not None:
+        last = last.resize.Point(format=base_orig.format)
+    return last
+
+def HAVC_auto_levels(clip: vs.VideoNode = None, mode: str = 'Light', method: int = 0,
+                     luma_blend: bool = False, range_tv: bool = True) -> vs.VideoNode:
+    """Pre-/Post-process filter using Histogram Equalization or Retinex for improving contrast/luminosity
+       of B&W clips to be colored with HAVC.
+
+        :param clip:          Clip to process, any format is supported.
+        :param mode:          This parameter allows to improve contrast and luminosity of input clip
+                              Allowed values are:
+                                  'Light', (default)
+                                  'Medium',
+                                  'Strong'
+        :param method:        Method used to perform the histogram equalization.
+                              Allowed values are:
+                                0 : CLAHE (luma) (default)
+                                1 : Simple Histogram Equalization on all RGB channels
+                                2 : CLAHE on all RGB channels
+                                3 : CLAHE (luma) + Simple (RGB)
+                                4 : ScaleAbs + LUT
+                                5 : Multi-Scale Retinex on Luma
+        :param luma_blend:    If enabled the equalized image is blended with the original image, darker is the image and more
+                              weight will be assigned to the original image, default = True
+        :param range_tv:      If True, perform the color adjustments on limited TV range (the filter works better
+                              in TV range), default = True
+        """
+
+    clip, orig_fmt = convert_format_RGB24(clip)
+
+    clip_new = vs_auto_levels(clip, mode, method, luma_blend, range_tv)
+
+    return restore_format(clip_new, orig_fmt)
 
 """
 ------------------------------------------------------------------------------- 
@@ -2803,19 +3287,19 @@ def HAVC_export_reference_frames(clip: vs.VideoNode, sc_framedir: str = "./", re
 def HAVC_export_list_frames(clip: vs.VideoNode, sc_framedir: str = "./", ref_list: list[int] | None= None,
                             offset: int = 0, ref_ext: str = constants.DEF_EXPORT_FORMAT, ref_jpg_quality: int = constants.DEF_JPG_QUALITY,
                             ref_override: bool = True, fast_extract: bool = True) -> vs.VideoNode:
-    """Utility function to export reference frames
+    """Utility function to export frames included in a list.
 
     :param clip:                clip to process, any format is supported.
-    :param sc_framedir:         If set, define the directory where are stored the reference frames.
-                                The reference frames are named as: ref_nnnnnn.[jpg|png].
+    :param sc_framedir:         If set, define the directory where are stored the frames.
+                                The frames are named as: ref_nnnnnn.[jpg|png].
     :param ref_list:            List of frame numbers to export. default: None. If ref_list contains only one frame
-                                number, for example ref_list = [25], will be exported a reference frame every 25 frames
+                                number, for example ref_list = [25], will be exported a frame every 25 frames
     :param offset:              The offset will be added to the frame number. default = 0.
     :param ref_ext:             File extension and format of saved frames, range ["jpg", "png"] . default: "jpg"
     :param ref_jpg_quality:     Quality of "jpg" compression, range[0,100]. default: 95
-    :param ref_override:        If True, the reference frames with the same name will be overridden, otherwise will
+    :param ref_override:        If True, the frames with the same name will be overridden, otherwise will
                                 be discarded. default: True
-    :param fast_extract:        If True, the reference frames will be extracted directly with get_frame(), otherwise will
+    :param fast_extract:        If True, the frames will be extracted directly with get_frame(), otherwise will
                                 be performed a full parsing of the clip (necessary if there is a sequential temporal
                                 dependency in the script calling this function). default = True
     """
@@ -2827,7 +3311,7 @@ def HAVC_export_list_frames(clip: vs.VideoNode, sc_framedir: str = "./", ref_lis
     pathlib.Path(sc_framedir).mkdir(parents=True, exist_ok=True)
 
     clip = vs_list_export_frames(clip, sc_framedir=sc_framedir, ref_list=ref_list, ref_ext=ref_ext, offset=offset,
-                                 ref_jpg_quality=ref_jpg_quality, ref_override=ref_override)
+                                 ref_jpg_quality=ref_jpg_quality, ref_override=ref_override,fast_extract=fast_extract)
 
     return restore_format(clip, orig_fmt)
 

@@ -167,7 +167,10 @@ def vs_sc_combine_models(clip_a: vs.VideoNode = None, clip_b: vs.VideoNode = Non
     if method == 2:
         return SimpleMerge(clipa, clipb, clipb_weight, scenechange=scenechange)
     if method == 3:
-        return ConstrainedChromaMerge(clipa, clipb, clipb_weight, chroma_threshold, red_fix, scenechange=scenechange)
+        clip_ccm = ConstrainedChromaMerge(clipa, clipb, clipb_weight, chroma_threshold, red_fix, scenechange=scenechange)
+        clip_m = SimpleMerge(clipa, clipb, min(clipb_weight, 0.6), scenechange=scenechange)
+        clip_ccmm = SimpleMerge(clip_ccm, clip_m, clipb_weight=0.3, scenechange=scenechange)
+        return clip_ccmm
     if method == 4:
         return LumaMaskedMerge(clipa, clipb, luma_mask_limit, luma_white_limit, luma_mask_sat, clipb_weight,
                                scenechange=scenechange)
@@ -345,13 +348,13 @@ def ConstrainedChromaMerge(clipa: vs.VideoNode = None, clipb: vs.VideoNode = Non
         if luma > 0.3:
             img_m = img_stab
         elif luma > 0.2:
-            img_dark = image_tweak(img_stab, sat=0.8, hue_range="260:360,0:30")
+            img_dark = image_tweak(img_stab, sat=0.9, hue_range="280:360,0:30")
             img_m = w_image_luma_merge(img_dark, img_stab, 0.2, 0.3)
         elif luma > 0.1:
-            img_dark = image_tweak(img_stab, sat=0.7, hue_range="260:360,0:30")
+            img_dark = image_tweak(img_stab, sat=0.8, hue_range="280:360,0:30")
             img_m = w_image_luma_merge(img_dark, img_stab, 0.1, 0.2)
         else:
-            img_m = image_tweak(img_stab, sat=0.6)
+            img_m = image_tweak(img_stab, sat=0.7)
         return image_to_frame(img_m, f[0].copy())
 
     clipm = clipa.std.ModifyFrame(clips=[clipa, clipb],
@@ -404,13 +407,13 @@ def ChromaBoundAdaptiveMerge(
         if luma > 0.3:
             img_m = img_stab
         elif luma > 0.2:
-            img_dark = image_tweak(img_stab, sat=0.8, hue_range="260:360,0:30")
+            img_dark = image_tweak(img_stab, sat=0.9, hue_range="280:360,0:30")
             img_m = w_image_luma_merge(img_dark, img_stab, 0.2, 0.3)
         elif luma > 0.1:
-            img_dark = image_tweak(img_stab, sat=0.7, hue_range="260:360,0:30")
+            img_dark = image_tweak(img_stab, sat=0.8, hue_range="280:360,0:30")
             img_m = w_image_luma_merge(img_dark, img_stab, 0.1, 0.2)
         else:
-            img_m = image_tweak(img_stab, sat=0.6)
+            img_m = image_tweak(img_stab, sat=0.7)
 
         return image_to_frame(img_m, f[0].copy())
 

@@ -16,6 +16,7 @@ import math
 from typing import Optional
 
 from vsdeoldify.vsslib.constants import DEF_MAX_RESIZE
+from vsdeoldify.vsslib.vsscdect import CopySCDetect
 
 """
 ------------------------------------------------------------------------------- 
@@ -26,6 +27,52 @@ Description:
 function to resize a clip by keeping the aspect ratio. 
 """
 
+def resize_min_HW(clip: vs.VideoNode, min_size: tuple[int, int] = (512, 480)) -> vs.VideoNode:
+    """
+    Resize clip so that the minium width/height is min_size while maintaining aspect ratio.
+
+    Args:
+        clip: Input clip
+        min_size: Minimum HxW size, tuple(H,W)  (default: (512, 480))
+
+    Returns:
+        Resized clip with minium width/height is min_size (divisible by 2)
+    """
+
+    if clip.height < clip.width:
+        if clip.height >  min_size[1]:
+            return resize_to_height(clip, target_height=min_size[1])
+        else:
+            return clip # no resize
+    else:
+        if clip.width >  min_size[0]:
+            return resize_to_width(clip, target_width=min_size[0])
+        else:
+            return clip # no resize
+
+def resize_to_height(clip: vs.VideoNode, target_height: int = 480) -> vs.VideoNode:
+    """
+    Resize clip to target width while maintaining aspect ratio and ensuring
+    height is divisible by 2 (required for many codecs and filters).
+
+    Args:
+        clip: Input clip
+        target_height: Target height (default: 480)
+
+    Returns:
+        Resized clip with target_height and proportional width (divisible by 2)
+    """
+    # Calculate the proportional height
+    target_width = round(clip.width * target_height / clip.height)
+
+    # Ensure height is divisible by 2
+    if target_width % 2 != 0:
+        target_width -= 1  # or -= 1, but +1 is generally safer to avoid undersizing
+
+    # Resize using spline resampling
+    resized_clip = clip.resize.Spline36(width=target_width, height=target_height)
+
+    return resized_clip
 
 def resize_to_width(clip: vs.VideoNode, target_width: int = 512) -> vs.VideoNode:
     """
@@ -73,6 +120,7 @@ def resize_to_chroma(clip_highres: vs.VideoNode, clip_lowres: vs.VideoNode) -> v
     clip_color = clip_resized.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
     # restore orginal Y plane
     clip_yuv = vs.core.std.ShufflePlanes(clips=[clip_bw, clip_color, clip_color], planes=[0, 1, 2], colorfamily=vs.YUV)
+    clip_yuv = CopySCDetect(clip_yuv, clip_color)
     # convert result to RGB24
     return clip_yuv.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion")
 

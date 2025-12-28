@@ -15,6 +15,8 @@ import os
 # Hybrid paths for plugins used by HAVC
 vsslib_dir: str = os.path.dirname(os.path.realpath(__file__))
 
+support_dir: str = os.path.join(vsslib_dir, "..", "..", "..", "..", "..", "vsfilters", "Support")
+
 # Path for ReduceFlicker: https://github.com/AmusementClub/ReduceFlicker
 ReduceFlicker_dir: str = os.path.join(vsslib_dir, "..", "..", "..", "..", "..", "vsfilters", "FrameFilter", "ReduceFlicker")
 
