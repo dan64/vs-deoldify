@@ -56,7 +56,7 @@ def vs_sc_remaster_colorize(
 
     :param clip:            Clip to process. Only RGB24 "full range" format is supported.
     :param clip_ref:        Clip with the reference frames, must be of the same size of input clip: Default: None
-    :param clip_sc:        Clip with the scene change information: Default: None
+    :param clip_sc:         Clip with the scene change information: Default: None
     :param length:          Sequence length that the model processes (min. 2, max. 5). Default: 2
     :param render_vivid:    Given that the generated colors by the inference are a little washed out, by enabling
                             this parameter, the saturation will be increased by about 10%. range [True, False]

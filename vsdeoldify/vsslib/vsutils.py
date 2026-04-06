@@ -367,3 +367,13 @@ def debug_ModifyFrame(f_start: int = 0, f_end: int = 1, clip: vs.VideoNode = Non
             selector(n, frame)
 
     return clip
+
+def debug_FrameEval(f_start: int = 0, f_end: int = 1, clip: vs.VideoNode = None,
+                      eval: partial = None, silent: bool = True) -> vs.VideoNode:
+    f_end = min(f_end, clip.num_frames - 1)
+    for n in range(f_start, f_end):
+        if not silent:
+            print("Debug Frame: ", n)
+        eval(n)
+
+    return clip

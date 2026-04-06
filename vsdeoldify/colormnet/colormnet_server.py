@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2024-09-27
 version:
 LastEditors: Dan64
-LastEditTime: 2024-11-02
+LastEditTime: 2026-01-17
 -------------------------------------------------------------------------------
 Description:
 -------------------------------------------------------------------------------
@@ -118,7 +118,8 @@ class ColorMNetServer:
                 self.rpc_thread = threading.Thread(target=self.rpc_server.start_server, name="RPCServer-1", daemon=True)
                 self._initialized = True
             except Exception as exe:
-                warnings.warn("ERROR[" + str(type(exe)) + "]: " + str(exe))
+                self._initialized = False
+                raise RuntimeError(f"ColorMNetServer error allocating port {server_port}: {exe}")
 
     def run_server(self):
         if self.rpc_thread is None:

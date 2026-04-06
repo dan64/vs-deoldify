@@ -4,7 +4,7 @@ Author: Dan64
 Date: 2025-02-06
 version: 
 LastEditors: Dan64
-LastEditTime: 2025-10-26
+LastEditTime: 2026-04-06
 ------------------------------------------------------------------------------- 
 Description:
 ------------------------------------------------------------------------------- 
@@ -76,7 +76,15 @@ def convert_format_RGB24(clip: vs.VideoNode, chroma_resize: bool = False) -> tup
     if _matrixIsInvalid(clip):
         clip = clip.std.SetFrameProps(_Matrix=vs.MATRIX_BT709)
     if _rangeIsInvalid(clip):
-        clip = clip.std.SetFrameProps(_ColorRange=vs.RANGE_LIMITED)
+        if vs.core.core_version.release_major < 74:
+            clip = clip.std.SetFrameProps(_ColorRange=vs.RANGE_LIMITED)
+        else:
+            clip = clip.std.SetFrameProps(_Range=vs.RANGE_LIMITED)
+
+    if vs.core.core_version.release_major < 74:
+        clip_color_range = vs.ColorRange(props.get('_ColorRange', vs.RANGE_LIMITED.value))
+    else:
+        clip_color_range = vs.Range(props.get('_Range', vs.RANGE_LIMITED.value))
 
     if clip.format.id == vs.RGB24:
         if chroma_resize:
@@ -85,7 +93,7 @@ def convert_format_RGB24(clip: vs.VideoNode, chroma_resize: bool = False) -> tup
                                  color_family=original_format.color_family,
                                  bits_per_sample=original_format.bits_per_sample,
                                  matrix=vs.MatrixCoefficients(props.get('_Matrix', vs.MATRIX_BT709.value)),
-                                 color_range=vs.ColorRange(props.get('_ColorRange', vs.RANGE_LIMITED.value)),
+                                 color_range=clip_color_range,
                                  chroma_resize=True)
             clip = vsresize.resize_min_HW(clip)
         else:
@@ -94,7 +102,7 @@ def convert_format_RGB24(clip: vs.VideoNode, chroma_resize: bool = False) -> tup
                          color_family=original_format.color_family,
                          bits_per_sample=original_format.bits_per_sample,
                          matrix=vs.MatrixCoefficients(props.get('_Matrix', vs.MATRIX_BT709.value)),
-                         color_range=vs.ColorRange(props.get('_ColorRange', vs.RANGE_LIMITED.value)),
+                         color_range=clip_color_range,
                          chroma_resize=False)
         return clip, clip_info
 
@@ -105,7 +113,7 @@ def convert_format_RGB24(clip: vs.VideoNode, chroma_resize: bool = False) -> tup
                              color_family=original_format.color_family,
                              bits_per_sample=original_format.bits_per_sample,
                              matrix=vs.MatrixCoefficients(props.get('_Matrix', vs.MATRIX_BT709.value)),
-                             color_range=vs.ColorRange(props.get('_ColorRange', vs.RANGE_LIMITED.value)),
+                             color_range=clip_color_range,
                              chroma_resize=True)
         clip = vsresize.resize_min_HW(clip)
     else:
@@ -114,7 +122,7 @@ def convert_format_RGB24(clip: vs.VideoNode, chroma_resize: bool = False) -> tup
                          color_family=original_format.color_family,
                          bits_per_sample=original_format.bits_per_sample,
                          matrix=vs.MatrixCoefficients(props.get('_Matrix', vs.MATRIX_BT709.value)),
-                         color_range=vs.ColorRange(props.get('_ColorRange', vs.RANGE_LIMITED.value)),
+                         color_range=clip_color_range,
                          chroma_resize=False)
 
     # Ensure we're working with 8-bit
@@ -148,7 +156,10 @@ def convert_format_RGB24(clip: vs.VideoNode, chroma_resize: bool = False) -> tup
         )
 
     # Ensure output is explicitly full-range
-    clip = clip.std.SetFrameProps(_ColorRange=vs.RANGE_FULL)
+    if vs.core.core_version.release_major < 74:
+        clip = clip.std.SetFrameProps(_ColorRange=vs.RANGE_FULL)
+    else:
+        clip = clip.std.SetFrameProps(_Range=vs.RANGE_FULL)
 
     return clip, clip_info
 
@@ -282,7 +293,10 @@ def HAVC_read_video(source: str, fpsnum: int = 0, fpsden: int = 1, width: int = 
     if _primariesIsInvalid(clip):
         clip = vs.core.std.SetFrameProps(clip=clip, _Primaries=vs.PRIMARIES_BT709)
     # setting color range to TV (limited) range.
-    clip = vs.core.std.SetFrameProps(clip=clip, _ColorRange=vs.RANGE_LIMITED)
+    if vs.core.core_version.release_major < 74:
+        clip = vs.core.std.SetFrameProps(clip=clip, _ColorRange=vs.RANGE_LIMITED)
+    else:
+        clip = vs.core.std.SetFrameProps(clip=clip, _Range=vs.RANGE_LIMITED)
     # making sure frame rate is set
     clip = vs.core.std.AssumeFPS(clip=clip, fpsnum=clip.fps_num, fpsden=clip.fps_den)
     # making sure the detected scan type is set (detected: progressive)
@@ -292,12 +306,18 @@ def HAVC_read_video(source: str, fpsnum: int = 0, fpsden: int = 1, width: int = 
         # changing range from limited to full range for HAVC
         clip = vs.core.resize.Bicubic(clip, range_in_s="limited", range_s="full")
         # setting color range to PC (full) range.
-        clip = vs.core.std.SetFrameProps(clip=clip, _ColorRange=vs.RANGE_FULL)
+        if vs.core.core_version.release_major < 74:
+            clip = vs.core.std.SetFrameProps(clip=clip, _ColorRange=vs.RANGE_FULL)
+        else:
+            clip = vs.core.std.SetFrameProps(clip=clip, _Range=vs.RANGE_FULL)
         # adjusting color space to RGB24 for HAVC
         clip = clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full")
     else:
         # setting color range to TV (limited) range.
-        clip = vs.core.std.SetFrameProps(clip=clip, _ColorRange=vs.RANGE_LIMITED)
+        if vs.core.core_version.release_major < 74:
+            clip = vs.core.std.SetFrameProps(clip=clip, _ColorRange=vs.RANGE_LIMITED)
+        else:
+            clip = vs.core.std.SetFrameProps(clip=clip, _Range=vs.RANGE_LIMITED)
 
     return clip
 
@@ -594,12 +614,15 @@ def _check_input(DeepExOnlyRefFrames: bool, ScFrameDir: str, DeepExMethod: int, 
 # ------------------------------------------------------------
 
 def is_limited_range(clip: vs.VideoNode) -> bool:
-    # Try to read _ColorRange from props without forcing frame eval if possible.
+    # Try to read _ColorRange/_Range from props without forcing frame eval if possible.
     # Unfortunately, VapourSynth doesn't expose props without get_frame(),
     # so we have to accept minimal frame access—but make it safe.
     try:
         props = clip.get_frame(0).props
-        color_range = props.get('_ColorRange', vs.RANGE_LIMITED)  # default to limited if missing
+        if vs.core.core_version.release_major < 74:
+            color_range = props.get('_ColorRange', vs.RANGE_LIMITED)  # default to limited if missing
+        else:
+            color_range = props.get('_Range', vs.RANGE_LIMITED)
         return color_range == vs.RANGE_LIMITED
     except Exception:
         # Fallback: assume full range if frame access fails
@@ -625,9 +648,12 @@ def _primariesIsInvalid(clip: vs.VideoNode) -> bool:
 
 def _rangeIsInvalid(clip: vs.VideoNode) -> bool:
     frame = clip.get_frame(0)
-    value = frame.props.get('_ColorRange', None)
-    return value is None or value not in vs.ColorRange.__members__.values()
-
+    if vs.core.core_version.release_major < 74:
+        value = frame.props.get('_ColorRange', None)
+        return value is None or value not in vs.ColorRange.__members__.values()
+    else:
+        value = frame.props.get('_Range', None)
+        return value is None or value not in vs.Range.__members__.values()
 
 def _fieldBaseIsInvalid(clip: vs.VideoNode) -> bool:
     frame = clip.get_frame(0)

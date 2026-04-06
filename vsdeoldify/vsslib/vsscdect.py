@@ -21,6 +21,8 @@ import vsdeoldify.vsslib.vsutils as vsutil
 import vsdeoldify.vsslib.vsplugins as vsplugins
 
 from vsdeoldify.vsslib.constants import *
+from vsdeoldify.vsslib.vsplugins import load_MVTool_plugin
+from vsdeoldify.vsslib.vsresize import resize_min_HW
 
 """
 ------------------------------------------------------------------------------- 
@@ -203,6 +205,7 @@ class SceneDetection:
         clip = clip.std.SetFrameProp(prop="sc_ratio", floatval=0)
 
         sc = clip.resize.Bicubic(format=vs.GRAY8, matrix_s='709')
+        sc = resize_min_HW(sc)
         try:
             if frame_norm:
                 sc = sc_clip_normalize(sc)
@@ -222,9 +225,12 @@ class SceneDetection:
             raise vs.Error("HAVC_colorizer: plugin 'MiscFilters.dll' not properly loaded/installed -> " + str(error))
 
         if 0.0 < sc_tht_filter < 1.0 or min_length > 1:
-            clip = clip.std.CopyFrameProps(prop_src=sc, props=['_SceneChangePrev', '_SceneChangeNext',
+            clip_sc = resize_min_HW(clip)
+            clip_sc = clip_sc.std.CopyFrameProps(prop_src=sc, props=['_SceneChangePrev', '_SceneChangeNext',
                                                                'sc_luma', 'sc_ratio'])
-            clip_sc = self.SceneDetectFilter(clip=clip, ssim_threshold=sc_tht_filter, min_length=min_length)
+            clip_filter = self.SceneDetectFilter(clip=clip_sc, ssim_threshold=sc_tht_filter, min_length=min_length)
+            clip_sc = clip.std.CopyFrameProps(prop_src=clip_filter, props=['_SceneChangePrev', '_SceneChangeNext',
+                                                                  'sc_luma', 'sc_ratio'])
         else:
             clip_sc = clip.std.CopyFrameProps(prop_src=sc, props=['_SceneChangePrev', '_SceneChangeNext',
                                                                   'sc_luma', 'sc_ratio'])
@@ -487,3 +493,85 @@ class SceneDetection:
                                                    min_length=min_length))
 
         return sc
+
+
+def vs_sc_xvid(clip: vs.VideoNode, use_slices: bool = True) -> vs.VideoNode:
+
+    vsplugins.load_SCXvid_plugin()
+
+    sc_clip = resize_min_HW(clip, min_size = (480, 300))
+
+    # adjusting color space YUV420P8 for vsSCXvidFilter
+    sc_clip = vs.core.resize.Bicubic(clip=sc_clip, format=vs.YUV420P8, matrix_s="709", dither_type="error_diffusion")
+
+    sc_clip = vs.core.scxvid.Scxvid(clip=sc_clip, use_slices=use_slices)
+
+    # transfer '_SceneChangePrev', '_SceneChangeNext' to input clip
+    clip = clip.std.CopyFrameProps(prop_src=sc_clip, props=['_SceneChangePrev', '_SceneChangeNext'])
+    clip = clip.std.SetFrameProp(prop="sc_threshold", floatval=0.10)
+    clip = clip.std.SetFrameProp(prop="sc_frequency", intval=0)
+
+    return clip
+
+def vs_mv_sc_detect(clip: vs.VideoNode, thscd1: int =250, thscd2: int =130, blksize: int = 16) -> vs.VideoNode:
+    """
+        Rileva i cambi scena usando i vettori di movimento.
+        thscd1: Soglia SAD (Sum of Absolute Differences). Più bassa è, più è sensibile (default ~200-400).
+        thscd2: Soglia blocchi. Più bassa è, più è sensibile (default ~100-150).
+
+        Parametri su cui giocare:
+
+        blksize: Usare blocchi più grandi (es. 16 o 32) rende l'analisi più veloce e meno suscettibile al rumore video.
+
+        thscd1: Se hai molti "falsi positivi" (rileva cambi scena dove non ci sono), alza questo valore.
+                Se non rileva i tagli netti, abbassalo.
+
+        thscd2: Rappresenta quanti blocchi devono essere "mancanti" per dichiarare il cambio scena.
+                Su un video 1080p con blocchi 16x16, ci sono circa 8100 blocchi. Un valore di 130 è piuttosto sensibile.
+
+    """
+
+    load_MVTool_plugin()
+
+    low_res = resize_min_HW(clip, min_size=(480, 300))
+
+    sc = low_res.resize.Bicubic(format=vs.GRAY8, matrix_s='709')
+
+    # 1. Analisi del movimento (essenziale per SCDetection)
+    #    Preparazione (Super Clip)
+    #    Riduciamo la risoluzione per l'analisi (facoltativo, aumenta la velocità)
+    #    'pel=1' è sufficiente per il cambio scena, non serve sub-pixel precision.
+    sup = vs.core.mv.Super(sc, pel=1, sharp=0)
+
+    # 2. Analisi dei vettori (Indietro nel tempo)
+    #    isb=True (backward) analizza il frame precedente rispetto al corrente
+    bvec = vs.core.mv.Analyse(sup, isb=False, blksize=blksize, overlap=8)
+
+    # 3. Iniezione delle proprietà (_SceneChangePrev)
+    sc = sc.std.SetFrameProp(prop="_SceneChangePrev", intval=0)
+    sc = sc.std.SetFrameProp(prop="_SceneChangeNext", intval=0)
+
+    sc_low_res = vs.core.mv.SCDetection(sc, bvec, thscd1=thscd1, thscd2=thscd2)
+
+    # 4. Funzione per gestire la logica basata sulle proprietà
+    """
+    def handle_sc(n, f):
+        is_scene_change = f.props.get('_SceneChangePrev', 0)
+
+        # Qui puoi inserire la tua logica personalizzata.
+        # Per ora, aggiungiamo un testo se richiesto.
+        if show_text and is_scene_change:
+            return vs.core.text.Text(clip, "CAMBIO SCENA RILEVATO", alignment=7)
+        return clip
+
+    # Usiamo FrameEval per valutare le proprietà frame per frame
+    sc_output = vs.core.std.FrameEval(sc_low_res, handle_sc, prop_src=sc_low_res)
+    """
+
+    # transfer '_SceneChangePrev', '_SceneChangeNext' to input clip
+    clip = clip.std.CopyFrameProps(prop_src=sc_low_res, props=['_SceneChangePrev', '_SceneChangeNext'])
+    clip = clip.std.SetFrameProp(prop="sc_threshold", floatval=0.10)
+    clip = clip.std.SetFrameProp(prop="sc_frequency", intval=0)
+
+    return clip
+

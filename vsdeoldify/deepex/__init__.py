@@ -55,7 +55,7 @@ def get_deepex_size(render_speed: str = 'medium', enable_resize: bool = False, e
 
     d_size = None
 
-    if ex_model in (0, 1):
+    if ex_model in (0, 1, 3):
         match render_speed:
             case 'medium':
                 d_size = [216 * scale, 384 * scale]

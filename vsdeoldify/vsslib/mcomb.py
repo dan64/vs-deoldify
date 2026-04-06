@@ -61,10 +61,13 @@ def vs_ext_reference_clip(clip: vs.VideoNode, sc_framedir: str = None, clip_resi
 
     def set_clip_frame(n, f, img_list: list = None, f_size: Tuple[int, int] = None):
 
+        f_out = f.copy()
         is_scenechange = (n == 0) or (f.props['_SceneChangePrev'] == 1)
 
+        f_out.props['_SceneChangePrev'] = 0   # set scene-change detection OFF by default
+
         if not is_scenechange:
-            return f.copy()
+            return f_out
 
         img_name = f"ref_{n:06d}"
         ext_ref_img = [f for f in img_list if img_name in f]
@@ -76,18 +79,19 @@ def vs_ext_reference_clip(clip: vs.VideoNode, sc_framedir: str = None, clip_resi
                     if ref_img.size != f_size:
                         ref_img = ref_img.resize(f_size, Image.Resampling.LANCZOS)
                         # vs.core.log_message(2, "Resized reference frame: " + img_path + " size= " + str(f_size))
+                        f_out.props['_SceneChangePrev'] = 1  # set scene-change detection ON
                 except Exception as error:
                     HAVC_LogMessage(MessageType.WARNING, "Error reading reference frame: ", img_path, " -> ", error)
-                    return f.copy()
+                    return f_out
             else:
                 HAVC_LogMessage(MessageType.WARNING, "vs_ext_reference_clip(): path '", img_path, "' is invalid")
-                return f.copy()
+                return f_out
         else:
             HAVC_LogMessage(MessageType.WARNING, "vs_ext_reference_clip(): not found file: '", img_name, ".*' ")
-            return f.copy()
+            return f_out
 
         if ref_img is None:
-            return f.copy()
+            return f_out
 
         return image_to_frame(ref_img, f.copy())
 

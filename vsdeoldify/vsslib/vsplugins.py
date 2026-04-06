@@ -15,6 +15,7 @@ import vapoursynth as vs
 from pathlib import Path
 from vsdeoldify.vsslib.mcomb import vs_combine_models
 from vsdeoldify.vsslib.vsfilters import vs_tweak
+from vsdeoldify.vsslib.vsresize import resize_min_HW
 from vsdeoldify.vsslib.vsutils import HAVC_LogMessage, MessageType, frame_to_image
 
 from vsdeoldify.vsslib.constants import *
@@ -29,10 +30,32 @@ Description:
 ------------------------------------------------------------------------------- 
 Utility functions to load Vapoursynth plugins dynamically.
 """
+def load_TCanny_plugin() -> bool:
+    """
+    Ensures TCanny VapourSynth plugin is loaded.
+    URL: https://github.com/HomeOfVapourSynthEvolution/VapourSynth-TCanny
+    """
+
+    plugin_path = os.path.normpath(os.path.join(support_dir, "TCanny.dll"))
+
+    try:
+        if hasattr(vs.core, 'tcanny') and hasattr(vs.core.akarin, 'TCanny'):
+            if DEF_DEBUG_LEVEL > DEF_LEVEL_NONE:
+                HAVC_LogMessage(MessageType.INFORMATION,f"[INFO] Plugin 'TCanny' already loaded.")
+            return True
+        else:
+            vs.core.std.LoadPlugin(path=plugin_path)
+            if DEF_DEBUG_LEVEL > DEF_LEVEL_NONE:
+                HAVC_LogMessage(MessageType.INFORMATION, f"[INFO] Plugin 'TCanny' loaded from: {plugin_path}")
+            return True
+    except Exception as error:
+        HAVC_LogMessage(MessageType.WARNING,"[WARNING] Plugin 'TCanny': check/load failed ->", str(error))
+        return False
 
 def load_Akarin_plugin() -> bool:
     """
     Ensures Akarin VapourSynth plugin is loaded.
+    URL: https://github.com/AkarinVS/vapoursynth-plugin
     """
 
     plugin_path = os.path.normpath(os.path.join(support_dir, "akarin.dll"))
@@ -51,9 +74,76 @@ def load_Akarin_plugin() -> bool:
         HAVC_LogMessage(MessageType.WARNING,"[WARNING] Plugin 'Akarin': check/load failed ->", str(error))
         return False
 
+def load_SCXvid_plugin() -> bool:
+    """
+    Ensures SCXvid VapourSynth plugin is loaded.
+    URL: https://github.com/dubhater/vapoursynth-scxvid
+    """
+
+    plugin_path = os.path.normpath(os.path.join(support_dir, "libscxvid.dll"))
+
+    try:
+        if hasattr(vs.core, 'scxvid') and hasattr(vs.core.scxvid, 'Scxvid'):
+            if DEF_DEBUG_LEVEL > DEF_LEVEL_NONE:
+                HAVC_LogMessage(MessageType.INFORMATION,f"[INFO] Plugin 'SCXvid' already loaded.")
+            return True
+        else:
+            vs.core.std.LoadPlugin(path=plugin_path)
+            if DEF_DEBUG_LEVEL > DEF_LEVEL_NONE:
+                HAVC_LogMessage(MessageType.INFORMATION, f"[INFO] Plugin 'SCXvid' loaded from: {plugin_path}")
+            return True
+    except Exception as error:
+        HAVC_LogMessage(MessageType.WARNING,"[WARNING] Plugin 'SCXvid': check/load failed ->", str(error))
+        return False
+
+def load_MVTool_plugin() -> bool:
+    """
+    Ensures MVTool VapourSynth plugin is loaded.
+    URL: https://github.com/dubhater/vapoursynth-mvtools
+    """
+
+    plugin_path = os.path.normpath(os.path.join(support_dir, "libmvtools.dll"))
+
+    try:
+        if hasattr(vs.core, 'mv') and hasattr(vs.core.mv, 'SCDetection'):
+            if DEF_DEBUG_LEVEL > DEF_LEVEL_NONE:
+                HAVC_LogMessage(MessageType.INFORMATION,f"[INFO] Plugin 'MVTool' already loaded.")
+            return True
+        else:
+            vs.core.std.LoadPlugin(path=plugin_path)
+            if DEF_DEBUG_LEVEL > DEF_LEVEL_NONE:
+                HAVC_LogMessage(MessageType.INFORMATION, f"[INFO] Plugin 'MVTool' loaded from: {plugin_path}")
+            return True
+    except Exception as error:
+        HAVC_LogMessage(MessageType.WARNING,"[WARNING] Plugin 'MVTool': check/load failed ->", str(error))
+        return False
+
+def load_Zsmooth_plugin() -> bool:
+    """
+    Ensures Zsmooth VapourSynth plugin is loaded.
+    URL: https://github.com/adworacz/zsmooth?tab=readme-ov-file#median
+    """
+
+    plugin_path = os.path.normpath(os.path.join(Zsmooth_dir, "zsmooth.dll"))
+
+    try:
+        if hasattr(vs.core, 'zsmooth') and hasattr(vs.core.zsmooth, 'TemporalMedian'):
+            if DEF_DEBUG_LEVEL > DEF_LEVEL_NONE:
+                HAVC_LogMessage(MessageType.INFORMATION,f"[INFO] Plugin 'Zsmooth' already loaded.")
+            return True
+        else:
+            vs.core.std.LoadPlugin(path=plugin_path)
+            if DEF_DEBUG_LEVEL > DEF_LEVEL_NONE:
+                HAVC_LogMessage(MessageType.INFORMATION, f"[INFO] Plugin 'Zsmooth' loaded from: {plugin_path}")
+            return True
+    except Exception as error:
+        HAVC_LogMessage(MessageType.WARNING,"[WARNING] Plugin 'Zsmooth': check/load failed ->", str(error))
+        return False
+
 def load_Retinex_plugin() -> bool:
     """
     Ensures Retinex VapourSynth plugin is loaded.
+    URL: https://github.com/HomeOfVapourSynthEvolution/VapourSynth-Retinex
     """
 
     plugin_path = os.path.normpath(os.path.join(Retinex_dir, "Retinex.dll"))
@@ -75,6 +165,7 @@ def load_Retinex_plugin() -> bool:
 def load_SCDetect_plugin() -> bool:
     """
     Ensures SCDetect VapourSynth plugin is loaded.
+    URL: https://github.com/vapoursynth/vs-miscfilters-obsolete
     """
 
     plugin_path = os.path.normpath(os.path.join(MiscFilter_dir, "MiscFilters.dll"))
@@ -96,6 +187,7 @@ def load_SCDetect_plugin() -> bool:
 def load_ReduceFlicker_plugin() -> bool:
     """
     Ensures ReduceFlicker VapourSynth plugin is loaded.
+    URL: https://github.com/AmusementClub/ReduceFlicker
     """
 
     plugin_path = os.path.normpath(os.path.join(ReduceFlicker_dir, "ReduceFlicker.dll"))
@@ -117,6 +209,7 @@ def load_ReduceFlicker_plugin() -> bool:
 def load_LSMASHSource_plugin() -> bool:
     """
     Ensures LSMASHSource VapourSynth plugin is loaded.
+    URL: https://github.com/AkarinVS/L-SMASH-Works
     """
 
     plugin_path = os.path.normpath(os.path.join(LSMASHSource_dir, "LSMASHSource.dll"))
@@ -139,6 +232,7 @@ def load_LSMASHSource_plugin() -> bool:
 def load_TimeCube_plugin() -> bool:
     """
     Ensures TimeCube VapourSynth plugin is loaded.
+    URL: https://github.com/sekrit-twc/timecube
     """
 
     plugin_path = os.path.normpath(os.path.join(TimeCube_dir, "vscube.dll"))
@@ -282,3 +376,6 @@ def vs_timecube(clip: vs.VideoNode, strength: float = 1.0, lut_effect: int = DEF
         clip_new = vs.core.std.Merge(clipa=clip, clipb=clip_new, weight=strength)
 
     return clip_new
+
+
+

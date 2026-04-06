@@ -16,7 +16,7 @@ import math
 from typing import Optional
 
 from vsdeoldify.vsslib.constants import DEF_MAX_RESIZE
-from vsdeoldify.vsslib.vsscdect import CopySCDetect
+#from vsdeoldify.vsslib.vsscdect import CopySCDetect
 
 """
 ------------------------------------------------------------------------------- 
@@ -29,7 +29,7 @@ function to resize a clip by keeping the aspect ratio.
 
 def resize_min_HW(clip: vs.VideoNode, min_size: tuple[int, int] = (512, 480)) -> vs.VideoNode:
     """
-    Resize clip so that the minium width/height is min_size while maintaining aspect ratio.
+    Resize clip so that the max width/height is min_size while maintaining aspect ratio.
 
     Args:
         clip: Input clip
@@ -120,7 +120,9 @@ def resize_to_chroma(clip_highres: vs.VideoNode, clip_lowres: vs.VideoNode) -> v
     clip_color = clip_resized.resize.Bicubic(format=vs.YUV420P8, matrix_s="709", range_s="full")
     # restore orginal Y plane
     clip_yuv = vs.core.std.ShufflePlanes(clips=[clip_bw, clip_color, clip_color], planes=[0, 1, 2], colorfamily=vs.YUV)
-    clip_yuv = CopySCDetect(clip_yuv, clip_color)
+
+    clip_yuv = clip_yuv.std.CopyFrameProps(prop_src=clip_color, props=['_SceneChangePrev', '_SceneChangeNext',
+                                                           'sc_threshold', 'sc_frequency', 'sc_luma', 'sc_ratio'])
     # convert result to RGB24
     return clip_yuv.resize.Bicubic(format=vs.RGB24, matrix_in_s="709", range_s="full", dither_type="error_diffusion")
 
@@ -296,7 +298,7 @@ class SmartResizeColorizer:
         self.ratio_clip = round(self.clip_w / self.clip_h, 2)
         self.pad_width = 0
         self.pad_height = 0
-        if self.ex_model in (0, 1):
+        if self.ex_model in (0, 1, 3):
             if self.ratio_clip < self.ratio_target:
                 # necessary to add vertical borders
                 new_width = round(self.clip_h * self.ratio_target, 0)
@@ -314,7 +316,7 @@ class SmartResizeColorizer:
         return clip.resize.Spline64(width=self.target_width, height=self.target_height)
 
     def restore_clip_size(self, clip: vs.VideoNode = None):
-        if self.ex_model in (0, 1):
+        if self.ex_model in (0, 1, 3):
             clip = clip.resize.Spline64(width=self.clip_w + 2 * self.pad_width, height=self.clip_h + 2 * self.pad_height)
             if self.ratio_clip < self.ratio_target:
                 # necessary to remove vertical borders
@@ -366,7 +368,7 @@ class SmartResizeReference:
         self.ratio_clip = round(self.clip_w / self.clip_h, 2)
         self.pad_width = 0
         self.pad_height = 0
-        if self.ex_model in (0, 1):
+        if self.ex_model in (0, 1, 3):
             if self.ratio_clip < self.ratio_target:
                 # necessary to add vertical borders
                 new_width = round(self.clip_h * self.ratio_target, 0)
@@ -387,7 +389,7 @@ class SmartResizeReference:
             return clip  # no changes
 
     def restore_clip_size(self, clip: vs.VideoNode = None):
-        if self.ex_model in (0, 1):
+        if self.ex_model in (0, 1, 3):
             clip = clip.resize.Spline64(width=self.clip_w + 2 * self.pad_width, height=self.clip_h + 2 * self.pad_height)
             if self.ratio_clip < self.ratio_target:
                 # necessary to remove vertical borders
